@@ -542,9 +542,26 @@ export interface AcademicManagementDashboard {
   teacherAlerts: AcademicTeacherAlert[];
   monthlyProgress: Array<{ month: string; completed: number; planned: number }>;
   teacherPerformance: Array<{ teacherId: string; teacherName: string; completionPercent: number; remainingPercent: number }>;
-  subjectProgress: Array<{ subjectId: string; subjectName: string; completionPercent: number; remainingPercent: number }>;
+  /**
+   * Every curriculum subject, including ones with no plan yet (0%), tagged with
+   * the year it belongs to so the dashboard can facet 1st / 2nd / 3rd Year.
+   */
+  subjectProgress: Array<{
+    subjectId: string;
+    subjectName: string;
+    yearLabel?: string;
+    yearLevel?: number;
+    completionPercent: number;
+    remainingPercent: number;
+  }>;
   facultyProgress: Array<{ faculty: string; completionPercent: number; remainingPercent: number }>;
-  syllabusCompletion: Array<{ subjectName: string; percent: number; remainingPercent: number }>;
+  syllabusCompletion: Array<{
+    subjectName: string;
+    yearLabel?: string;
+    yearLevel?: number;
+    percent: number;
+    remainingPercent: number;
+  }>;
 }
 
 export interface TodayTimetableSlot {

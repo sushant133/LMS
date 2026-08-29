@@ -2,11 +2,19 @@ import type {
   AcademicManagementDashboard,
   AcademicTeacherAlert,
 } from "@phit-erp/shared";
-import { AlertTriangle, BookOpen, Clock, ClipboardList } from "lucide-react";
+import {
+  AlertTriangle,
+  BookOpen,
+  Clock,
+  ClipboardList,
+  Printer,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   LabelList,
   Legend,
   ResponsiveContainer,
@@ -14,10 +22,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
+import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { ChartBox } from "components/ui/chart-box";
 import { LoadingState } from "components/shared/LoadingState";
+import { printElementById } from "lib/printUtils";
+import { cn } from "lib/utils";
 import { AcademicProgressBar } from "./AcademicProgressBar";
 
 interface AcademicManagementDashboardPanelProps {
@@ -77,84 +89,508 @@ const shortLabel = (value: unknown, max = 22): string => {
   return `${text.slice(0, max - 1)}…`;
 };
 
-const chartHeight = (count: number): number =>
-  Math.min(560, Math.max(288, count * 48 + 64));
+/* ────────────────────────────────────────────────────────────────────────────
+   Chart system for the Academic Management dashboard.
+
+   Palette: validated categorical set (8 slots, fixed order — never cycled).
+   `node validate_palette.js "<hexes>" --mode light --surface #ffffff` reports
+   all hard checks PASS, with a contrast WARN on aqua / yellow / magenta. The
+   documented relief for that warn is visible labels or a table view — every
+   chart below ships BOTH (a value on each column and a Table toggle), so a
+   low-contrast fill never carries meaning on its own.
+
+   Colour follows the entity, not its rank: a subject keeps its hue whatever the
+   sort or filter does, and the same hue identifies it in every chart. More than
+   eight categories are never cycled — the subject charts facet into per-year
+   small multiples instead, which is also how all three years get shown.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/** Categorical slots, in the order the validator passed them. */
+const SERIES = [
+  "#2a78d6",
+  "#eb6834",
+  "#1baf7a",
+  "#eda100",
+  "#e87ba4",
+  "#008300",
+  "#4a3aa7",
+  "#e34948",
+] as const;
+
+const INK = {
+  primary: "#0b0b0b",
+  secondary: "#52514e",
+  muted: "#898781",
+  grid: "#e1e0d9",
+  axis: "#c3c2b7",
+  track: "#eef0f4",
+} as const;
 
 const tooltipStyle = {
   borderRadius: 12,
-  border: "1px solid #e2e8f0",
+  border: `1px solid ${INK.grid}`,
   boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
   fontSize: 13,
+  padding: "8px 10px",
 };
 
-type NamedPercentRow = {
+/** Hue by identity — stable across sorts, filters and sibling charts. */
+const hueFor = (index: number): string => SERIES[index % SERIES.length]!;
+
+type ColumnRow = {
+  key: string;
   label: string;
-  completionPercent: number;
-  remainingPercent: number;
+  value: number;
+  color: string;
 };
 
-const NamedPercentChart = ({
-  rows,
-  completedColor,
-  remainingColor = "#f59e0b",
+/** Rough width of the 11px axis label face — enough to decide "does it fit". */
+const CHAR_PX = 6.1;
+
+/** Plot width, so the tilt decision is made against real pixels. */
+const useMeasuredWidth = () => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => setWidth(el.getBoundingClientRect().width);
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return { ref, width };
+};
+
+/**
+ * Tilt a label only when it cannot sit upright in its slot — a tilted label is
+ * easier to read than a truncated one, but flat is easier still, so flat wins
+ * whenever it fits.
+ */
+const axisGeometry = (rows: ColumnRow[], plotWidth = 0) => {
+  const longest = rows.reduce((max, r) => Math.max(max, r.label.length), 0);
+  const slotPx = rows.length > 0 && plotWidth > 0 ? plotWidth / rows.length : 0;
+  const tilt =
+    slotPx > 0
+      ? longest * CHAR_PX > slotPx - 10
+      : longest > Math.max(9, Math.floor(72 / Math.max(1, rows.length)) + 6);
+  return {
+    tilt,
+    angle: tilt ? -35 : 0,
+    textAnchor: tilt ? ("end" as const) : ("middle" as const),
+    /** The card must include the axis band, or the labels get clipped. */
+    axisHeight: tilt ? Math.min(120, 34 + longest * 3.6) : 30,
+  };
+};
+
+const TiltedTick = ({
+  x,
+  y,
+  payload,
+  angle,
+  anchor,
 }: {
-  rows: NamedPercentRow[];
-  completedColor: string;
-  remainingColor?: string;
+  /** Recharts hands ticks x/y as `string | number`, so widen and coerce. */
+  x?: string | number;
+  y?: string | number;
+  payload?: { value?: string | number };
+  angle: number;
+  anchor: "end" | "middle";
 }) => (
-  <ChartBox height={chartHeight(rows.length)}>
-    <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-      <BarChart
-        layout="vertical"
-        data={rows}
-        margin={{ top: 8, right: 56, left: 8, bottom: 8 }}
-      >
-        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-        <XAxis
-          type="number"
-          domain={[0, 100]}
-          tickFormatter={formatPercent}
-          tick={{ fill: "#64748b", fontSize: 11 }}
-        />
-        <YAxis
-          type="category"
-          dataKey="label"
-          width={156}
-          interval={0}
-          tick={{ fill: "#334155", fontSize: 12 }}
-          tickFormatter={(value) => shortLabel(value)}
-        />
-        <Tooltip
-          formatter={(value, name) => [formatPercent(value), String(name)]}
-          labelFormatter={(label) => String(label)}
-          contentStyle={tooltipStyle}
-        />
-        <Legend />
-        <Bar
-          dataKey="completionPercent"
-          stackId="pct"
-          fill={completedColor}
-          name="Completed %"
-          maxBarSize={22}
-        />
-        <Bar
-          dataKey="remainingPercent"
-          stackId="pct"
-          fill={remainingColor}
-          name="Remaining %"
-          radius={[0, 4, 4, 0]}
-          maxBarSize={22}
+  <g transform={`translate(${Number(x) || 0},${Number(y) || 0})`}>
+    <text
+      dy={angle === 0 ? 14 : 10}
+      textAnchor={anchor}
+      transform={`rotate(${angle})`}
+      style={{ fill: INK.secondary, fontSize: 11 }}
+    >
+      {String(payload?.value ?? "")}
+    </text>
+  </g>
+);
+
+/**
+ * Percent columns for one set of entities — one hue per entity.
+ *
+ * Each column is the whole 100%: the coloured segment is what is done, the
+ * light segment is what is left. A plain value bar drew nothing at all for a
+ * subject at 0%, so the slot read as missing data rather than "not started";
+ * the full-height column keeps every category visible and makes the value
+ * legible as a share.
+ */
+const PercentColumns = ({ rows }: { rows: ColumnRow[] }) => {
+  const { ref, width } = useMeasuredWidth();
+  const geo = axisGeometry(rows, Math.max(0, width - 48));
+  const height = geo.axisHeight + 186;
+  const data = rows.map((row) => ({
+    ...row,
+    rest: Math.max(0, 100 - row.value),
+  }));
+  return (
+    <div ref={ref}>
+    <ChartBox height={height}>
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <BarChart
+          data={data}
+          margin={{ top: 22, right: 12, left: 0, bottom: 4 }}
+          barCategoryGap="28%"
         >
-          <LabelList
-            dataKey="completionPercent"
-            position="right"
-            formatter={(value) => formatPercent(value)}
-            style={{ fill: "#0f172a", fontSize: 11, fontWeight: 600 }}
+          {/* Solid hairlines — dashed grids read as thresholds. */}
+          <CartesianGrid stroke={INK.grid} vertical={false} />
+          <XAxis
+            dataKey="label"
+            interval={0}
+            height={geo.axisHeight}
+            tickLine={false}
+            axisLine={{ stroke: INK.axis }}
+            tick={(props) => (
+              <TiltedTick {...props} angle={geo.angle} anchor={geo.textAnchor} />
+            )}
           />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  </ChartBox>
+          <YAxis
+            domain={[0, 100]}
+            ticks={[0, 25, 50, 75, 100]}
+            tickFormatter={(v) => `${v}%`}
+            tickLine={false}
+            axisLine={false}
+            width={40}
+            tick={{ fill: INK.muted, fontSize: 11 }}
+          />
+          <Tooltip
+            cursor={{ fill: "rgba(15,23,42,0.04)" }}
+            contentStyle={tooltipStyle}
+            formatter={(value: unknown, name: unknown) => [
+              formatPercent(value),
+              name === "rest" ? "Remaining" : "Completed",
+            ]}
+          />
+          <Bar dataKey="value" stackId="pct" maxBarSize={46}>
+            {data.map((row) => (
+              <Cell key={row.key} fill={row.color} />
+            ))}
+          </Bar>
+          {/* Remaining share. The 2px surface stroke is the gap between the two
+              fills, not a border drawn around the mark. */}
+          <Bar
+            dataKey="rest"
+            stackId="pct"
+            maxBarSize={46}
+            radius={[4, 4, 0, 0]}
+            stroke="#ffffff"
+            strokeWidth={2}
+          >
+            {/* Tinted with the subject own hue so identity stays visible even at
+                0%, where the coloured segment has no height to show. */}
+            {data.map((row) => (
+              <Cell key={row.key + "-rest"} fill={row.color + "1f"} />
+            ))}
+            <LabelList
+              dataKey="value"
+              position="top"
+              offset={8}
+              formatter={(v: unknown) => formatPercent(v)}
+              style={{ fill: INK.primary, fontSize: 11, fontWeight: 600 }}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartBox>
+    </div>
+  );
+};
+
+/** The WCAG-clean twin of every chart. */
+const ValueTable = ({
+  rows,
+  nameHeader,
+}: {
+  rows: ColumnRow[];
+  nameHeader: string;
+}) => (
+  <div className="overflow-x-auto">
+    <table className="w-full text-left text-sm">
+      <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th className="py-2 pr-3 font-medium">{nameHeader}</th>
+          <th className="py-2 pr-3 text-right font-medium">Completed</th>
+          <th className="py-2 text-right font-medium">Remaining</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {rows.map((row) => (
+          <tr key={row.key}>
+            <td className="py-2 pr-3">
+              <span className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: row.color }}
+                />
+                {row.label}
+              </span>
+            </td>
+            <td className="py-2 pr-3 text-right tabular-nums">
+              {formatPercent(row.value)}
+            </td>
+            <td className="py-2 text-right tabular-nums text-slate-500">
+              {formatPercent(100 - row.value)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+/**
+ * One card = one question. Header carries the title, a one-line read of what the
+ * chart says, and the two controls the user asked for: a per-chart print and the
+ * chart/table switch.
+ */
+const ChartCard = ({
+  id,
+  title,
+  subtitle,
+  empty,
+  children,
+  table,
+}: {
+  id: string;
+  title: string;
+  subtitle: string;
+  empty: boolean;
+  children: ReactNode;
+  table: ReactNode;
+}) => {
+  const [view, setView] = useState<"chart" | "table">("chart");
+  const [printing, setPrinting] = useState(false);
+
+  const print = async () => {
+    setPrinting(true);
+    try {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() =>
+          window.requestAnimationFrame(() => resolve()),
+        );
+      });
+      await printElementById(id, title);
+    } catch {
+      toast.error("Could not print this chart");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>
+        </div>
+        <div className="no-print flex shrink-0 items-center gap-1">
+          <div className="flex rounded-lg border border-slate-200 p-0.5">
+            {(["chart", "table"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setView(mode)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-medium capitalize transition",
+                  view === mode
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-100",
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={printing || empty}
+            title={`Print ${title}`}
+            onClick={() => void print()}
+          >
+            <Printer className="mr-1.5 h-3.5 w-3.5" />
+            {printing ? "Printing…" : "Print"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-5">
+        <div id={id}>
+          <div className="mb-3 hidden print:block">
+            <p className="text-sm font-semibold text-slate-900">{title}</p>
+            <p className="text-xs text-slate-500">{subtitle}</p>
+          </div>
+          {empty ? (
+            <p className="flex h-56 items-center justify-center text-sm text-slate-500">
+              No data for the current filters yet.
+            </p>
+          ) : view === "chart" ? (
+            children
+          ) : (
+            table
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+/** Planned is a recessive reference bar; completed is the series that matters. */
+const MonthlyColumns = ({
+  rows,
+}: {
+  rows: Array<{ month: string; planned: number; completed: number }>;
+}) => {
+  const { ref, width } = useMeasuredWidth();
+  const geo = axisGeometry(
+    rows.map((r) => ({ key: r.month, label: r.month, value: 0, color: "" })),
+    Math.max(0, width - 48),
+  );
+  return (
+    <div ref={ref}>
+    <ChartBox height={geo.axisHeight + 250}>
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <BarChart
+          data={rows}
+          margin={{ top: 22, right: 12, left: 0, bottom: 4 }}
+          barCategoryGap="26%"
+          barGap={2}
+        >
+          <CartesianGrid stroke={INK.grid} vertical={false} />
+          <XAxis
+            dataKey="month"
+            interval={0}
+            height={geo.axisHeight}
+            tickLine={false}
+            axisLine={{ stroke: INK.axis }}
+            tick={(props) => (
+              <TiltedTick {...props} angle={geo.angle} anchor={geo.textAnchor} />
+            )}
+          />
+          <YAxis
+            allowDecimals={false}
+            tickLine={false}
+            axisLine={false}
+            width={36}
+            tick={{ fill: INK.muted, fontSize: 11 }}
+          />
+          <Tooltip
+            cursor={{ fill: "rgba(15,23,42,0.04)" }}
+            contentStyle={tooltipStyle}
+          />
+          <Legend
+            iconType="circle"
+            iconSize={8}
+            wrapperStyle={{ fontSize: 12, color: INK.secondary, paddingTop: 6 }}
+          />
+          <Bar
+            dataKey="planned"
+            name="Planned"
+            fill={INK.track}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={34}
+          />
+          <Bar
+            dataKey="completed"
+            name="Completed"
+            fill={SERIES[0]}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={34}
+          >
+            <LabelList
+              dataKey="completed"
+              position="top"
+              offset={8}
+              style={{ fill: INK.primary, fontSize: 11, fontWeight: 600 }}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartBox>
+    </div>
+  );
+};
+
+const MonthlyTable = ({
+  rows,
+}: {
+  rows: Array<{ month: string; planned: number; completed: number }>;
+}) => (
+  <div className="overflow-x-auto">
+    <table className="w-full text-left text-sm">
+      <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+        <tr>
+          <th className="py-2 pr-3 font-medium">Month</th>
+          <th className="py-2 pr-3 text-right font-medium">Planned</th>
+          <th className="py-2 text-right font-medium">Completed</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {rows.map((row) => (
+          <tr key={row.month}>
+            <td className="py-2 pr-3">{row.month}</td>
+            <td className="py-2 pr-3 text-right tabular-nums">{row.planned}</td>
+            <td className="py-2 text-right tabular-nums">{row.completed}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+type YearGroup = { year: string; rows: ColumnRow[] };
+
+/**
+ * Past eight categories hues are never cycled — the subject charts break into
+ * one small multiple per year instead. That keeps every facet inside the
+ * validated slot order and is also how all three years get on screen at once.
+ */
+const groupByYear = (
+  items: Array<{ name: string; year?: string; level?: number; value: number }>,
+): YearGroup[] => {
+  const buckets = new Map<string, { level: number; items: typeof items }>();
+  for (const item of items) {
+    const year = item.year?.trim() || "Unassigned";
+    const bucket = buckets.get(year) ?? { level: item.level ?? 99, items: [] };
+    bucket.items.push(item);
+    buckets.set(year, bucket);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => a[1].level - b[1].level || a[0].localeCompare(b[0]))
+    .map(([year, bucket]) => ({
+      year,
+      // Alphabetical, so a subject's hue never moves when values change.
+      rows: [...bucket.items]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((item, index) => ({
+          key: `${year}-${item.name}`,
+          label: item.name,
+          value: item.value,
+          color: hueFor(index),
+        })),
+    }));
+};
+
+const YearFacets = ({ groups }: { groups: YearGroup[] }) => (
+  <div className="space-y-6">
+    {groups.map((group) => (
+      <div key={group.year}>
+        <div className="mb-1 flex items-baseline justify-between gap-2">
+          <p className="text-sm font-semibold text-slate-800">{group.year}</p>
+          <p className="text-xs text-slate-500">
+            {group.rows.length} subject{group.rows.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <PercentColumns rows={group.rows} />
+      </div>
+    ))}
+  </div>
 );
 
 const alertLabel = (type: AcademicTeacherAlert["type"]) => {
@@ -178,6 +614,83 @@ export const AcademicManagementDashboardPanel = ({
   if (!data) return null;
 
   const alerts = data.teacherAlerts ?? [];
+
+  /**
+   * Chart rows are derived once. Subject hues are assigned inside each year
+   * facet by alphabetical order, so they follow the subject rather than its
+   * current rank — a filter or a re-sort never repaints the survivors.
+   */
+  const monthlyRows = useMemo(
+    () =>
+      (data?.monthlyProgress ?? []).map((row) => ({
+        month: String(row.month ?? "—"),
+        planned: asNumber(row.planned),
+        completed: asNumber(row.completed),
+      })),
+    [data?.monthlyProgress],
+  );
+
+  const subjectGroups = useMemo(
+    () =>
+      groupByYear(
+        (data?.subjectProgress ?? []).map((row) => ({
+          name: row.subjectName?.trim() || "Subject",
+          year: row.yearLabel,
+          level: row.yearLevel,
+          value: asNumber(row.completionPercent),
+        })),
+      ),
+    [data?.subjectProgress],
+  );
+
+  const syllabusGroups = useMemo(
+    () =>
+      groupByYear(
+        (data?.syllabusCompletion ?? []).map((row) => ({
+          name: row.subjectName?.trim() || "Subject",
+          year: row.yearLabel,
+          level: row.yearLevel,
+          value: asNumber(row.percent),
+        })),
+      ),
+    [data?.syllabusCompletion],
+  );
+
+  const subjectFlat = useMemo(
+    () => subjectGroups.flatMap((g) => g.rows),
+    [subjectGroups],
+  );
+  const syllabusFlat = useMemo(
+    () => syllabusGroups.flatMap((g) => g.rows),
+    [syllabusGroups],
+  );
+
+  /**
+   * Teachers and faculties appear in one chart each, so there is nothing to
+   * recognise them across — a single hue is the honest encoding; the axis
+   * already carries identity.
+   */
+  const teacherRows = useMemo(
+    () =>
+      (data?.teacherPerformance ?? []).map((row) => ({
+        key: row.teacherId || row.teacherName,
+        label: row.teacherName?.trim() || "Teacher",
+        value: asNumber(row.completionPercent),
+        color: SERIES[0],
+      })),
+    [data?.teacherPerformance],
+  );
+
+  const facultyRows = useMemo(
+    () =>
+      (data?.facultyProgress ?? []).map((row) => ({
+        key: row.faculty,
+        label: row.faculty?.trim() || "Faculty",
+        value: asNumber(row.completionPercent),
+        color: SERIES[2],
+      })),
+    [data?.facultyProgress],
+  );
 
   return (
     <div className="space-y-6">
@@ -290,152 +803,61 @@ export const AcademicManagementDashboardPanel = ({
         })}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Progress</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(data.monthlyProgress?.length ?? 0) === 0 ? (
-              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
-                No monthly progress data yet.
-              </p>
-            ) : (
-              <ChartBox height={Math.max(288, (data.monthlyProgress?.length ?? 0) * 28 + 80)}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart
-                    data={data.monthlyProgress}
-                    margin={{ top: 24, right: 16, left: 8, bottom: 48 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis
-                      dataKey="month"
-                      type="category"
-                      interval={0}
-                      angle={-35}
-                      textAnchor="end"
-                      height={56}
-                      tick={{ fill: "#334155", fontSize: 11 }}
-                    />
-                    <YAxis allowDecimals={false} tick={{ fill: "#64748b", fontSize: 11 }} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Legend />
-                    <Bar dataKey="planned" fill="#94a3b8" name="Planned" radius={[4, 4, 0, 0]}>
-                      <LabelList
-                        dataKey="planned"
-                        position="top"
-                        style={{ fill: "#475569", fontSize: 11 }}
-                      />
-                    </Bar>
-                    <Bar dataKey="completed" fill="#0c2d6b" name="Completed" radius={[4, 4, 0, 0]}>
-                      <LabelList
-                        dataKey="completed"
-                        position="top"
-                        style={{ fill: "#0f172a", fontSize: 11, fontWeight: 600 }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartBox>
-            )}
-          </CardContent>
-        </Card>
+      {/*
+        One chart per row. A column chart needs the full card width for its
+        tilted axis labels, and stacking gives the page a single top-to-bottom
+        reading order instead of a two-column zig-zag.
+      */}
+      <div className="grid gap-6">
+        <ChartCard
+          id="chart-monthly-progress"
+          title="Monthly Progress"
+          subtitle="Lesson plans planned against completed, by Nepali month."
+          empty={monthlyRows.length === 0}
+          table={<MonthlyTable rows={monthlyRows} />}
+        >
+          <MonthlyColumns rows={monthlyRows} />
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Subject Progress</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(data.subjectProgress?.length ?? 0) === 0 ? (
-              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
-                No subject progress data yet.
-              </p>
-            ) : (
-              <NamedPercentChart
-                completedColor="#2563eb"
-                rows={(data.subjectProgress ?? []).map((row) => ({
-                  label: row.subjectName?.trim() || "Subject",
-                  completionPercent: asNumber(row.completionPercent),
-                  remainingPercent: asNumber(
-                    row.remainingPercent ?? 100 - asNumber(row.completionPercent),
-                  ),
-                }))}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          id="chart-subject-progress"
+          title="Subject Progress"
+          subtitle="Every curriculum subject across all years. Each subject keeps its own colour here and in Syllabus Completion."
+          empty={subjectGroups.length === 0}
+          table={<ValueTable rows={subjectFlat} nameHeader="Subject" />}
+        >
+          <YearFacets groups={subjectGroups} />
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Teacher Performance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(data.teacherPerformance?.length ?? 0) === 0 ? (
-              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
-                No teacher performance data yet.
-              </p>
-            ) : (
-              <NamedPercentChart
-                completedColor="#059669"
-                rows={(data.teacherPerformance ?? []).map((row) => ({
-                  label: row.teacherName?.trim() || "Teacher",
-                  completionPercent: asNumber(row.completionPercent),
-                  remainingPercent: asNumber(
-                    row.remainingPercent ?? 100 - asNumber(row.completionPercent),
-                  ),
-                }))}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          id="chart-syllabus-completion"
+          title="Syllabus Completion"
+          subtitle="Share of each subject's syllabus marked complete from the log book."
+          empty={syllabusGroups.length === 0}
+          table={<ValueTable rows={syllabusFlat} nameHeader="Subject" />}
+        >
+          <YearFacets groups={syllabusGroups} />
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Syllabus Completion</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(data.syllabusCompletion?.length ?? 0) === 0 ? (
-              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
-                No syllabus completion data yet.
-              </p>
-            ) : (
-              <NamedPercentChart
-                completedColor="#7c3aed"
-                rows={(data.syllabusCompletion ?? []).map((row) => ({
-                  label: row.subjectName?.trim() || "Subject",
-                  completionPercent: asNumber(row.percent),
-                  remainingPercent: asNumber(
-                    row.remainingPercent ?? 100 - asNumber(row.percent),
-                  ),
-                }))}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          id="chart-teacher-performance"
+          title="Teacher Performance"
+          subtitle="Average completion across each teacher's session plans."
+          empty={teacherRows.length === 0}
+          table={<ValueTable rows={teacherRows} nameHeader="Teacher" />}
+        >
+          <PercentColumns rows={teacherRows} />
+        </ChartCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Faculty Progress</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(data.facultyProgress?.length ?? 0) === 0 ? (
-              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
-                No faculty progress data yet.
-              </p>
-            ) : (
-              <NamedPercentChart
-                completedColor="#ea580c"
-                rows={(data.facultyProgress ?? []).map((row) => ({
-                  label: row.faculty?.trim() || "Faculty",
-                  completionPercent: asNumber(row.completionPercent),
-                  remainingPercent: asNumber(
-                    row.remainingPercent ?? 100 - asNumber(row.completionPercent),
-                  ),
-                }))}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          id="chart-faculty-progress"
+          title="Faculty Progress"
+          subtitle="Average completion by faculty or programme."
+          empty={facultyRows.length === 0}
+          table={<ValueTable rows={facultyRows} nameHeader="Faculty" />}
+        >
+          <PercentColumns rows={facultyRows} />
+        </ChartCard>
       </div>
     </div>
   );

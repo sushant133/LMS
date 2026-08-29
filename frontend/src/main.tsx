@@ -1,3 +1,13 @@
+/**
+ * Third-party CSS FIRST, app CSS last.
+ * @munatech/nepali-datepicker ships its own Tailwind utilities build that
+ * redefines .hidden / .flex but carries no responsive variants. Loaded after
+ * index.css (it used to arrive lazily with the date field) its plain .hidden
+ * outranked our .md:flex / .md:block, so every `hidden md:*` in the app
+ * collapsed to display:none at every width. Importing it up front puts
+ * Tailwind last in the cascade again.
+ */
+import "@munatech/nepali-datepicker/styles.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";

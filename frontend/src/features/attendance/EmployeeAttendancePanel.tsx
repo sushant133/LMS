@@ -394,6 +394,145 @@ export const EmployeeAttendancePanel = ({
 
   const showPeriods = category === "TEACHER";
 
+  /**
+   * One set of controls for both layouts: the desktop sheet renders them as
+   * table cells, the phone renders them stacked in a card. Same state, same
+   * handlers — a change here lands in both.
+   */
+  const statusSelect = (row: MarkRow, className = "h-10 w-[8.75rem] max-w-full") => (
+    <Select
+      className={className}
+      disabled={!canWriteSheet}
+      value={row.status}
+      onChange={(e) => {
+        const nextStatus = e.target.value as EmployeeAttendanceStatus | "";
+        const withTimes = acceptsCheckTimes(nextStatus);
+        setRows((list) =>
+          list.map((r) =>
+            r.id === row.id
+              ? {
+                  ...r,
+                  status: nextStatus,
+                  checkInTime: withTimes ? r.checkInTime : "",
+                  checkOutTime: withTimes ? r.checkOutTime : "",
+                }
+              : r,
+          ),
+        );
+      }}
+    >
+      {/* Blank by default — nothing is assumed until someone marks the row. */}
+      <option value="">— Select —</option>
+      {STATUSES.map((st) => (
+        <option key={st} value={st}>
+          {st.replace(/_/g, " ")}
+        </option>
+      ))}
+    </Select>
+  );
+
+  const timeInput = (
+    row: MarkRow,
+    field: "checkInTime" | "checkOutTime",
+    className = "time-input h-10 w-[9.75rem] max-w-none shrink-0",
+  ) =>
+    acceptsCheckTimes(row.status) ? (
+      <Input
+        className={className}
+        type="time"
+        disabled={!canWriteSheet}
+        value={row[field]}
+        onChange={(e) =>
+          setRows((list) =>
+            list.map((r) =>
+              r.id === row.id ? { ...r, [field]: e.target.value } : r,
+            ),
+          )
+        }
+      />
+    ) : (
+      <span className="text-sm text-slate-400">—</span>
+    );
+
+  const periodsInput = (row: MarkRow, className = "h-10 w-16") => (
+    <NumberInput
+      className={className}
+      min={0}
+      max={24}
+      step={1}
+      placeholder=""
+      disabled={!canWriteSheet}
+      value={row.periodsTaught}
+      onChange={(e) =>
+        setRows((list) =>
+          list.map((r) =>
+            r.id === row.id ? { ...r, periodsTaught: e.target.value } : r,
+          ),
+        )
+      }
+    />
+  );
+
+  const remarksInput = (row: MarkRow, className = "h-10 w-full min-w-[6rem]") => (
+    <Input
+      className={className}
+      disabled={!canWriteSheet}
+      value={row.remarks}
+      onChange={(e) =>
+        setRows((list) =>
+          list.map((r) => (r.id === row.id ? { ...r, remarks: e.target.value } : r)),
+        )
+      }
+    />
+  );
+
+  /**
+   * Per-employee save: each teacher checks in and out at their own time, so
+   * their row is stored on its own without touching anyone else's or moving
+   * the sheet to the next step.
+   */
+  const rowActions = (row: MarkRow) => (
+    <div className="flex flex-wrap gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 px-2 text-xs"
+        disabled={!canWriteSheet || savingRowId === row.id}
+        title="Stamp the current time as check-in and save this row"
+        onClick={() => stampAndSave(row, "checkInTime")}
+      >
+        In now
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 px-2 text-xs"
+        disabled={!canWriteSheet || savingRowId === row.id}
+        title="Stamp the current time as check-out and save this row"
+        onClick={() => stampAndSave(row, "checkOutTime")}
+      >
+        Out now
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        className="h-8 px-2 text-xs"
+        disabled={
+          !canWriteSheet ||
+          savingRowId === row.id ||
+          (row.status === "" && !row.checkInTime && !row.checkOutTime)
+        }
+        title="Save only this employee's row"
+        onClick={() => saveRowMut.mutate(row)}
+      >
+        {savingRowId === row.id ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  );
+
   const exportExcel = () => {
     const reg = (registerQuery.data?.rows ?? []) as Array<{
       dateBs?: string;
@@ -701,7 +840,73 @@ export const EmployeeAttendancePanel = ({
                   </colgroup>
                 );
                 return (
-                  <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <>
+                    {/*
+                      Phone: one card per employee. The sheet is ~1500px wide with
+                      two sticky columns, which on a phone cover the fields they are
+                      meant to label — so stack the same controls instead.
+                    */}
+                    <div className="space-y-3 md:hidden">
+                      {filteredRows.map((row) => (
+                        <div
+                          key={row.id}
+                          className="rounded-xl border border-slate-200 bg-white p-3"
+                        >
+                          <p className="font-medium text-slate-900">
+                            {row.fullName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {[row.employeeCode, row.department, row.designation]
+                              .filter(Boolean)
+                              .join(" · ") || "—"}
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            <label className="block">
+                              <span className="text-xs text-slate-500">Status</span>
+                              {statusSelect(row, "mt-0.5 h-10 w-full")}
+                            </label>
+                            {acceptsCheckTimes(row.status) ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="block">
+                                  <span className="text-xs text-slate-500">
+                                    Check-in
+                                  </span>
+                                  {timeInput(
+                                    row,
+                                    "checkInTime",
+                                    "time-input mt-0.5 h-10 w-full",
+                                  )}
+                                </label>
+                                <label className="block">
+                                  <span className="text-xs text-slate-500">
+                                    Check-out
+                                  </span>
+                                  {timeInput(
+                                    row,
+                                    "checkOutTime",
+                                    "time-input mt-0.5 h-10 w-full",
+                                  )}
+                                </label>
+                              </div>
+                            ) : null}
+                            {showPeriods ? (
+                              <label className="block">
+                                <span className="text-xs text-slate-500">
+                                  Periods taught
+                                </span>
+                                {periodsInput(row, "mt-0.5 h-10 w-20")}
+                              </label>
+                            ) : null}
+                            <label className="block">
+                              <span className="text-xs text-slate-500">Remarks</span>
+                              {remarksInput(row, "mt-0.5 h-10 w-full")}
+                            </label>
+                          </div>
+                          <div className="mt-3">{rowActions(row)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="hidden min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
                     <StickyTableScroll
                       maxHeightClassName="max-h-[min(70vh,720px)]"
                       header={
@@ -775,209 +980,26 @@ export const EmployeeAttendancePanel = ({
                                     {row.designation || "—"}
                                   </span>
                                 </Td>
-                                <Td>
-                                  <Select
-                                    className="h-10 w-[8.75rem] max-w-full"
-                                    disabled={!canWriteSheet}
-                                    value={row.status}
-                                    onChange={(e) => {
-                                      const nextStatus = e.target.value as
-                                        | EmployeeAttendanceStatus
-                                        | "";
-                                      const withTimes =
-                                        acceptsCheckTimes(nextStatus);
-                                      setRows((list) =>
-                                        list.map((r) =>
-                                          r.id === row.id
-                                            ? {
-                                                ...r,
-                                                status: nextStatus,
-                                                checkInTime: withTimes
-                                                  ? r.checkInTime
-                                                  : "",
-                                                checkOutTime: withTimes
-                                                  ? r.checkOutTime
-                                                  : "",
-                                              }
-                                            : r,
-                                        ),
-                                      );
-                                    }}
-                                  >
-                                    {/* Blank by default — nothing is assumed
-                                        until someone marks the row. */}
-                                    <option value="">— Select —</option>
-                                    {STATUSES.map((s) => (
-                                      <option key={s} value={s}>
-                                        {s.replace(/_/g, " ")}
-                                      </option>
-                                    ))}
-                                  </Select>
+                                <Td>{statusSelect(row)}</Td>
+                                <Td className="p-2">
+                                  {timeInput(row, "checkInTime")}
                                 </Td>
                                 <Td className="p-2">
-                                  {acceptsCheckTimes(row.status) ? (
-                                    <Input
-                                      className="time-input h-10 w-[9.75rem] max-w-none shrink-0"
-                                      type="time"
-                                      disabled={!canWriteSheet}
-                                      value={row.checkInTime}
-                                      onChange={(e) =>
-                                        setRows((list) =>
-                                          list.map((r) =>
-                                            r.id === row.id
-                                              ? {
-                                                  ...r,
-                                                  checkInTime: e.target.value,
-                                                }
-                                              : r,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                  ) : (
-                                    <span className="text-sm text-slate-400">
-                                      —
-                                    </span>
-                                  )}
-                                </Td>
-                                <Td className="p-2">
-                                  {acceptsCheckTimes(row.status) ? (
-                                    <Input
-                                      className="time-input h-10 w-[9.75rem] max-w-none shrink-0"
-                                      type="time"
-                                      disabled={!canWriteSheet}
-                                      value={row.checkOutTime}
-                                      onChange={(e) =>
-                                        setRows((list) =>
-                                          list.map((r) =>
-                                            r.id === row.id
-                                              ? {
-                                                  ...r,
-                                                  checkOutTime: e.target.value,
-                                                }
-                                              : r,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                  ) : (
-                                    <span className="text-sm text-slate-400">
-                                      —
-                                    </span>
-                                  )}
+                                  {timeInput(row, "checkOutTime")}
                                 </Td>
                                 {showPeriods ? (
-                                  <Td className="p-2">
-                                    <NumberInput
-                                      className="h-10 w-16"
-                                      min={0}
-                                      max={24}
-                                      step={1}
-                                      placeholder=""
-                                      disabled={!canWriteSheet}
-                                      value={row.periodsTaught}
-                                      onChange={(e) =>
-                                        setRows((list) =>
-                                          list.map((r) =>
-                                            r.id === row.id
-                                              ? {
-                                                  ...r,
-                                                  periodsTaught: e.target.value,
-                                                }
-                                              : r,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                  </Td>
+                                  <Td className="p-2">{periodsInput(row)}</Td>
                                 ) : null}
-                                <Td className="p-2">
-                                  <Input
-                                    className="h-10 w-full min-w-[6rem]"
-                                    disabled={!canWriteSheet}
-                                    value={row.remarks}
-                                    onChange={(e) =>
-                                      setRows((list) =>
-                                        list.map((r) =>
-                                          r.id === row.id
-                                            ? {
-                                                ...r,
-                                                remarks: e.target.value,
-                                              }
-                                            : r,
-                                        ),
-                                      )
-                                    }
-                                  />
-                                </Td>
-                                {/*
-                                  Per-employee save: each teacher checks in and
-                                  out at their own time, so their row is stored
-                                  on its own without touching anyone else's or
-                                  moving the sheet to the next step.
-                                */}
-                                <Td className="p-2">
-                                  <div className="flex flex-wrap gap-1">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-8 px-2 text-xs"
-                                      disabled={
-                                        !canWriteSheet ||
-                                        savingRowId === row.id
-                                      }
-                                      title="Stamp the current time as check-in and save this row"
-                                      onClick={() =>
-                                        stampAndSave(row, "checkInTime")
-                                      }
-                                    >
-                                      In now
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-8 px-2 text-xs"
-                                      disabled={
-                                        !canWriteSheet ||
-                                        savingRowId === row.id
-                                      }
-                                      title="Stamp the current time as check-out and save this row"
-                                      onClick={() =>
-                                        stampAndSave(row, "checkOutTime")
-                                      }
-                                    >
-                                      Out now
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="secondary"
-                                      className="h-8 px-2 text-xs"
-                                      disabled={
-                                        !canWriteSheet ||
-                                        savingRowId === row.id ||
-                                        (row.status === "" &&
-                                          !row.checkInTime &&
-                                          !row.checkOutTime)
-                                      }
-                                      title="Save only this employee's row"
-                                      onClick={() => saveRowMut.mutate(row)}
-                                    >
-                                      {savingRowId === row.id
-                                        ? "Saving…"
-                                        : "Save"}
-                                    </Button>
-                                  </div>
-                                </Td>
+                                <Td className="p-2">{remarksInput(row)}</Td>
+                                <Td className="p-2">{rowActions(row)}</Td>
                               </tr>
                             ))}
                           </TableBody>
                         </Table>
                       }
                     />
-                  </div>
+                    </div>
+                  </>
                 );
               })()
             )}
@@ -1148,7 +1170,65 @@ export const EmployeeAttendancePanel = ({
                   remarks?: string;
                 }>;
                 return (
-                  <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
+                  <>
+                    {/* Phone: the register is read-only, so stack it as cards. */}
+                    <div className="space-y-2 md:hidden">
+                      {regRows.map((r, i) => (
+                        <div
+                          key={`m-${r.attendanceId ?? "x"}-${r.employeeCode ?? i}-${i}`}
+                          className="rounded-xl border border-slate-200 bg-white p-3"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium text-slate-900">
+                                {r.fullName ?? "—"}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {[r.employeeCode, r.department, r.designation]
+                                  .filter(Boolean)
+                                  .join(" · ") || "—"}
+                              </p>
+                            </div>
+                            <Badge
+                              className={cn(statusClass(String(r.status ?? "")), "shrink-0")}
+                            >
+                              {String(r.status ?? "—").replace(/_/g, " ")}
+                            </Badge>
+                          </div>
+                          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600">
+                            <div>
+                              <dt className="text-slate-400">Date</dt>
+                              <dd>{r.dateBs ?? "—"}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-slate-400">In / Out</dt>
+                              <dd>
+                                {hasCheckTimes(String(r.status ?? ""))
+                                  ? `${r.checkInTime || "—"} / ${r.checkOutTime || "—"}`
+                                  : "—"}
+                              </dd>
+                            </div>
+                            {showPeriods ? (
+                              <div>
+                                <dt className="text-slate-400">Periods</dt>
+                                <dd>
+                                  {typeof r.periodsTaught === "number"
+                                    ? r.periodsTaught
+                                    : "—"}
+                                </dd>
+                              </div>
+                            ) : null}
+                            {r.remarks ? (
+                              <div className="col-span-2">
+                                <dt className="text-slate-400">Remarks</dt>
+                                <dd>{r.remarks}</dd>
+                              </div>
+                            ) : null}
+                          </dl>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="hidden min-w-0 overflow-hidden rounded-xl border border-slate-200 md:block">
                     <StickyTableScroll
                       maxHeightClassName="max-h-[min(70vh,720px)]"
                       header={
@@ -1233,7 +1313,8 @@ export const EmployeeAttendancePanel = ({
                         </Table>
                       }
                     />
-                  </div>
+                    </div>
+                  </>
                 );
               })()
             )}
@@ -1327,7 +1408,50 @@ const SelfPortal = ({
                 </colgroup>
               );
               return (
-                <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
+                <>
+                  {/* Phone: personal history as cards instead of a wide table. */}
+                  <div className="space-y-2 md:hidden">
+                    {data.history.map((h, i) => (
+                      <div
+                        key={`mh-${h.dateBs ?? i}-${i}`}
+                        className="rounded-xl border border-slate-200 bg-white p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium text-slate-900">
+                            {h.dateBs ?? "—"}
+                          </p>
+                          <Badge
+                            className={cn(statusClass(String(h.status ?? "")), "shrink-0")}
+                          >
+                            {String(h.status ?? "—").replace(/_/g, " ")}
+                          </Badge>
+                        </div>
+                        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600">
+                          <div>
+                            <dt className="text-slate-400">In / Out</dt>
+                            <dd>{`${h.checkInTime || "—"} / ${h.checkOutTime || "—"}`}</dd>
+                          </div>
+                          {showPeriods ? (
+                            <div>
+                              <dt className="text-slate-400">Periods</dt>
+                              <dd>
+                                {typeof h.periodsTaught === "number"
+                                  ? h.periodsTaught
+                                  : "—"}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {h.remarks ? (
+                            <div className="col-span-2">
+                              <dt className="text-slate-400">Remarks</dt>
+                              <dd>{h.remarks}</dd>
+                            </div>
+                          ) : null}
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden min-w-0 overflow-hidden rounded-xl border border-slate-200 md:block">
                   <StickyTableScroll
                     maxHeightClassName="max-h-[min(50vh,480px)]"
                     header={
@@ -1386,6 +1510,7 @@ const SelfPortal = ({
                     }
                   />
                 </div>
+                </>
               );
             })()
           )}

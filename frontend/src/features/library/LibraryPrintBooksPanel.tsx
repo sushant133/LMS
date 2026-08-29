@@ -448,10 +448,15 @@ export const LibraryPrintBooksPanel = () => {
                     key={book._id}
                     className="rounded-lg border border-slate-200"
                   >
-                    <div className="flex w-full flex-wrap items-center gap-2 px-3 py-3">
+                    {/*
+                      Phone: stack title / status / actions. In one row the
+                      number, chevron, stock badge and Print/PDF leave the title
+                      only a sliver, so it wraps one word per line.
+                    */}
+                    <div className="flex w-full flex-col items-stretch gap-2 px-3 py-3 md:flex-row md:flex-wrap md:items-center">
                       <button
                         type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-90"
+                        className="flex min-w-0 flex-1 items-start gap-2 text-left hover:opacity-90 md:items-center"
                         onClick={() =>
                           setExpandedBookId(expanded ? null : book._id)
                         }
@@ -466,12 +471,15 @@ export const LibraryPrintBooksPanel = () => {
                         )}
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium text-slate-900">
+                            <p className="basis-full font-medium text-slate-900 md:basis-auto">
                               {book.title}
                             </p>
                             <Badge className="bg-indigo-100 text-indigo-800">
                               {book.yearLevel ?? "All Years"}
                             </Badge>
+                            <span className="md:hidden">
+                              <StockStatusBadge status={book.status} />
+                            </span>
                           </div>
                           <p className="text-xs text-slate-500">
                             {book.author} · {book.category} ·{" "}
@@ -480,9 +488,11 @@ export const LibraryPrintBooksPanel = () => {
                             {book.isbn ? ` · ISBN ${book.isbn}` : ""}
                           </p>
                         </div>
-                        <StockStatusBadge status={book.status} />
+                        <span className="hidden shrink-0 md:inline-flex">
+                          <StockStatusBadge status={book.status} />
+                        </span>
                       </button>
-                      <div className="flex shrink-0 flex-wrap gap-1">
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1 md:justify-start">
                         <Button
                           size="sm"
                           variant="secondary"

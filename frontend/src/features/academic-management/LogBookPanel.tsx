@@ -25,7 +25,8 @@ import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import {
   academicListApiParams,
   dedupeYearsForSelect,
@@ -255,6 +256,34 @@ interface LogBookPanelProps {
   /** Academic Management admin hub (not teacher My Work). */
   isAdminView?: boolean;
 }
+
+/**
+ * Entries table layout. The row is wider than most screens, so the header sits
+ * in its own strip with a reachable scrollbar (no scrolling to the bottom of the
+ * page to move sideways) and the Actions column is pinned to the right edge so
+ * Edit / Approve / Delete stay on screen at any scroll position.
+ */
+const logTableClass = "w-full table-fixed min-w-[1520px]";
+const logThClass = "bg-slate-50 whitespace-nowrap";
+const stickyActionsBase =
+  "sticky right-0 border-l border-slate-200 shadow-[-2px_0_4px_-2px_rgba(15,23,42,0.08)]";
+const stickyActionsTh = cn(stickyActionsBase, "z-20 bg-slate-50");
+const stickyActionsTd = cn(stickyActionsBase, "z-10 bg-white");
+const logColGroup = (
+  <colgroup>
+    <col style={{ width: 56 }} />
+    <col style={{ width: 104 }} />
+    <col style={{ width: 176 }} />
+    <col style={{ width: 208 }} />
+    <col style={{ width: 120 }} />
+    <col style={{ width: 72 }} />
+    <col style={{ width: 116 }} />
+    <col style={{ width: 168 }} />
+    <col style={{ width: 136 }} />
+    <col style={{ width: 116 }} />
+    <col style={{ width: 248 }} />
+  </colgroup>
+);
 
 export const LogBookPanel = ({
   filters,
@@ -933,6 +962,103 @@ export const LogBookPanel = ({
     isCollege,
   ]);
 
+  /**
+   * Row actions, shared by the desktop table cell and the mobile cards so both
+   * stay in step (a button added here shows up in both layouts).
+   */
+  const renderEntryActions = (entry: AcademicLogBookEntryRecord) => (
+    <div className="flex flex-wrap gap-1">
+      {canEditDelete ? (
+        <Button
+          size="sm"
+          variant="outline"
+          title="Edit this log book row"
+          onClick={() => openEdit(entry)}
+        >
+          <Pencil className="mr-1 h-3.5 w-3.5" />
+          Edit
+        </Button>
+      ) : null}
+      <Button
+        size="sm"
+        variant="outline"
+        title="Open comments for this row"
+        onClick={() =>
+          setSelectedEntryId(entry._id)
+        }
+      >
+        Comments
+      </Button>
+      {isAdmin && canMutate ? (
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-emerald-700"
+            title="Approve this log book entry"
+            onClick={() =>
+              reviewMutation.mutate({
+                id: entry._id,
+                reviewStatus: "APPROVED",
+              })
+            }
+          >
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-amber-700"
+            title="Mark as needs improvement"
+            onClick={() =>
+              reviewMutation.mutate({
+                id: entry._id,
+                reviewStatus:
+                  "NEEDS_IMPROVEMENT",
+              })
+            }
+          >
+            Needs improvement
+          </Button>
+        </>
+      ) : null}
+      {canEditDelete &&
+      (isAdmin ||
+        entry.reviewStatus !== "APPROVED") ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-rose-200 text-rose-700 hover:bg-rose-50"
+          disabled={deleteMutation.isPending}
+          title={
+            entry.reviewStatus === "APPROVED"
+              ? "Delete this approved entry (approved by mistake)"
+              : "Delete this log book row"
+          }
+          onClick={() => {
+            const label = entry.dateBs || "this row";
+            const warning =
+              entry.reviewStatus === "APPROVED"
+                ? " It is already approved, and the sub-units it covered will go back to not started."
+                : "";
+            if (
+              !window.confirm(
+                `Delete the log book entry for ${label}?${warning}`,
+              )
+            ) {
+              return;
+            }
+            deleteMutation.mutate(entry._id);
+          }}
+        >
+          <Trash2 className="mr-1 h-3.5 w-3.5" />
+          Delete
+        </Button>
+      ) : null}
+    </div>
+  );
+
   const sortEntries = (list: AcademicLogBookEntryRecord[]) =>
     [...list].sort((a, b) => {
       const dateCmp = (a.dateBs || "").localeCompare(b.dateBs || "");
@@ -1474,165 +1600,174 @@ export const LogBookPanel = ({
                     </div>
                   ) : null}
                   <Card>
-                    <CardContent className="overflow-x-auto pt-6">
-                      <Table>
-                        <TableHead>
-                          <tr>
-                            <Th>S.N</Th>
-                            <Th>Date</Th>
-                            <Th>Unit</Th>
-                            <Th>Sub-unit</Th>
-                            <Th>Method</Th>
-                            <Th>T/P</Th>
-                            <Th>Time</Th>
-                            <Th>Feedback</Th>
-                            <Th>Signature</Th>
-                            <Th className="no-print">Review</Th>
-                            <Th className="no-print">Actions</Th>
-                          </tr>
-                        </TableHead>
-                        <TableBody>
-                          {group.items.map((entry, index) => {
-                            const subs = entrySubUnits(entry);
-                            return (
-                              <tr key={entry._id}>
-                                <Td className="tabular-nums">{index + 1}</Td>
-                                <Td className="whitespace-nowrap">
-                                  {entry.dateBs}
-                                </Td>
-                                <Td>
-                                  {cleanDuplicatedUnitLabel(entry.unit) || "—"}
-                                </Td>
-                                <Td>
-                                  {subs.length > 0 ? (
-                                    <div className="space-y-0.5">
-                                      {subs.map((title) => (
-                                        <div key={title}>{title}</div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    "—"
+                    <CardContent className="p-0">
+                      {/*
+                        Phone layout: one card per entry. A 1520px row cannot be
+                        made readable on a phone, so drop the table entirely and
+                        stack the same fields — no horizontal scrolling at all.
+                      */}
+                      <div className="space-y-3 p-3 md:hidden">
+                        {group.items.map((entry, index) => {
+                          const subs = entrySubUnits(entry);
+                          return (
+                            <div
+                              key={entry._id}
+                              className="rounded-xl border border-slate-200 bg-white p-3"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-medium text-slate-900">
+                                    {index + 1}. {entry.dateBs}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {cleanDuplicatedUnitLabel(entry.unit) || "—"}
+                                  </p>
+                                </div>
+                                <Badge
+                                  className={cn(
+                                    statusBadgeClass(entry.reviewStatus),
+                                    "no-print shrink-0",
                                   )}
-                                </Td>
-                                <Td>{entry.teachingMethod || "—"}</Td>
-                                <Td>{formatTp(entry.theoryPractical)}</Td>
-                                <Td className="whitespace-nowrap text-xs">
-                                  {formatTime(entry.startTime, entry.endTime)}
-                                </Td>
-                                <Td className="max-w-[140px] truncate">
-                                  {entry.feedback || "—"}
-                                </Td>
-                                <Td>
-                                  {entry.teacherSignature ||
-                                    entry.teacher?.user?.fullName ||
-                                    "—"}
-                                </Td>
-                                <Td className="no-print">
-                                  <Badge
-                                    className={statusBadgeClass(
-                                      entry.reviewStatus,
-                                    )}
-                                  >
-                                    {entry.reviewStatus}
-                                  </Badge>
-                                </Td>
-                                <Td className="no-print">
-                                  <div className="flex flex-wrap gap-1">
-                                    {canEditDelete ? (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        title="Edit this log book row"
-                                        onClick={() => openEdit(entry)}
-                                      >
-                                        <Pencil className="mr-1 h-3.5 w-3.5" />
-                                        Edit
-                                      </Button>
-                                    ) : null}
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      title="Open comments for this row"
-                                      onClick={() =>
-                                        setSelectedEntryId(entry._id)
-                                      }
-                                    >
-                                      Comments
-                                    </Button>
-                                    {isAdmin && canMutate ? (
-                                      <>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="text-emerald-700"
-                                          title="Approve this log book entry"
-                                          onClick={() =>
-                                            reviewMutation.mutate({
-                                              id: entry._id,
-                                              reviewStatus: "APPROVED",
-                                            })
-                                          }
-                                        >
-                                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                                          Approve
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="text-amber-700"
-                                          title="Mark as needs improvement"
-                                          onClick={() =>
-                                            reviewMutation.mutate({
-                                              id: entry._id,
-                                              reviewStatus:
-                                                "NEEDS_IMPROVEMENT",
-                                            })
-                                          }
-                                        >
-                                          Needs improvement
-                                        </Button>
-                                      </>
-                                    ) : null}
-                                    {canEditDelete &&
-                                    (isAdmin ||
-                                      entry.reviewStatus !== "APPROVED") ? (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                                        disabled={deleteMutation.isPending}
-                                        title={
-                                          entry.reviewStatus === "APPROVED"
-                                            ? "Delete this approved entry (approved by mistake)"
-                                            : "Delete this log book row"
-                                        }
-                                        onClick={() => {
-                                          const label = entry.dateBs || "this row";
-                                          const warning =
-                                            entry.reviewStatus === "APPROVED"
-                                              ? " It is already approved, and the sub-units it covered will go back to not started."
-                                              : "";
-                                          if (
-                                            !window.confirm(
-                                              `Delete the log book entry for ${label}?${warning}`,
-                                            )
-                                          ) {
-                                            return;
-                                          }
-                                          deleteMutation.mutate(entry._id);
-                                        }}
-                                      >
-                                        <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                        Delete
-                                      </Button>
-                                    ) : null}
+                                >
+                                  {entry.reviewStatus}
+                                </Badge>
+                              </div>
+                              {subs.length > 0 ? (
+                                <ul className="mt-2 list-disc pl-4 text-sm text-slate-700">
+                                  {subs.map((title) => (
+                                    <li key={title}>{title}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600">
+                                <div>
+                                  <dt className="text-slate-400">Method</dt>
+                                  <dd>{entry.teachingMethod || "—"}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-slate-400">T/P</dt>
+                                  <dd>{formatTp(entry.theoryPractical)}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-slate-400">Time</dt>
+                                  <dd>
+                                    {formatTime(entry.startTime, entry.endTime)}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt className="text-slate-400">Signature</dt>
+                                  <dd>
+                                    {entry.teacherSignature ||
+                                      entry.teacher?.user?.fullName ||
+                                      "—"}
+                                  </dd>
+                                </div>
+                                {entry.feedback ? (
+                                  <div className="col-span-2">
+                                    <dt className="text-slate-400">Feedback</dt>
+                                    <dd>{entry.feedback}</dd>
                                   </div>
-                                </Td>
+                                ) : null}
+                              </dl>
+                              <div className="mt-3 no-print">
+                                {renderEntryActions(entry)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <StickyTableScroll
+                        className="hidden md:flex"
+                        maxHeightClassName="max-h-[min(65vh,640px)]"
+                        showHeaderScrollbar
+                        header={
+                          <Table className={logTableClass}>
+                            {logColGroup}
+                            <TableHead>
+                              <tr>
+                                <Th className={logThClass}>S.N</Th>
+                                <Th className={logThClass}>Date</Th>
+                                <Th className={logThClass}>Unit</Th>
+                                <Th className={logThClass}>Sub-unit</Th>
+                                <Th className={logThClass}>Method</Th>
+                                <Th className={logThClass}>T/P</Th>
+                                <Th className={logThClass}>Time</Th>
+                                <Th className={logThClass}>Feedback</Th>
+                                <Th className={logThClass}>Signature</Th>
+                                <Th className={cn(logThClass, "no-print")}>
+                                  Review
+                                </Th>
+                                <Th
+                                  className={cn(
+                                    logThClass,
+                                    "no-print",
+                                    stickyActionsTh,
+                                  )}
+                                >
+                                  Actions
+                                </Th>
                               </tr>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
+                            </TableHead>
+                          </Table>
+                        }
+                        body={
+                          <Table className={logTableClass}>
+                            {logColGroup}
+                            <TableBody>
+                              {group.items.map((entry, index) => {
+                                const subs = entrySubUnits(entry);
+                                return (
+                                  <tr key={entry._id} className="align-top">
+                                    <Td className="tabular-nums">{index + 1}</Td>
+                                    <Td className="whitespace-nowrap">
+                                      {entry.dateBs}
+                                    </Td>
+                                    <Td>
+                                      {cleanDuplicatedUnitLabel(entry.unit) || "—"}
+                                    </Td>
+                                    <Td>
+                                      {subs.length > 0 ? (
+                                        <div className="space-y-0.5">
+                                          {subs.map((title) => (
+                                            <div key={title}>{title}</div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </Td>
+                                    <Td>{entry.teachingMethod || "—"}</Td>
+                                    <Td>{formatTp(entry.theoryPractical)}</Td>
+                                    <Td className="whitespace-nowrap text-xs">
+                                      {formatTime(entry.startTime, entry.endTime)}
+                                    </Td>
+                                    <Td className="max-w-[140px] truncate">
+                                      {entry.feedback || "—"}
+                                    </Td>
+                                    <Td>
+                                      {entry.teacherSignature ||
+                                        entry.teacher?.user?.fullName ||
+                                        "—"}
+                                    </Td>
+                                    <Td className="no-print">
+                                      <Badge
+                                        className={statusBadgeClass(
+                                          entry.reviewStatus,
+                                        )}
+                                      >
+                                        {entry.reviewStatus}
+                                      </Badge>
+                                    </Td>
+                                    <Td className={cn("no-print", stickyActionsTd)}>
+                                      {renderEntryActions(entry)}
+                                    </Td>
+                                  </tr>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        }
+                      />
                     </CardContent>
                   </Card>
                 </div>

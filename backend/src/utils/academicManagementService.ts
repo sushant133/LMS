@@ -2965,20 +2965,84 @@ const buildDashboardInner = async (
     current.percents.push(Number(row.completionPercent) || 0);
     subjectGrouped.set(key, current);
   }
-  const subjectProgress = [...subjectGrouped.values()]
-    .map((row) => {
-      const pct = roundPct(
-        row.percents.reduce((sum, n) => sum + n, 0) / Math.max(1, row.percents.length)
-      );
+  /**
+   * The aggregation only knows subjects that already have progress rows. The
+   * dashboard should show the whole curriculum — a subject nobody has planned
+   * yet is exactly the one an administrator needs to see — so fold in every
+   * active subject at 0% and tag each with its year for the faceted charts.
+   */
+  const curriculumSubjects = await Subject.find({
+    schoolId,
+    isActive: { $ne: false },
+    ...((teacherScopeSubjectIds?.length ?? 0) > 0
+      ? { _id: { $in: teacherScopeSubjectIds } }
+      : {})
+  })
+    .select("_id name code masterSubjectId yearIds")
+    .lean();
+  const yearRows = await Year.find({ schoolId }).select("_id name level").lean();
+  const yearById = new Map(
+    yearRows.map((year) => [
+      String(year._id),
+      { label: String(year.name ?? ""), level: Number(year.level) || 0 }
+    ])
+  );
+  /** Same identity key the progress rows use, so batch instances merge into one. */
+  const curriculumKey = (subject: {
+    name?: string;
+    code?: string;
+    masterSubjectId?: unknown;
+  }): string => {
+    const name = String(subject.name ?? "").trim() || "Subject";
+    const master = subject.masterSubjectId ? String(subject.masterSubjectId) : "";
+    const code = String(subject.code ?? "").trim().toLowerCase();
+    return master ? `master:${master}` : code ? `code:${code}` : `name:${name.toLowerCase()}`;
+  };
+  const yearByKey = new Map<string, { label: string; level: number }>();
+  for (const subject of curriculumSubjects) {
+    const key = curriculumKey(subject);
+    const ids = Array.isArray(subject.yearIds) ? subject.yearIds : [];
+    for (const id of ids) {
+      const year = yearById.get(String(id));
+      // Lowest year wins when a subject is shared, so it lands in one facet only.
+      if (!year || !year.level) continue;
+      const current = yearByKey.get(key);
+      if (!current || year.level < current.level) yearByKey.set(key, year);
+    }
+    if (!subjectGrouped.has(key)) {
+      subjectGrouped.set(key, {
+        subjectId: String(subject._id),
+        subjectName: String(subject.name ?? "").trim() || "Subject",
+        percents: []
+      });
+    }
+  }
+
+  const subjectProgress = [...subjectGrouped.entries()]
+    .map(([key, row]) => {
+      const pct =
+        row.percents.length > 0
+          ? roundPct(
+              row.percents.reduce((sum, n) => sum + n, 0) / row.percents.length
+            )
+          : 0;
+      const year = yearByKey.get(key);
       return {
         subjectId: row.subjectId,
         subjectName: row.subjectName,
+        yearLabel: year?.label,
+        yearLevel: year?.level,
         completionPercent: pct,
         remainingPercent: roundPct(100 - pct)
       };
     })
-    .sort((a, b) => b.completionPercent - a.completionPercent || a.subjectName.localeCompare(b.subjectName))
-    .slice(0, 25);
+    // Stable order: year, then name. Never by value — chart colors follow the
+    // subject, so a re-sort must not repaint the series.
+    .sort(
+      (a, b) =>
+        (a.yearLevel ?? 99) - (b.yearLevel ?? 99) ||
+        a.subjectName.localeCompare(b.subjectName)
+    );
 
   const facultyProgress = facultyProgressRows
     .filter((row) => row._id != null && String(row._id).trim() !== "")
@@ -2991,11 +3055,23 @@ const buildDashboardInner = async (
       };
     });
 
+  /** Year tags by subject name, so the syllabus chart facets like the others. */
+  const yearByName = new Map(
+    subjectProgress.map((row) => [
+      row.subjectName.trim().toLowerCase(),
+      { label: row.yearLabel, level: row.yearLevel }
+    ])
+  );
   const syllabusCompletion =
     syllabusCompletionRows.length > 0
-      ? syllabusCompletionRows.slice(0, 25)
+      ? syllabusCompletionRows.map((row) => {
+          const year = yearByName.get(String(row.subjectName ?? "").trim().toLowerCase());
+          return { ...row, yearLabel: year?.label, yearLevel: year?.level };
+        })
       : subjectProgress.map((row) => ({
           subjectName: row.subjectName,
+          yearLabel: row.yearLabel,
+          yearLevel: row.yearLevel,
           percent: row.completionPercent,
           remainingPercent: row.remainingPercent
         }));

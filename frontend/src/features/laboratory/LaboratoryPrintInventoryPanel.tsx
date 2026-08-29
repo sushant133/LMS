@@ -283,10 +283,15 @@ export const LaboratoryPrintInventoryPanel = () => {
                     key={item._id}
                     className="rounded-lg border border-slate-200"
                   >
-                    <div className="flex w-full flex-wrap items-center gap-2 px-3 py-3">
+                    {/*
+                      Phone: stack name / badges / actions. In one row the number,
+                      chevron, item code, year, stock badge and Print/PDF leave the
+                      name a sliver, so it wraps one word per line under the badges.
+                    */}
+                    <div className="flex w-full flex-col items-stretch gap-2 px-3 py-3 md:flex-row md:flex-wrap md:items-center">
                       <button
                         type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-90"
+                        className="flex min-w-0 flex-1 items-start gap-2 text-left hover:opacity-90 md:items-center"
                         onClick={() =>
                           setExpandedId(expanded ? null : item._id)
                         }
@@ -301,7 +306,7 @@ export const LaboratoryPrintInventoryPanel = () => {
                         )}
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium text-slate-900">
+                            <p className="basis-full font-medium text-slate-900 md:basis-auto">
                               {item.name}
                             </p>
                             <Badge className="bg-slate-100 font-mono text-slate-700">
@@ -310,6 +315,9 @@ export const LaboratoryPrintInventoryPanel = () => {
                             <Badge className="bg-indigo-100 text-indigo-800">
                               {item.yearLevel ?? "All Years"}
                             </Badge>
+                            <span className="md:hidden">
+                              <StockStatusBadge status={item.status} />
+                            </span>
                           </div>
                           <p className="text-xs text-slate-500">
                             {item.laboratoryName || "—"} ·{" "}
@@ -318,9 +326,11 @@ export const LaboratoryPrintInventoryPanel = () => {
                             {item.brand ? ` · ${item.brand}` : ""}
                           </p>
                         </div>
-                        <StockStatusBadge status={item.status} />
+                        <span className="hidden shrink-0 md:inline-flex">
+                          <StockStatusBadge status={item.status} />
+                        </span>
                       </button>
-                      <div className="flex shrink-0 flex-wrap gap-1">
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1 md:justify-start">
                         <Button
                           size="sm"
                           variant="secondary"
