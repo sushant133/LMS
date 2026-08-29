@@ -151,6 +151,7 @@ export const FieldPostingSectionPanel = ({
   /** Attendance record currently loaded for mark panel (authoritative for read-only). */
   const [loadedAttendance, setLoadedAttendance] =
     useState<FieldDutyAttendanceRecord | null>(null);
+  const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [studentPickerOpen, setStudentPickerOpen] = useState(false);
   const [loadingMark, setLoadingMark] = useState(false);
@@ -506,7 +507,7 @@ export const FieldPostingSectionPanel = ({
   });
 
   const submitAttendance = useMutation({
-    mutationFn: () => {
+    mutationFn: (opts: { asDraft: boolean; studentId?: string }) => {
       if (!selectedScheduleId) throw new Error("Select a posting first");
       if (!markDateBs?.trim()) throw new Error("Select attendance date (BS)");
       if (!markShift) throw new Error("Select duty shift before marking attendance");
@@ -514,8 +515,15 @@ export const FieldPostingSectionPanel = ({
         throw new Error("Load the attendance sheet for this date and shift first");
       }
       const onDuty = markRows.filter((r) => r.onRoster);
-      if (onDuty.length === 0) {
-        throw new Error("Select at least one student for today's roster");
+      const entries = opts.studentId
+        ? onDuty.filter((r) => r.studentId === opts.studentId)
+        : onDuty;
+      if (entries.length === 0) {
+        throw new Error(
+          opts.studentId
+            ? "This student is not on duty for today's roster"
+            : "Select at least one student for today's roster",
+        );
       }
       return unwrap(
         api.post("/field-duty/attendance", {
@@ -523,7 +531,8 @@ export const FieldPostingSectionPanel = ({
           dateBs: markDateBs,
           shift: markShift,
           notes,
-          entries: onDuty.map((r) => ({
+          asDraft: opts.asDraft,
+          entries: entries.map((r) => ({
             studentId: r.studentId,
             status: r.status,
             remarks: r.remarks,
@@ -531,16 +540,32 @@ export const FieldPostingSectionPanel = ({
         }),
       );
     },
-    onSuccess: async (data) => {
+    onMutate: (opts) => {
+      if (opts.studentId) setSavingStudentId(opts.studentId);
+    },
+    onSuccess: async (data, opts) => {
       const rec = data as FieldDutyAttendanceRecord;
-      toast.success(
-        `Register saved · ${markDateBs} · ${shiftLabel(markShift)} · ${rec.entries?.length ?? 0} students`,
-      );
       setLoadedAttendance(rec);
+      if (opts.studentId) {
+        const name =
+          markRows.find((r) => r.studentId === opts.studentId)?.fullName ??
+          "Student";
+        toast.success(`${name} submitted`);
+        await queryClient.invalidateQueries({
+          queryKey: ["field-duty", "register"],
+        });
+        return;
+      }
+      toast.success(
+        opts.asDraft
+          ? `All rows saved · ${markDateBs} · ${shiftLabel(markShift)} · ${rec.entries?.length ?? 0} students`
+          : `Register submitted and locked · ${markDateBs} · ${shiftLabel(markShift)} · ${rec.entries?.length ?? 0} students`,
+      );
       await invalidate();
       await queryClient.invalidateQueries({ queryKey: ["field-duty", "register"] });
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
+    onSettled: () => setSavingStudentId(null),
   });
 
   const unlockAttendance = useMutation({
@@ -2032,7 +2057,8 @@ export const FieldPostingSectionPanel = ({
                     : ""}
                 </li>
                 <li>
-                  Mark Present / Absent / Late / Leave, then <strong>Save register</strong>
+                  Mark Present / Absent / Late / Leave. Use <strong>Submit</strong> on a
+                  student to save that row, then <strong>Final submit</strong> to lock the day
                 </li>
               </ol>
             </CardContent>
@@ -2332,6 +2358,14 @@ export const FieldPostingSectionPanel = ({
                   </div>
                 ) : null}
 
+                {loadedAttendance?.status === "DRAFT" && !isReadOnly ? (
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                    Draft saved. Use <strong>Submit</strong> on each student as they
+                    are marked, then <strong>Final submit &amp; lock</strong> when the
+                    day is complete.
+                  </div>
+                ) : null}
+
                 {isReadOnly ? (
                   <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     This day&apos;s register is locked (read-only).
@@ -2500,12 +2534,34 @@ export const FieldPostingSectionPanel = ({
                               )
                             }
                           />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="mt-2 w-full"
+                            disabled={
+                              isReadOnly ||
+                              !row.onRoster ||
+                              savingStudentId === row.studentId ||
+                              submitAttendance.isPending
+                            }
+                            onClick={() =>
+                              submitAttendance.mutate({
+                                asDraft: true,
+                                studentId: row.studentId,
+                              })
+                            }
+                          >
+                            {savingStudentId === row.studentId
+                              ? "Saving…"
+                              : "Submit"}
+                          </Button>
                         </div>
                       );
                     })}
                   </div>
                   <div className="overflow-x-auto rounded-xl border border-slate-300 [-webkit-overflow-scrolling:touch]">
-                    <table className="w-full min-w-[720px] border-collapse text-sm">
+                    <table className="w-full min-w-[820px] border-collapse text-sm">
                       <thead>
                         <tr className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
                           <th className="border border-slate-300 px-2 py-2 text-center">
@@ -2538,6 +2594,9 @@ export const FieldPostingSectionPanel = ({
                             Leave
                           </th>
                           <th className="border border-slate-300 px-2 py-2">Remarks</th>
+                          <th className="border border-slate-300 px-2 py-2 text-center">
+                            Save
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2646,6 +2705,31 @@ export const FieldPostingSectionPanel = ({
                                   }
                                 />
                               </td>
+                              <td className="border border-slate-200 px-1 py-1 text-center">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-8 px-2 text-xs"
+                                  disabled={
+                                    isReadOnly ||
+                                    !row.onRoster ||
+                                    savingStudentId === row.studentId ||
+                                    submitAttendance.isPending
+                                  }
+                                  title="Save only this student's attendance"
+                                  onClick={() =>
+                                    submitAttendance.mutate({
+                                      asDraft: true,
+                                      studentId: row.studentId,
+                                    })
+                                  }
+                                >
+                                  {savingStudentId === row.studentId
+                                    ? "Saving…"
+                                    : "Submit"}
+                                </Button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -2715,7 +2799,11 @@ export const FieldPostingSectionPanel = ({
                     </Button>
                     <Button
                       className="ml-auto"
-                      onClick={() => submitAttendance.mutate()}
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        submitAttendance.mutate({ asDraft: true })
+                      }
                       disabled={
                         submitAttendance.isPending ||
                         !markDateBs ||
@@ -2723,10 +2811,35 @@ export const FieldPostingSectionPanel = ({
                         !sheetLoaded ||
                         onDutyCount === 0
                       }
+                      title="Save every on-duty student without locking the day"
                     >
-                      {submitAttendance.isPending
+                      {submitAttendance.isPending && !savingStudentId
                         ? "Saving…"
-                        : `Save register · ${onDutyCount} · ${markDateBs} · ${shiftLabel(markShift)}`}
+                        : `Save all · ${onDutyCount}`}
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Final submit saves all ${onDutyCount} on-duty student(s) for ${markDateBs} · ${shiftLabel(markShift)} and locks this day sheet. Continue?`,
+                          )
+                        ) {
+                          submitAttendance.mutate({ asDraft: false });
+                        }
+                      }}
+                      disabled={
+                        submitAttendance.isPending ||
+                        !markDateBs ||
+                        !markShift ||
+                        !sheetLoaded ||
+                        onDutyCount === 0
+                      }
+                      title="Save the whole table and lock this day's register"
+                    >
+                      {submitAttendance.isPending && !savingStudentId
+                        ? "Submitting…"
+                        : "Final submit & lock"}
                     </Button>
                   </div>
                 ) : null}

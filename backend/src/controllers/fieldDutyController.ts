@@ -1004,6 +1004,7 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     shift: attendanceShift,
     isDeleted: false
   });
+  const asDraft = Boolean(payload.asDraft);
   if (existing && (existing.status === "SUBMITTED" || existing.status === "LOCKED")) {
     throw new ApiError(
       400,
@@ -1114,7 +1115,32 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     seenEntry.add(entry.studentId);
   }
 
-  const docPayload = {
+  const mappedEntries = payload.entries.map((e) => ({
+    studentId: e.studentId,
+    status: e.status,
+    remarks: emptyToUndef(e.remarks) ?? ""
+  }));
+
+  const mergeDraftEntries = (
+    current: Array<{ studentId: unknown; status: string; remarks?: string }>
+  ) => {
+    const byId = new Map<string, (typeof mappedEntries)[number]>();
+    for (const row of current) {
+      const id = String(row.studentId ?? "");
+      if (!id) continue;
+      byId.set(id, {
+        studentId: id,
+        status: row.status as (typeof mappedEntries)[number]["status"],
+        remarks: row.remarks ?? ""
+      });
+    }
+    for (const row of mappedEntries) {
+      byId.set(String(row.studentId), row);
+    }
+    return [...byId.values()];
+  };
+
+  const basePayload = {
     schoolId,
     scheduleId: schedule._id,
     dateBs,
@@ -1127,38 +1153,61 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     batchId: schedule.batchId,
     yearId: schedule.yearId,
     supervisorStaffId: schedule.supervisorStaffId ?? schedule.supervisorTeacherId,
-    entries: payload.entries.map((e) => ({
-      studentId: e.studentId,
-      status: e.status,
-      remarks: emptyToUndef(e.remarks) ?? ""
-    })),
-    notes: emptyToUndef(payload.notes) ?? "",
-    status: "LOCKED" as const,
+    notes:
+      payload.notes !== undefined
+        ? emptyToUndef(payload.notes) ?? ""
+        : existing?.notes ?? "",
     editRequest: undefined,
-    createdBy: actorId(req),
-    submittedBy: actorId(req),
-    submittedAt: new Date()
+    createdBy: existing?.createdBy ?? actorId(req)
   };
 
   let saved;
-  if (existing) {
-    Object.assign(existing, docPayload);
-    existing.editRequest = undefined;
-    await existing.save();
-    saved = existing;
+  if (asDraft) {
+    const entries = existing
+      ? mergeDraftEntries(existing.entries as Array<{ studentId: unknown; status: string; remarks?: string }>)
+      : mappedEntries;
+    if (existing) {
+      existing.set({
+        ...basePayload,
+        entries,
+        status: "DRAFT"
+      });
+      await existing.save();
+      saved = existing;
+    } else {
+      saved = await FieldDutyAttendance.create({
+        ...basePayload,
+        entries,
+        status: "DRAFT"
+      });
+    }
   } else {
-    saved = await FieldDutyAttendance.create(docPayload);
+    const docPayload = {
+      ...basePayload,
+      entries: mappedEntries,
+      status: "LOCKED" as const,
+      submittedBy: actorId(req),
+      submittedAt: new Date()
+    };
+    if (existing) {
+      Object.assign(existing, docPayload);
+      existing.editRequest = undefined;
+      await existing.save();
+      saved = existing;
+    } else {
+      saved = await FieldDutyAttendance.create(docPayload);
+    }
+
+    await notifyFieldDutyAttendance(schoolId.toString(), {
+      dateBs,
+      hospitalName: siteName,
+      department: schedule.department || "",
+      entries: mappedEntries
+    });
   }
 
-  await notifyFieldDutyAttendance(schoolId.toString(), {
-    dateBs,
-    hospitalName: siteName,
-    department: schedule.department || "",
-    entries: docPayload.entries
-  });
-
   await recordAudit(req, {
-    action: "field_duty.attendance.submit",
+    action: asDraft ? "field_duty.attendance.save" : "field_duty.attendance.submit",
     entity: "FIELD_DUTY_ATTENDANCE",
     entityId: saved._id.toString(),
     after: saved
@@ -1166,9 +1215,9 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
 
   return sendSuccess(
     res,
-    "Field attendance submitted",
+    asDraft ? "Student attendance saved" : "Field attendance submitted",
     await serializeAttendance(saved.toObject() as never),
-    201
+    existing ? 200 : 201
   );
 });
 
