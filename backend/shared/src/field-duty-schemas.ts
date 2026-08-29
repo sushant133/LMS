@@ -184,10 +184,10 @@ export const fieldDutyAttendanceSubmitSchema = z.object({
   entries: z.array(fieldDutyAttendanceEntrySchema).min(1),
   notes: z.string().optional().or(z.literal("")),
   /**
-   * Save without locking (one student or the whole sheet).
-   * Final submit omits this / sends false and locks the day.
+   * false = lock the day (Final submit). true / omitted = save as draft.
+   * Default is draft so a single-student Submit can never lock the sheet.
    */
-  asDraft: z.boolean().optional().default(false)
+  asDraft: z.boolean().optional().default(true)
 });
 
 export const fieldDutyAttendanceUpdateSchema = z.object({

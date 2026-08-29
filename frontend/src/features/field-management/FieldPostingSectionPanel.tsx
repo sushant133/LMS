@@ -66,7 +66,8 @@ interface MarkRow {
   rollNumber: number;
   /** Included on today's daily roster for this date+shift */
   onRoster: boolean;
-  status: FieldDutyStudentStatus;
+  /** Empty until marked — never assume Present. */
+  status: FieldDutyStudentStatus | "";
   remarks: string;
   /** From Hospital Roster cell (department / shift codes). */
   departmentLabel?: string;
@@ -507,22 +508,36 @@ export const FieldPostingSectionPanel = ({
   });
 
   const submitAttendance = useMutation({
-    mutationFn: (opts: { asDraft: boolean; studentId?: string }) => {
+    mutationFn: (opts: {
+      asDraft: boolean;
+      studentId?: string;
+      status?: FieldDutyStudentStatus | "";
+      remarks?: string;
+    }) => {
       if (!selectedScheduleId) throw new Error("Select a posting first");
       if (!markDateBs?.trim()) throw new Error("Select attendance date (BS)");
       if (!markShift) throw new Error("Select duty shift before marking attendance");
       if (!sheetLoaded) {
         throw new Error("Load the attendance sheet for this date and shift first");
       }
-      const onDuty = markRows.filter((r) => r.onRoster);
+      const marked = markRows.filter((r) => r.onRoster && r.status);
       const entries = opts.studentId
-        ? onDuty.filter((r) => r.studentId === opts.studentId)
-        : onDuty;
+        ? [
+            {
+              studentId: opts.studentId,
+              status: opts.status || marked.find((r) => r.studentId === opts.studentId)?.status,
+              remarks:
+                opts.remarks ??
+                marked.find((r) => r.studentId === opts.studentId)?.remarks ??
+                "",
+            },
+          ].filter((r) => r.status)
+        : marked;
       if (entries.length === 0) {
         throw new Error(
           opts.studentId
-            ? "This student is not on duty for today's roster"
-            : "Select at least one student for today's roster",
+            ? "Mark Present / Absent / Late / Leave before submitting this student"
+            : "Mark at least one student before saving",
         );
       }
       return unwrap(
@@ -713,15 +728,12 @@ export const FieldPostingSectionPanel = ({
         pool.map((s) => {
           const prev = attendance?.entries.find((e) => e.studentId === s._id);
           const m = meta[s._id];
-          // Existing register → those students are on roster
-          // Hospital roster → all pool students are on duty for this day/shift
-          // MULTI/MANUAL/AUTO defaults → all pool selected
-          // DAILY new day → use suggested when available
+          // Hospital roster: every assigned student stays on the sheet even after
+          // a partial draft. Never drop unmarked students or default them Present.
           let onRoster = false;
-          if (prev) onRoster = true;
-          else if (attendance?.entries?.length) onRoster = false;
-          else if (rosterDriven) onRoster = suggested.has(s._id) || suggested.size === 0;
-          else if (mode === "DAILY") onRoster = suggested.has(s._id);
+          if (rosterDriven) onRoster = suggested.has(s._id) || suggested.size === 0;
+          else if (prev) onRoster = true;
+          else if (mode === "DAILY") onRoster = suggested.has(s._id) || !attendance?.entries?.length;
           else if (suggested.size > 0) onRoster = suggested.has(s._id);
           else onRoster = true;
 
@@ -741,10 +753,7 @@ export const FieldPostingSectionPanel = ({
             admissionNumber: s.admissionNumber,
             rollNumber: s.rollNumber,
             onRoster,
-            status:
-              prev?.status ??
-              suggestedStatus ??
-              ("PRESENT" as FieldDutyStudentStatus),
+            status: prev?.status ?? suggestedStatus ?? "",
             remarks: prev?.remarks ?? "",
             departmentLabel: deptLabel,
             shiftLabel: shiftLabel,
@@ -810,6 +819,7 @@ export const FieldPostingSectionPanel = ({
   };
 
   const onDutyCount = markRows.filter((r) => r.onRoster).length;
+  const markedCount = markRows.filter((r) => r.onRoster && r.status).length;
   const filteredMarkRows = useMemo(() => {
     const q = rosterSearch.trim().toLowerCase();
     if (!q) return markRows;
@@ -948,7 +958,7 @@ export const FieldPostingSectionPanel = ({
   const sheetFromMarkRows = (): FieldDailySheet | null => {
     if (!selectedSchedule || !markDateBs || !markShift) return null;
     const entries = markRows
-      .filter((r) => r.onRoster)
+      .filter((r) => r.onRoster || r.status)
       .map((r) => ({
         studentId: r.studentId,
         fullName: r.fullName,
@@ -2291,7 +2301,9 @@ export const FieldPostingSectionPanel = ({
                   {" · "}
                   {selectedSchedule.batch?.name}/{selectedSchedule.year?.name}
                   {" · "}
-                  On duty: <strong>{onDutyCount}</strong>
+                  Roster: <strong>{onDutyCount}</strong>
+                  {" · "}
+                  Marked: <strong>{markedCount}</strong>
                   {loadedAttendance ? (
                     <>
                       {" · "}
@@ -2499,7 +2511,7 @@ export const FieldPostingSectionPanel = ({
                                     className="h-3.5 w-3.5"
                                     name={`m-status-${row.studentId}`}
                                     disabled={isReadOnly || !row.onRoster}
-                                    checked={row.onRoster && row.status === st}
+                                    checked={row.status === st}
                                     onChange={() =>
                                       setMarkRows((rows) =>
                                         rows.map((r, i) =>
@@ -2542,6 +2554,7 @@ export const FieldPostingSectionPanel = ({
                             disabled={
                               isReadOnly ||
                               !row.onRoster ||
+                              !row.status ||
                               savingStudentId === row.studentId ||
                               submitAttendance.isPending
                             }
@@ -2549,6 +2562,8 @@ export const FieldPostingSectionPanel = ({
                               submitAttendance.mutate({
                                 asDraft: true,
                                 studentId: row.studentId,
+                                status: row.status,
+                                remarks: row.remarks,
                               })
                             }
                           >
@@ -2672,7 +2687,7 @@ export const FieldPostingSectionPanel = ({
                                     className="h-4 w-4"
                                     name={`status-${row.studentId}`}
                                     disabled={isReadOnly || !row.onRoster}
-                                    checked={row.onRoster && row.status === st}
+                                    checked={row.status === st}
                                     onChange={() =>
                                       setMarkRows((rows) =>
                                         rows.map((r, i) =>
@@ -2714,14 +2729,17 @@ export const FieldPostingSectionPanel = ({
                                   disabled={
                                     isReadOnly ||
                                     !row.onRoster ||
+                                    !row.status ||
                                     savingStudentId === row.studentId ||
                                     submitAttendance.isPending
                                   }
-                                  title="Save only this student's attendance"
+                                  title="Save only this student's attendance as draft"
                                   onClick={() =>
                                     submitAttendance.mutate({
                                       asDraft: true,
                                       studentId: row.studentId,
+                                      status: row.status,
+                                      remarks: row.remarks,
                                     })
                                   }
                                 >
@@ -2809,20 +2827,20 @@ export const FieldPostingSectionPanel = ({
                         !markDateBs ||
                         !markShift ||
                         !sheetLoaded ||
-                        onDutyCount === 0
+                        markedCount === 0
                       }
-                      title="Save every on-duty student without locking the day"
+                      title="Save every marked student without locking the day"
                     >
                       {submitAttendance.isPending && !savingStudentId
                         ? "Saving…"
-                        : `Save all · ${onDutyCount}`}
+                        : `Save all · ${markedCount}`}
                     </Button>
                     <Button
                       type="button"
                       onClick={() => {
                         if (
                           window.confirm(
-                            `Final submit saves all ${onDutyCount} on-duty student(s) for ${markDateBs} · ${shiftLabel(markShift)} and locks this day sheet. Continue?`,
+                            `Final submit saves ${markedCount} marked student(s) for ${markDateBs} · ${shiftLabel(markShift)} and locks this day sheet. Unmarked students stay unmarked. Continue?`,
                           )
                         ) {
                           submitAttendance.mutate({ asDraft: false });
@@ -2833,7 +2851,7 @@ export const FieldPostingSectionPanel = ({
                         !markDateBs ||
                         !markShift ||
                         !sheetLoaded ||
-                        onDutyCount === 0
+                        markedCount === 0
                       }
                       title="Save the whole table and lock this day's register"
                     >

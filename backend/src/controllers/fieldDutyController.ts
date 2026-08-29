@@ -1004,7 +1004,8 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     shift: attendanceShift,
     isDeleted: false
   });
-  const asDraft = Boolean(payload.asDraft);
+  // Lock only when the client explicitly sends asDraft: false (Final submit).
+  const asDraft = payload.asDraft !== false;
   if (existing && (existing.status === "SUBMITTED" || existing.status === "LOCKED")) {
     throw new ApiError(
       400,
@@ -1182,9 +1183,14 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
       });
     }
   } else {
+    const mergedForLock = existing
+      ? mergeDraftEntries(
+          existing.entries as Array<{ studentId: unknown; status: string; remarks?: string }>
+        )
+      : mappedEntries;
     const docPayload = {
       ...basePayload,
-      entries: mappedEntries,
+      entries: mergedForLock,
       status: "LOCKED" as const,
       submittedBy: actorId(req),
       submittedAt: new Date()
@@ -1202,7 +1208,7 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
       dateBs,
       hospitalName: siteName,
       department: schedule.department || "",
-      entries: mappedEntries
+      entries: mergedForLock
     });
   }
 
