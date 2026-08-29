@@ -179,19 +179,62 @@ type ColumnRow = {
 /** Rough width of the 11px axis label face — enough to decide "does it fit". */
 const CHAR_PX = 6.1;
 
-/**
- * Longest axis label we will draw. A tilted 40-character name runs off the left
- * edge of the plot and the SVG clips its opening characters — "…prehensive
- * clinical + PHC Practicum II" tells the reader nothing. Truncate the drawn
- * label and keep the full name in the tooltip and the table view.
- */
-const AXIS_LABEL_MAX = 20;
+/** Line height of the 11px axis label face. */
+const LINE_PX = 13;
 
-const axisLabel = (value: unknown): string => {
+/** Most lines we will stack under one column before giving up on wrapping. */
+const MAX_LABEL_LINES = 4;
+
+/**
+ * Break a subject name across lines so the WHOLE name is readable under its
+ * column. Truncating with an ellipsis still hides half of "Comprehensive
+ * clinical + PHC Practicum II", and a tilted 40-character label runs off the
+ * plot and gets clipped — wrapping is the only option that shows all of it.
+ *
+ * Words move to the next line whole; a single word longer than the line is
+ * split rather than allowed to overflow. Only if the name still will not fit in
+ * `maxLines` does the last line end in an ellipsis, and the full text is always
+ * in the tooltip and the table view.
+ */
+const wrapLabel = (
+  value: unknown,
+  charsPerLine: number,
+  maxLines = MAX_LABEL_LINES,
+): string[] => {
   const text = String(value ?? "").trim();
-  return text.length > AXIS_LABEL_MAX
-    ? `${text.slice(0, AXIS_LABEL_MAX - 1)}…`
-    : text;
+  if (!text) return [""];
+  const width = Math.max(3, Math.floor(charsPerLine));
+  if (text.length <= width) return [text];
+
+  const lines: string[] = [];
+  let current = "";
+  const flush = () => {
+    if (current) lines.push(current);
+    current = "";
+  };
+
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (!current) current = word;
+    else if (current.length + 1 + word.length <= width) current += ` ${word}`;
+    else {
+      flush();
+      current = word;
+    }
+    // Let a slightly-too-long word overhang its slot rather than breaking it:
+    // "Comprehensiv / e" is worse than one character of overlap. Only a word far
+    // wider than the line is split.
+    while (current.length > width * 1.5) {
+      lines.push(current.slice(0, width));
+      current = current.slice(width);
+    }
+  }
+  flush();
+
+  if (lines.length <= maxLines) return lines;
+  const kept = lines.slice(0, maxLines);
+  const last = kept[maxLines - 1] ?? "";
+  kept[maxLines - 1] = `${last.slice(0, Math.max(1, width - 1))}…`;
+  return kept;
 };
 
 /** Plot width, so the tilt decision is made against real pixels. */
@@ -212,55 +255,87 @@ const useMeasuredWidth = () => {
 };
 
 /**
- * Tilt a label only when it cannot sit upright in its slot — a tilted label is
- * easier to read than a truncated one, but flat is easier still, so flat wins
- * whenever it fits.
+ * How the x-axis labels are laid out, decided from the real slot width.
+ *
+ * Upright and wrapped is the most readable, and it shows the whole name, so it
+ * is the default. Tilting is the fallback for slots too narrow to wrap into
+ * (below ~6 characters a line, wrapping produces unreadable stacks of
+ * fragments) — there the diagonal buys horizontal room instead.
  */
 const axisGeometry = (rows: ColumnRow[], plotWidth = 0) => {
-  const longest = rows.reduce(
-    (max, r) => Math.max(max, axisLabel(r.label).length),
-    0,
+  const slotPx =
+    rows.length > 0 && plotWidth > 0 ? plotWidth / rows.length : 0;
+  const longest = rows.reduce((max, r) => Math.max(max, r.label.length), 0);
+
+  // Before the first measurement, assume it fits; the ResizeObserver corrects it.
+  const charsPerLine =
+    slotPx > 0 ? Math.floor((slotPx - 8) / CHAR_PX) : Math.max(longest, 12);
+  const tilt = charsPerLine < 6;
+
+  if (tilt) {
+    // Diagonal: one line, capped so it cannot run off the plot edge.
+    const drawn = Math.min(longest, 24);
+    return {
+      tilt,
+      angle: -35,
+      textAnchor: "end" as const,
+      charsPerLine: drawn,
+      maxLines: 1,
+      // sin(35°) ≈ 0.57, plus the tick gap and descenders.
+      axisHeight: Math.min(150, 30 + drawn * CHAR_PX * 0.62),
+    };
+  }
+
+  const lines = rows.reduce(
+    (max, r) => Math.max(max, wrapLabel(r.label, charsPerLine).length),
+    1,
   );
-  const slotPx = rows.length > 0 && plotWidth > 0 ? plotWidth / rows.length : 0;
-  const tilt =
-    slotPx > 0
-      ? longest * CHAR_PX > slotPx - 10
-      : longest > Math.max(9, Math.floor(72 / Math.max(1, rows.length)) + 6);
   return {
     tilt,
-    angle: tilt ? -35 : 0,
-    textAnchor: tilt ? ("end" as const) : ("middle" as const),
-    /** The card must include the axis band, or the labels get clipped. */
-    // sin(35°) ≈ 0.57, plus room for the tick gap and descenders.
-    axisHeight: tilt ? Math.min(150, 30 + longest * CHAR_PX * 0.62) : 30,
+    angle: 0,
+    textAnchor: "middle" as const,
+    charsPerLine,
+    maxLines: MAX_LABEL_LINES,
+    /** The card must include the whole axis band, or the last line is clipped. */
+    axisHeight: 14 + lines * LINE_PX,
   };
 };
 
-const TiltedTick = ({
+/** Recharts hands ticks x/y as `string | number`, so widen and coerce. */
+const AxisTick = ({
   x,
   y,
   payload,
   angle,
   anchor,
+  charsPerLine,
+  maxLines,
 }: {
-  /** Recharts hands ticks x/y as `string | number`, so widen and coerce. */
   x?: string | number;
   y?: string | number;
   payload?: { value?: string | number };
   angle: number;
   anchor: "end" | "middle";
-}) => (
-  <g transform={`translate(${Number(x) || 0},${Number(y) || 0})`}>
-    <text
-      dy={angle === 0 ? 14 : 10}
-      textAnchor={anchor}
-      transform={`rotate(${angle})`}
-      style={{ fill: INK.secondary, fontSize: 11 }}
-    >
-      {axisLabel(payload?.value)}
-    </text>
-  </g>
-);
+  charsPerLine: number;
+  maxLines: number;
+}) => {
+  const lines = wrapLabel(payload?.value, charsPerLine, maxLines);
+  return (
+    <g transform={`translate(${Number(x) || 0},${Number(y) || 0})`}>
+      <text
+        textAnchor={anchor}
+        transform={`rotate(${angle})`}
+        style={{ fill: INK.secondary, fontSize: 11 }}
+      >
+        {lines.map((line, index) => (
+          <tspan key={line + index} x={0} dy={index === 0 ? 12 : LINE_PX}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
 
 /**
  * Percent columns for one set of entities — one hue per entity.
@@ -297,7 +372,13 @@ const PercentColumns = ({ rows }: { rows: ColumnRow[] }) => {
             tickLine={false}
             axisLine={{ stroke: INK.axis }}
             tick={(props) => (
-              <TiltedTick {...props} angle={geo.angle} anchor={geo.textAnchor} />
+              <AxisTick
+                {...props}
+                angle={geo.angle}
+                anchor={geo.textAnchor}
+                charsPerLine={geo.charsPerLine}
+                maxLines={geo.maxLines}
+              />
             )}
           />
           <YAxis
@@ -523,7 +604,13 @@ const MonthlyColumns = ({
             tickLine={false}
             axisLine={{ stroke: INK.axis }}
             tick={(props) => (
-              <TiltedTick {...props} angle={geo.angle} anchor={geo.textAnchor} />
+              <AxisTick
+                {...props}
+                angle={geo.angle}
+                anchor={geo.textAnchor}
+                charsPerLine={geo.charsPerLine}
+                maxLines={geo.maxLines}
+              />
             )}
           />
           <YAxis
