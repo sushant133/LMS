@@ -1,6 +1,21 @@
+import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.js";
 import { ApiError } from "../utils/apiError.js";
+
+/**
+ * Length-independent constant-time comparison.
+ *
+ * A plain `!==` on the shared device key leaks how many leading characters
+ * matched through response timing, which is enough to recover the key one
+ * character at a time. Both sides are hashed first so `timingSafeEqual` always
+ * gets equal-length buffers and the length itself is not a side channel.
+ */
+const secretsMatch = (provided: string, expected: string): boolean => {
+  const a = crypto.createHash("sha256").update(provided, "utf8").digest();
+  const b = crypto.createHash("sha256").update(expected, "utf8").digest();
+  return crypto.timingSafeEqual(a, b);
+};
 
 /**
  * Device / integration auth for biometric punch ingest.
@@ -30,7 +45,7 @@ export const biometricApiKeyAuth = (req: Request, _res: Response, next: NextFunc
     auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
 
   const provided = (headerKey || bearer).trim();
-  if (!provided || provided !== expected) {
+  if (!provided || !secretsMatch(provided, expected)) {
     next(new ApiError(401, "Invalid or missing biometric API key"));
     return;
   }

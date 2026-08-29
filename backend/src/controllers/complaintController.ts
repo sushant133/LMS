@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
 import {
-  canManageInstitution,
   COMPLAINANT_ROLES,
   createComplaintSchema,
   hasInstitutionAccess,
@@ -16,6 +15,7 @@ import { ApiError } from "../utils/apiError.js";
 import { sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import { actorCanAdministerModule } from "../utils/workspaceScope.js";
 
 type ComplaintLean = {
   _id: Types.ObjectId;
@@ -36,9 +36,16 @@ type ComplaintLean = {
 
 const isComplainantRole = (role: string): boolean => COMPLAINANT_ROLES.includes(normalizeUserRole(role));
 
-const buildComplaintFilter = (req: Request, extra: Record<string, unknown> = {}): Record<string, unknown> => {
+const canAdministerComplaints = async (req: Request): Promise<boolean> =>
+  hasInstitutionAccess(req.user?.role ?? "") ||
+  actorCanAdministerModule(req, "complaints");
+
+const buildComplaintFilter = async (
+  req: Request,
+  extra: Record<string, unknown> = {}
+): Promise<Record<string, unknown>> => {
   const filter = withTenantScope(req, extra);
-  if (!hasInstitutionAccess(req.user?.role ?? "")) {
+  if (!(await canAdministerComplaints(req))) {
     Object.assign(filter, { submittedBy: req.user?.userId });
   }
   return filter;
@@ -98,19 +105,20 @@ const notifyCollegeAdmins = async (req: Request, subject: string, category: stri
 };
 
 export const listComplaints = asyncHandler(async (req: Request, res: Response) => {
-  const canViewAll = hasInstitutionAccess(req.user?.role ?? "");
-  const complaints = await Complaint.find(buildComplaintFilter(req)).sort({ createdAt: -1 }).limit(200).lean();
+  const canViewAll = await canAdministerComplaints(req);
+  const complaints = await Complaint.find(await buildComplaintFilter(req)).sort({ createdAt: -1 }).limit(200).lean();
   const enriched = await enrichComplaints(complaints as ComplaintLean[], canViewAll);
   return sendSuccess(res, "Complaints fetched", enriched);
 });
 
 export const getComplaint = asyncHandler(async (req: Request, res: Response) => {
-  const complaint = await Complaint.findOne(buildComplaintFilter(req, { _id: req.params.id })).lean();
+  const canViewAll = await canAdministerComplaints(req);
+  const complaint = await Complaint.findOne(await buildComplaintFilter(req, { _id: req.params.id })).lean();
   if (!complaint) {
     throw new ApiError(404, "Complaint not found");
   }
 
-  const [enriched] = await enrichComplaints([complaint as ComplaintLean], hasInstitutionAccess(req.user?.role ?? ""));
+  const [enriched] = await enrichComplaints([complaint as ComplaintLean], canViewAll);
   return sendSuccess(res, "Complaint fetched", enriched);
 });
 
@@ -138,7 +146,7 @@ export const createComplaint = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const updateComplaintStatus = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!(await actorCanAdministerModule(req, "complaints"))) {
     throw new ApiError(403, "Only administrators can update complaint status");
   }
 
@@ -180,7 +188,7 @@ export const updateComplaintStatus = asyncHandler(async (req: Request, res: Resp
 });
 
 export const deleteComplaint = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!(await actorCanAdministerModule(req, "complaints"))) {
     throw new ApiError(403, "Only administrators can delete complaints");
   }
 

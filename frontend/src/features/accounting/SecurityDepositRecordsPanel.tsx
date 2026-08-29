@@ -143,6 +143,7 @@ const paymentMethodLabel = (method?: string) =>
 
 const emptyRecordForm = () => ({
   studentId: "",
+  receiptNumber: "",
   securityDepositPaidNpr: "",
   paidDateBs: "",
   paidDateAd: "",
@@ -574,6 +575,11 @@ export const SecurityDepositRecordsPanel = () => {
       toast.error("Enter payment date");
       return;
     }
+    const receiptNumber = recordForm.receiptNumber.trim();
+    if (!receiptNumber) {
+      toast.error("Enter receipt number");
+      return;
+    }
     if (selectedRecordStudent?.securityDepositWaived) {
       toast.error(
         "Security deposit was marked not taken for this student — clear that on the student profile first",
@@ -582,6 +588,7 @@ export const SecurityDepositRecordsPanel = () => {
     }
     recordMutation.mutate({
       studentId: recordForm.studentId,
+      receiptNumber,
       paidDateBs,
       paidDateAd: paidDateAd || undefined,
       programYear: 1,
@@ -1709,6 +1716,19 @@ export const SecurityDepositRecordsPanel = () => {
                     }))
                   }
                   placeholder="Amount actually collected"
+                />
+              </FormField>
+              <FormField label="Receipt no.">
+                <Input
+                  value={recordForm.receiptNumber}
+                  onChange={(e) =>
+                    setRecordForm((f) => ({
+                      ...f,
+                      receiptNumber: e.target.value,
+                    }))
+                  }
+                  placeholder="As printed on the receipt book"
+                  autoComplete="off"
                 />
               </FormField>
               <FormField label="Payment method">

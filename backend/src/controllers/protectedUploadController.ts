@@ -12,6 +12,13 @@ import { logger } from "../utils/logger.js";
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 
 /**
+ * Module directory whose files carry an extra owner/admin ACL
+ * (see serveComplaintAttachment). Tenant isolation alone is not enough there,
+ * so these files must never be reached through the basename fallback below.
+ */
+const RESTRICTED_ACL_DIR = "complaints";
+
+/**
  * Express 5 `{*filePath}` captures as string[] (e.g. ["classroom","file.pdf"]).
  * Older path-to-regexp may use a single slash-joined string.
  */
@@ -148,6 +155,14 @@ const findFileByBasenameUnderSchool = async (
         return full;
       }
       if (entry.isDirectory()) {
+        /**
+         * Never remap a request into the complaints tree. The stricter
+         * complaint ACL only runs when the *requested* path starts with
+         * "complaints"; letting the fallback reach those files would serve
+         * another user's attachment to any same-school account that knows
+         * the filename.
+         */
+        if (entry.name.toLowerCase() === RESTRICTED_ACL_DIR) continue;
         queue.push(full);
       }
     }
@@ -282,6 +297,23 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
   }
 
   const { filePath } = resolved;
+
+  /**
+   * Defense in depth: whatever the requested path looked like, a file that
+   * actually lives under a complaints directory may only be served through
+   * serveComplaintAttachment (owner / institution-admin ACL). Requests that
+   * reach here never ran that check.
+   */
+  if (
+    filePath
+      .split(/[/\\]+/)
+      .some((segment) => segment.toLowerCase() === RESTRICTED_ACL_DIR)
+  ) {
+    logger.warn(
+      `Blocked non-ACL access to complaint attachment: user=${req.user.userId} path=${publicRelative}`,
+    );
+    throw new ApiError(403, "Access denied");
+  }
 
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", "private, max-age=3600");

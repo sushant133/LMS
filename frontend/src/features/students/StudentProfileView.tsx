@@ -26,8 +26,10 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
+import { useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { useNormalizedRole } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
+import { adminScopeParams } from "lib/workspace";
 import {
   getStudentProfileBackLabel,
   getStudentProfileBackPath,
@@ -105,14 +107,17 @@ export const StudentProfileView = () => {
   const { studentId = "" } = useParams();
   const { user } = useAuth();
   const role = useNormalizedRole();
+  const studentAdminView = useIsGrantedAdmin("students");
   const [tab, setTab] = useState<ProfileTab>("overview");
   const [documents, setDocuments] = useState<StudentDocument[]>([]);
 
   const profileQuery = useQuery({
-    queryKey: ["student-profile", studentId],
+    queryKey: ["student-profile", studentId, studentAdminView],
     queryFn: async () => {
       const data = await unwrap<StudentProfileData>(
-        api.get(`/students/${studentId}/profile`),
+        api.get(`/students/${studentId}/profile`, {
+          params: studentAdminView ? adminScopeParams : undefined,
+        }),
       );
       setDocuments(data.student.documents ?? []);
       return data;

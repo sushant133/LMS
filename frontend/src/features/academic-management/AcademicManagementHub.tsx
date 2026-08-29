@@ -12,7 +12,6 @@ import {
   type SubjectAssignmentRecord,
   type SubjectRecord,
   type YearRecord,
-  canManageInstitution,
   hasInstitutionAccess,
 } from "@phit-erp/shared";
 import {
@@ -30,7 +29,7 @@ import { Button } from "components/ui/button";
 import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useModuleAccess } from "hooks/useModuleAccess";
+import { useIsGrantedAdmin, useModuleAccess } from "hooks/useModuleAccess";
 import { getCollegeDisplayName } from "lib/auth";
 import { useWorkspaceMode } from "lib/workspace";
 import { api, unwrap } from "lib/api";
@@ -91,10 +90,10 @@ export const AcademicManagementHub = () => {
   const workspace = useWorkspaceMode();
   /** Administration hub: all teachers' plans / approvals. My Work: own subjects only. */
   const isAdminWorkspace = workspace === "admin";
-  const isTeacher = user?.role === "TEACHER" && !isAdminWorkspace;
-  const isAdmin = canManageInstitution(user?.role ?? "") || isAdminWorkspace;
+  const isAdmin = useIsGrantedAdmin("academic-management");
+  const isTeacher = user?.role === "TEACHER" && !isAdmin;
   const hasInstitutionRead =
-    hasInstitutionAccess(user?.role ?? "") || isAdminWorkspace;
+    hasInstitutionAccess(user?.role ?? "") || isAdmin;
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const institutionName = getCollegeDisplayName(availableSchools, user);
   const { canWrite: canWriteAcademic, isReadOnly: academicReadOnly } =
@@ -570,6 +569,7 @@ export const AcademicManagementHub = () => {
           teacherId={teacherId}
           teachers={teachersQuery.data ?? []}
           writeAccess={canWriteAcademic}
+          isAdminView={isAdmin}
           {...hierarchyProps}
         />
       </div>
@@ -580,6 +580,7 @@ export const AcademicManagementHub = () => {
           teacherId={teacherId}
           teachers={teachersQuery.data ?? []}
           writeAccess={canWriteAcademic}
+          isAdminView={isAdmin}
           {...hierarchyProps}
         />
       </div>
@@ -602,6 +603,7 @@ export const AcademicManagementHub = () => {
           subjects={subjects}
           teachers={teachersQuery.data ?? []}
           writeAccess={canWriteAcademic}
+          isAdminView={isAdmin}
           {...hierarchyProps}
         />
       </div>

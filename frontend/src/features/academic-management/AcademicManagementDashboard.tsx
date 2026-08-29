@@ -7,6 +7,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  LabelList,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -61,6 +63,99 @@ const alertIcon = (type: AcademicTeacherAlert["type"]) => {
       return <BookOpen className="h-4 w-4 text-slate-600" />;
   }
 };
+
+const asNumber = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatPercent = (value: unknown): string => `${Math.round(asNumber(value))}%`;
+
+const shortLabel = (value: unknown, max = 22): string => {
+  const text = String(value ?? "").trim() || "—";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+};
+
+const chartHeight = (count: number): number =>
+  Math.min(560, Math.max(288, count * 48 + 64));
+
+const tooltipStyle = {
+  borderRadius: 12,
+  border: "1px solid #e2e8f0",
+  boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
+  fontSize: 13,
+};
+
+type NamedPercentRow = {
+  label: string;
+  completionPercent: number;
+  remainingPercent: number;
+};
+
+const NamedPercentChart = ({
+  rows,
+  completedColor,
+  remainingColor = "#f59e0b",
+}: {
+  rows: NamedPercentRow[];
+  completedColor: string;
+  remainingColor?: string;
+}) => (
+  <ChartBox height={chartHeight(rows.length)}>
+    <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+      <BarChart
+        layout="vertical"
+        data={rows}
+        margin={{ top: 8, right: 56, left: 8, bottom: 8 }}
+      >
+        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+        <XAxis
+          type="number"
+          domain={[0, 100]}
+          tickFormatter={formatPercent}
+          tick={{ fill: "#64748b", fontSize: 11 }}
+        />
+        <YAxis
+          type="category"
+          dataKey="label"
+          width={156}
+          interval={0}
+          tick={{ fill: "#334155", fontSize: 12 }}
+          tickFormatter={(value) => shortLabel(value)}
+        />
+        <Tooltip
+          formatter={(value, name) => [formatPercent(value), String(name)]}
+          labelFormatter={(label) => String(label)}
+          contentStyle={tooltipStyle}
+        />
+        <Legend />
+        <Bar
+          dataKey="completionPercent"
+          stackId="pct"
+          fill={completedColor}
+          name="Completed %"
+          maxBarSize={22}
+        />
+        <Bar
+          dataKey="remainingPercent"
+          stackId="pct"
+          fill={remainingColor}
+          name="Remaining %"
+          radius={[0, 4, 4, 0]}
+          maxBarSize={22}
+        >
+          <LabelList
+            dataKey="completionPercent"
+            position="right"
+            formatter={(value) => formatPercent(value)}
+            style={{ fill: "#0f172a", fontSize: 11, fontWeight: 600 }}
+          />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  </ChartBox>
+);
 
 const alertLabel = (type: AcademicTeacherAlert["type"]) => {
   switch (type) {
@@ -159,7 +254,7 @@ export const AcademicManagementDashboardPanel = ({
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {statCards.map((card) => {
-          const value = data[card.key as keyof AcademicManagementDashboard];
+          const value = asNumber(data[card.key as keyof AcademicManagementDashboard]);
           const isPercent =
             card.key === "syllabusCompletionPercent" ||
             card.key === "syllabusRemainingPercent";
@@ -180,7 +275,7 @@ export const AcademicManagementDashboardPanel = ({
                       : "text-slate-900"
                   }`}
                 >
-                  {isPercent ? `${value as number}%` : (value as number)}
+                  {isPercent ? `${value}%` : value}
                 </p>
                 {card.key === "syllabusCompletionPercent" ? (
                   <AcademicProgressBar
@@ -206,15 +301,39 @@ export const AcademicManagementDashboardPanel = ({
                 No monthly progress data yet.
               </p>
             ) : (
-              <ChartBox height={288}>
+              <ChartBox height={Math.max(288, (data.monthlyProgress?.length ?? 0) * 28 + 80)}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart data={data.monthlyProgress}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="planned" fill="#94a3b8" name="Planned" />
-                    <Bar dataKey="completed" fill="#0c2d6b" name="Completed" />
+                  <BarChart
+                    data={data.monthlyProgress}
+                    margin={{ top: 24, right: 16, left: 8, bottom: 48 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      type="category"
+                      interval={0}
+                      angle={-35}
+                      textAnchor="end"
+                      height={56}
+                      tick={{ fill: "#334155", fontSize: 11 }}
+                    />
+                    <YAxis allowDecimals={false} tick={{ fill: "#64748b", fontSize: 11 }} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Legend />
+                    <Bar dataKey="planned" fill="#94a3b8" name="Planned" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="planned"
+                        position="top"
+                        style={{ fill: "#475569", fontSize: 11 }}
+                      />
+                    </Bar>
+                    <Bar dataKey="completed" fill="#0c2d6b" name="Completed" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="completed"
+                        position="top"
+                        style={{ fill: "#0f172a", fontSize: 11, fontWeight: 600 }}
+                      />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </ChartBox>
@@ -224,7 +343,7 @@ export const AcademicManagementDashboardPanel = ({
 
         <Card>
           <CardHeader>
-            <CardTitle>Subject Progress (remaining %)</CardTitle>
+            <CardTitle>Subject Progress</CardTitle>
           </CardHeader>
           <CardContent>
             {(data.subjectProgress?.length ?? 0) === 0 ? (
@@ -232,33 +351,23 @@ export const AcademicManagementDashboardPanel = ({
                 No subject progress data yet.
               </p>
             ) : (
-              <ChartBox height={288}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart data={data.subjectProgress}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="subjectName" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip />
-                    <Bar
-                      dataKey="completionPercent"
-                      fill="#2563eb"
-                      name="Completed %"
-                    />
-                    <Bar
-                      dataKey="remainingPercent"
-                      fill="#f59e0b"
-                      name="Remaining %"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartBox>
+              <NamedPercentChart
+                completedColor="#2563eb"
+                rows={(data.subjectProgress ?? []).map((row) => ({
+                  label: row.subjectName?.trim() || "Subject",
+                  completionPercent: asNumber(row.completionPercent),
+                  remainingPercent: asNumber(
+                    row.remainingPercent ?? 100 - asNumber(row.completionPercent),
+                  ),
+                }))}
+              />
             )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Teacher Performance (remaining %)</CardTitle>
+            <CardTitle>Teacher Performance</CardTitle>
           </CardHeader>
           <CardContent>
             {(data.teacherPerformance?.length ?? 0) === 0 ? (
@@ -266,26 +375,16 @@ export const AcademicManagementDashboardPanel = ({
                 No teacher performance data yet.
               </p>
             ) : (
-              <ChartBox height={288}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart data={data.teacherPerformance}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="teacherName" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip />
-                    <Bar
-                      dataKey="completionPercent"
-                      fill="#059669"
-                      name="Completed %"
-                    />
-                    <Bar
-                      dataKey="remainingPercent"
-                      fill="#f59e0b"
-                      name="Remaining %"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartBox>
+              <NamedPercentChart
+                completedColor="#059669"
+                rows={(data.teacherPerformance ?? []).map((row) => ({
+                  label: row.teacherName?.trim() || "Teacher",
+                  completionPercent: asNumber(row.completionPercent),
+                  remainingPercent: asNumber(
+                    row.remainingPercent ?? 100 - asNumber(row.completionPercent),
+                  ),
+                }))}
+              />
             )}
           </CardContent>
         </Card>
@@ -300,22 +399,16 @@ export const AcademicManagementDashboardPanel = ({
                 No syllabus completion data yet.
               </p>
             ) : (
-              <ChartBox height={288}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart data={data.syllabusCompletion}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="subjectName" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip />
-                    <Bar dataKey="percent" fill="#7c3aed" name="Completed %" />
-                    <Bar
-                      dataKey="remainingPercent"
-                      fill="#f59e0b"
-                      name="Remaining %"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartBox>
+              <NamedPercentChart
+                completedColor="#7c3aed"
+                rows={(data.syllabusCompletion ?? []).map((row) => ({
+                  label: row.subjectName?.trim() || "Subject",
+                  completionPercent: asNumber(row.percent),
+                  remainingPercent: asNumber(
+                    row.remainingPercent ?? 100 - asNumber(row.percent),
+                  ),
+                }))}
+              />
             )}
           </CardContent>
         </Card>
@@ -330,26 +423,16 @@ export const AcademicManagementDashboardPanel = ({
                 No faculty progress data yet.
               </p>
             ) : (
-              <ChartBox height={288}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart data={data.facultyProgress}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="faculty" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip />
-                    <Bar
-                      dataKey="completionPercent"
-                      fill="#ea580c"
-                      name="Completed %"
-                    />
-                    <Bar
-                      dataKey="remainingPercent"
-                      fill="#f59e0b"
-                      name="Remaining %"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartBox>
+              <NamedPercentChart
+                completedColor="#ea580c"
+                rows={(data.facultyProgress ?? []).map((row) => ({
+                  label: row.faculty?.trim() || "Faculty",
+                  completionPercent: asNumber(row.completionPercent),
+                  remainingPercent: asNumber(
+                    row.remainingPercent ?? 100 - asNumber(row.completionPercent),
+                  ),
+                }))}
+              />
             )}
           </CardContent>
         </Card>

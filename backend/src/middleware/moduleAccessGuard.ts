@@ -3,9 +3,11 @@ import {
   canAccessExaminationCollege,
   canAccessExaminationCtevt,
   canAccessModule,
+  canEditOrDeleteRecords,
   canWriteExaminationCollege,
   canWriteExaminationCtevt,
   canWriteModule,
+  EDIT_DELETE_ADMIN_ONLY_MESSAGE,
   hasModuleAction,
   inferActionFromApiPath,
   isInstitutionAdmin,
@@ -19,6 +21,7 @@ import {
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { isAssignedFieldCoordinator } from "../utils/fieldDutyService.js";
+import { wantsAdminWorkspaceScope } from "../utils/workspaceScope.js";
 import {
   getUserModuleAccessMap,
   getUserModuleActionsMap,
@@ -29,6 +32,49 @@ import {
 } from "../utils/moduleAccessService.js";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const RECORD_EDIT_DELETE_METHODS = new Set(["PUT", "DELETE"]);
+
+const isOperationalStatusPath = (path: string): boolean =>
+  /\/login-access(\/|$)/i.test(path) ||
+  /\/status(\/|$)/i.test(path) ||
+  /\/inventory-access(\/|$)/i.test(path);
+
+const operationalDepartmentEditRole = (
+  role: string,
+  moduleKey: string | null
+): boolean => {
+  if (role === "LIBRARY_STAFF" && moduleKey === "library") return true;
+  if (role === "LABORATORY_STAFF" && moduleKey === "laboratory") return true;
+  if (
+    (role === "ACCOUNTANT" || role === "CASHIER") &&
+    (moduleKey === "accounts" || moduleKey === "fees")
+  ) {
+    return true;
+  }
+  return false;
+};
+
+/** Granted VP / Principal / staff may create and approve, not edit or delete. */
+const shouldBlockGrantedEditDelete = (
+  req: Request,
+  role: string,
+  isTeacherRole: boolean,
+  moduleKey: string | null
+): boolean => {
+  if (!RECORD_EDIT_DELETE_METHODS.has(req.method)) return false;
+  if (canEditOrDeleteRecords(role)) return false;
+  if (isOperationalStatusPath(req.originalUrl || req.path || "")) return false;
+  if (operationalDepartmentEditRole(role, moduleKey)) return false;
+  if (
+    isTeacherRole &&
+    !wantsAdminWorkspaceScope(req) &&
+    moduleKey &&
+    TEACHER_MY_WORK_MODULE_KEYS.has(moduleKey)
+  ) {
+    return false;
+  }
+  return true;
+};
 
 /**
  * Enforces per-user Module Access Control on all requests.
@@ -102,6 +148,10 @@ export const enforceModuleAccess = async (
             originalPath
           )
         ) {
+          const moduleKey = resolveModuleForRequest(req);
+          if (shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
+            return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
+          }
           return next();
         }
       }
@@ -169,6 +219,16 @@ export const enforceModuleAccess = async (
           return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
         }
       }
+      if (
+        shouldBlockGrantedEditDelete(
+          req,
+          role,
+          req.user.role === "TEACHER",
+          canTeacher ? "teacher-attendance" : "staff-attendance"
+        )
+      ) {
+        return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
+      }
       return next();
     }
 
@@ -221,6 +281,16 @@ export const enforceModuleAccess = async (
           return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
         }
       }
+      if (
+        shouldBlockGrantedEditDelete(
+          req,
+          req.user.role,
+          isTeacherRole,
+          canCollege ? "examinations-college" : "examinations"
+        )
+      ) {
+        return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
+      }
       return next();
     }
 
@@ -249,10 +319,16 @@ export const enforceModuleAccess = async (
             return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
           }
         }
+        if (shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
+          return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
+        }
         return next();
       }
       const isCoord = await isAssignedFieldCoordinator(req);
       if (isCoord) {
+        if (shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
+          return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
+        }
         return next();
       }
       return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
@@ -396,8 +472,11 @@ export const enforceModuleAccess = async (
       return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
     }
 
-    // Teacher My Work WRITE — allow create/edit without granular matrix
+    // Teacher My Work WRITE — allow create (and own-record edit when not Administration)
     if (isTeacherRole && TEACHER_MY_WORK_MODULE_KEYS.has(moduleKey) && mode === "WRITE") {
+      if (shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
+        return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
+      }
       return next();
     }
 
@@ -424,6 +503,10 @@ export const enforceModuleAccess = async (
           )
         );
       }
+    }
+
+    if (shouldBlockGrantedEditDelete(req, role, isTeacherRole, moduleKey)) {
+      return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
     }
 
     return next();

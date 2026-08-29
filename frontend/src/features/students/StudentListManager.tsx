@@ -27,14 +27,14 @@ import { cn } from "lib/utils";
 import { useIsCollege } from "hooks/useInstitutionType";
 import {
   useHasInstitutionAccess,
-  useIsTenantAdmin,
   useNormalizedRole,
 } from "hooks/useNormalizedRole";
+import { useCanEditOrDeleteRecords, useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { useAuth } from "features/auth/AuthProvider";
 import { getCollegeDisplayName } from "lib/auth";
 import { userIsTeacher } from "lib/teacherRole";
-import { adminScopeParams, isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
+import { adminScopeParams } from "lib/workspace";
 import {
   filterSectionsByClass,
   filterYearsByBatch,
@@ -112,14 +112,13 @@ export const StudentListManager = () => {
   const role = useNormalizedRole();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
-  const isAdmin = useIsTenantAdmin();
-  const workspace = useWorkspaceMode();
-  const adminWorkspace =
-    workspace === "admin" && (isAdmin || isDualRoleTeacher(user));
+  const grantedStudentAdmin = useIsGrantedAdmin("students");
+  const adminWorkspace = grantedStudentAdmin;
   const hasInstitutionRead = useHasInstitutionAccess() || adminWorkspace;
   const isTeacher =
     (userIsTeacher(user) || role === "TEACHER") && !adminWorkspace;
-  const canManage = isAdmin || adminWorkspace;
+  const canManage = grantedStudentAdmin;
+  const canEditDelete = useCanEditOrDeleteRecords();
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -966,6 +965,7 @@ export const StudentListManager = () => {
                               </Button>
                               {canManage ? (
                                 <>
+                                  {canEditDelete ? (
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -974,6 +974,7 @@ export const StudentListManager = () => {
                                   >
                                     Edit
                                   </Button>
+                                  ) : null}
                                   {student.user?._id ? (
                                     <>
                                       <Button
@@ -1042,6 +1043,7 @@ export const StudentListManager = () => {
                                       )}
                                     </>
                                   ) : null}
+                                  {canEditDelete ? (
                                   <Button
                                     variant="destructive"
                                     size="sm"
@@ -1061,6 +1063,7 @@ export const StudentListManager = () => {
                                   >
                                     Delete
                                   </Button>
+                                  ) : null}
                                 </>
                               ) : null}
                             </div>

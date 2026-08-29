@@ -73,10 +73,63 @@ const actionsFromUserDoc = (raw: unknown): ModuleActionsMap => {
   return {};
 };
 
+/**
+ * Fields every permission lookup needs, cached briefly per user.
+ *
+ * `protect` → `enforceModuleAccess` → `authorize` each used to re-read the same
+ * User document, so a single authenticated request issued four to six identical
+ * findById queries before the controller ran. That is pure amplification: it
+ * multiplies database load per request and makes the app easier to overwhelm.
+ *
+ * The TTL is deliberately tiny (one second) so it only ever collapses the
+ * lookups *within* one request, and every write path calls
+ * `invalidatePermissionCache` so an admin's permission change still takes
+ * effect on the user's very next request.
+ */
+interface PermissionUserFields {
+  role?: string;
+  moduleAccess?: unknown;
+  moduleActions?: unknown;
+  secondaryRoles?: UserRole[];
+}
+
+const PERMISSION_CACHE_TTL_MS = 1000;
+const permissionCache = new Map<string, { expiresAt: number; value: PermissionUserFields | null }>();
+
+/** Drop a user's cached permission fields (call after any permission write). */
+export const invalidatePermissionCache = (userId?: string | null): void => {
+  if (!userId) {
+    permissionCache.clear();
+    return;
+  }
+  permissionCache.delete(String(userId));
+};
+
+const loadPermissionUser = async (userId: string): Promise<PermissionUserFields | null> => {
+  const key = String(userId);
+  const now = Date.now();
+  const hit = permissionCache.get(key);
+  if (hit && hit.expiresAt > now) {
+    return hit.value;
+  }
+
+  const user = (await User.findById(userId)
+    .select("moduleAccess moduleActions role secondaryRoles")
+    .lean()) as PermissionUserFields | null;
+
+  // Keep the map from growing without bound on long-lived processes.
+  if (permissionCache.size > 5000) {
+    for (const [cachedKey, cached] of permissionCache) {
+      if (cached.expiresAt <= now) permissionCache.delete(cachedKey);
+    }
+  }
+
+  permissionCache.set(key, { expiresAt: now + PERMISSION_CACHE_TTL_MS, value: user });
+  return user;
+};
+
 export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAccessMap> => {
-  const user = await User.findById(userId)
-    .select("moduleAccess role secondaryRoles")
-    .lean();
+  const user = await loadPermissionUser(userId);
   if (!user) return {};
   // Super Admin: unrestricted (empty map → legacy full WRITE via resolveModuleAccessMode)
   if (isModuleAccessUnrestricted(user.role as string)) {
@@ -97,14 +150,14 @@ export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAcce
 };
 
 export const getUserModuleActionsMap = async (userId: string): Promise<ModuleActionsMap> => {
-  const user = await User.findById(userId).select("moduleActions role").lean();
+  const user = await loadPermissionUser(userId);
   if (!user) return {};
   if (isModuleAccessUnrestricted(user.role as string)) return {};
   return actionsFromUserDoc(user.moduleActions);
 };
 
 export const getUserSecondaryRoles = async (userId: string): Promise<UserRole[]> => {
-  const user = await User.findById(userId).select("secondaryRoles").lean();
+  const user = await loadPermissionUser(userId);
   if (!user?.secondaryRoles?.length) return [];
   return user.secondaryRoles as UserRole[];
 };
@@ -226,6 +279,20 @@ export const updateUserModuleAccess = async (
     throw new ApiError(400, "Module access cannot be restricted for System Administrator accounts");
   }
 
+  /**
+   * No self-granting. "User Management" WRITE is a delegated grant, so without
+   * this a staff account holding it could PUT its own id and switch every
+   * module to WRITE — turning one delegated permission into full ERP access.
+   * Administrators pass authorize() on role alone and manage other accounts,
+   * so nothing legitimate needs to edit its own permission matrix here.
+   */
+  if (req.user?.userId && String(req.user.userId) === String(user._id)) {
+    throw new ApiError(
+      403,
+      "You cannot change your own department access. Ask an Administrator to make this change."
+    );
+  }
+
   // Only Super Admin may assign module access to Administrator (COLLEGE_ADMIN) accounts
   if (targetRole === "COLLEGE_ADMIN") {
     if (req.user?.role !== "SUPER_ADMIN") {
@@ -278,6 +345,9 @@ export const updateUserModuleAccess = async (
   }
 
   await user.save();
+  // Permission fields just changed — drop the short-lived read cache so the
+  // very next request for this account sees the new matrix.
+  invalidatePermissionCache(userId);
 
   let afterAccess = mapFromUserDoc(user.moduleAccess);
   const afterActions = actionsFromUserDoc(user.moduleActions);

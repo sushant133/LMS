@@ -771,60 +771,69 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
 }> = [
   {
     id: "people",
-    title: "People",
-    description: "Who they can manage in the directory",
+    title: "People directory",
+    description: "College-wide lists (not a teacher’s own class list)",
     keys: ["students", "teachers", "staff", "parents"]
   },
   {
     id: "academics",
-    title: "Academics",
-    description: "Classes, subjects, plans, and exams",
+    title: "Academic administration",
+    description: "Structure, assignments, plans, timetable, and exams for the whole college",
     keys: [
       "academic-structure",
-      "academics",
       "subject-assignment",
       "academic-management",
-      "academic-calendar",
       "timetable",
       "examinations-college",
-      "examinations-ctevt",
-      "results",
-      "homework"
+      "examinations-ctevt"
     ]
   },
   {
     id: "attendance",
-    title: "Attendance & field",
+    title: "HR attendance & field",
     description:
-      "Daily / subject attendance and Field Management. Set Field Management to Manage for full staff control of postings, rosters, and attendance.",
-    keys: [
-      "attendance",
-      "daily-attendance",
-      "teacher-attendance",
-      "staff-attendance",
-      "field-duty"
-    ]
+      "Teacher/staff attendance sheets and Field Management. Classroom attendance stays in the teacher’s My Work menu.",
+    keys: ["teacher-attendance", "staff-attendance", "field-duty"]
   },
   {
     id: "campus",
     title: "Campus services",
-    description: "Library, lab, transport, notices",
-    keys: ["library", "laboratory", "inventory", "transport", "notices", "banners"]
+    description: "Library and lab consoles, transport, notices",
+    keys: ["library", "laboratory", "transport", "notices", "banners"]
   },
   {
     id: "finance",
     title: "Finance & HR",
-    description:
-      "Accounting console needs Accounts (Manage). Student fee pickers work automatically with Accounts; Fees/HR are separate modules.",
+    description: "Accounting, finance archive, fees, and payroll",
     keys: ["accounts", "finance-management", "fees", "hr"]
   },
   {
     id: "system",
     title: "Reports & settings",
-    description: "Institution reports and configuration",
-    keys: ["reports", "settings", "user-management", "complaints"]
+    description: "Institution reports, settings, and complaints",
+    keys: ["reports", "settings", "complaints"]
   }
 ];
+
+/**
+ * Extra Administration modules an admin typically turns on for a teacher
+ * (Principal / Vice Principal / Coordinator). Teaching tools are not listed.
+ */
+export const MODULE_ACCESS_TEACHER_EXTRA_GROUPS: Array<{
+  id: string;
+  title: string;
+  description: string;
+  keys: ErpModuleKey[];
+}> = MODULE_ACCESS_UI_GROUPS.map((group) => ({
+  ...group,
+  keys: group.keys.filter(
+    (key) =>
+      (EXTRA_ADMIN_MODULE_KEYS as readonly string[]).includes(key) &&
+      key !== "hostel" &&
+      key !== "user-management" &&
+      key !== "inventory"
+  )
+})).filter((group) => group.keys.length > 0);
 
 export const resolveModuleAccessMode = (
   map: ModuleAccessMap | null | undefined,

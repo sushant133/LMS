@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ERP_MODULES,
+  EXTRA_ADMIN_MODULE_KEYS,
   LEADERSHIP_DESIGNATIONS,
+  MODULE_ACCESS_TEACHER_EXTRA_GROUPS,
   MODULE_ACCESS_UI_GROUPS,
   TEACHER_BASELINE_MODULE_KEYS,
   buildPresetModuleAccess,
@@ -11,7 +13,17 @@ import {
   type ModulePermissionAction,
   type UserRole,
 } from "@phit-erp/shared";
-import { Check, Eye, EyeOff, Lock, Save, Shield, Sparkles } from "lucide-react";
+import {
+  BookOpen,
+  Briefcase,
+  Check,
+  Eye,
+  EyeOff,
+  Lock,
+  Save,
+  Shield,
+  Sparkles,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
@@ -98,11 +110,87 @@ const SECONDARY_ROLE_OPTIONS: Array<{ value: UserRole; label: string; hint: stri
   { value: "PRINCIPAL", label: "Principal portal", hint: "Principal dashboard" },
 ];
 
+const ROW_COPY: Partial<Record<ErpModuleKey, { label: string; hint: string }>> = {
+  staff: {
+    label: "Staff Management",
+    hint: "College Staff page — office staff and the Teachers tab",
+  },
+  teachers: {
+    label: "Teachers",
+    hint: "Create and edit teachers (Staff Management → Teachers)",
+  },
+  parents: {
+    label: "Parent Management",
+    hint: "Link parents to students",
+  },
+  "academic-structure": {
+    label: "Academic Structure",
+    hint: "Batches, years, classes, and subjects",
+  },
+  "examinations-college": {
+    label: "Examination Management — College",
+    hint: "College exams, routines, marks, and results",
+  },
+  "examinations-ctevt": {
+    label: "Examination Management — CTEVT",
+    hint: "CTEVT registration and exam fees",
+  },
+  "teacher-attendance": {
+    label: "Teacher Attendance",
+    hint: "HR sheet for teaching staff (not classroom attendance)",
+  },
+  "staff-attendance": {
+    label: "Staff Attendance",
+    hint: "HR sheet for office staff",
+  },
+  "field-duty": {
+    label: "Field Management",
+    hint: "Field postings, hospital rosters, and field attendance",
+  },
+  accounts: {
+    label: "Accounting",
+    hint: "Journals, ledgers, and fee collection",
+  },
+  "finance-management": {
+    label: "Finance Management",
+    hint: "Institution finance archive (separate from Accounting)",
+  },
+  fees: { label: "Fee structures", hint: "Fee types and structures" },
+  hr: { label: "HR & Payroll", hint: "Leave and salary" },
+  library: { label: "Library Management", hint: "Full library console" },
+  laboratory: { label: "Laboratory Management", hint: "Full laboratory console" },
+  transport: { label: "Transport", hint: "Routes and vehicles" },
+  banners: { label: "Banners", hint: "Dashboard banners" },
+  reports: { label: "Reports", hint: "Exports and IEMIS reports" },
+  settings: { label: "Settings", hint: "Institution settings" },
+  complaints: { label: "Complaints", hint: "Complaint management" },
+};
+
+const LEADERSHIP_PRESET_KEYS: ErpModuleKey[] = [
+  "teachers",
+  "staff",
+  "academic-structure",
+  "examinations-college",
+  "teacher-attendance",
+  "staff-attendance",
+  "reports",
+];
+
+const TEACHING_MY_WORK_PREVIEW = [
+  "My Students",
+  "My Attendance",
+  "My Examinations",
+  "Session / Lesson / Log Book",
+  "Assignments",
+  "My Timetable",
+  "Notices",
+];
+
 const moduleLabel = (key: ErpModuleKey): string =>
-  ERP_MODULES.find((m) => m.key === key)?.label ?? key;
+  ROW_COPY[key]?.label ?? ERP_MODULES.find((m) => m.key === key)?.label ?? key;
 
 const moduleDescription = (key: ErpModuleKey): string =>
-  ERP_MODULES.find((m) => m.key === key)?.description ?? "";
+  ROW_COPY[key]?.hint ?? ERP_MODULES.find((m) => m.key === key)?.description ?? "";
 
 export const ModuleAccessControlPanel = ({
   userId,
@@ -207,34 +295,83 @@ export const ModuleAccessControlPanel = ({
   });
 
   const configured = Boolean(accessQuery.data?.configured);
-  const groups = accessQuery.data?.groups?.length
-    ? accessQuery.data.groups
-    : MODULE_ACCESS_UI_GROUPS;
+  const groups = isPrimaryTeacher
+    ? MODULE_ACCESS_TEACHER_EXTRA_GROUPS
+    : accessQuery.data?.groups?.length
+      ? accessQuery.data.groups
+      : MODULE_ACCESS_UI_GROUPS;
 
   const setMode = (key: string, mode: ModuleAccessMode) => {
     setDirty(true);
     setDraftAccess((current) => ({ ...current, [key]: mode }));
   };
 
+  const setGroupMode = (keys: ErpModuleKey[], mode: ModuleAccessMode) => {
+    setDirty(true);
+    setDraftAccess((current) => {
+      const next = { ...current };
+      for (const key of keys) next[key] = mode;
+      return next;
+    });
+  };
+
   const applyQuickStart = (preset: "NO_ACCESS" | "READ_ONLY" | "FULL_ACCESS") => {
     setDirty(true);
     if (preset === "NO_ACCESS" && (isPrimaryTeacher || secondaryRoles.includes("TEACHER"))) {
-      // Never wipe teaching tools for teacher accounts with "No access" quick start
       setDraftAccess(buildTeacherBaselineModuleAccess());
       return;
     }
     setDraftAccess(buildPresetModuleAccess(preset));
   };
 
-  const enabledModules = useMemo(() => {
-    return ERP_MODULES.filter((m) => {
-      if (m.key === "dashboard" || m.key === "profile" || m.key === "hostel") {
+  const applyLeadershipPreset = () => {
+    setDirty(true);
+    setDraftAccess((current) => {
+      const next = {
+        ...buildTeacherBaselineModuleAccess(),
+        ...current,
+      };
+      for (const key of EXTRA_ADMIN_MODULE_KEYS) {
+        if (key === "hostel" || key === "user-management" || key === "inventory") {
+          next[key] = "NONE";
+          continue;
+        }
+        next[key] = LEADERSHIP_PRESET_KEYS.includes(key) ? "WRITE" : "NONE";
+      }
+      return next;
+    });
+  };
+
+  const extraEnabled = useMemo(() => {
+    return (EXTRA_ADMIN_MODULE_KEYS as readonly ErpModuleKey[]).filter((key) => {
+      if (key === "hostel" || key === "user-management" || key === "inventory") {
         return false;
       }
-      const mode = draftAccess[m.key] ?? "NONE";
+      const mode = draftAccess[key] ?? "NONE";
       return mode === "WRITE" || mode === "READ_ONLY";
     });
   }, [draftAccess]);
+
+  const enabledModules = useMemo(() => {
+    const keys = isPrimaryTeacher
+      ? extraEnabled
+      : ERP_MODULES.filter((m) => {
+          if (
+            m.key === "dashboard" ||
+            m.key === "profile" ||
+            m.key === "hostel"
+          ) {
+            return false;
+          }
+          const mode = draftAccess[m.key] ?? "NONE";
+          return mode === "WRITE" || mode === "READ_ONLY";
+        }).map((m) => m.key as ErpModuleKey);
+    return keys.map((key) => ({
+      key,
+      label: moduleLabel(key),
+      mode: (draftAccess[key] ?? "NONE") as ModuleAccessMode,
+    }));
+  }, [draftAccess, extraEnabled, isPrimaryTeacher]);
 
   const counts = useMemo(() => {
     let manage = 0;
@@ -303,15 +440,15 @@ export const ModuleAccessControlPanel = ({
             <p className="mt-1 max-w-2xl text-sm text-slate-600">
               {userName ? (
                 <>
-                  Choose which admin sections <strong>{userName}</strong> can open
-                  on their login. Only sections set to <strong>View</strong> or{" "}
-                  <strong>Manage</strong> appear in their menu.
+                  Three steps: set their <strong>job title</strong>, keep teaching
+                  tools as they are, then turn on extra{" "}
+                  <strong>Administration</strong> sections for{" "}
+                  <strong>{userName}</strong>.
                 </>
               ) : (
                 <>
-                  Choose which admin sections this person can open. Only sections
-                  set to <strong>View</strong> or <strong>Manage</strong> appear
-                  in their menu.
+                  Set job title, then turn on only the Administration sections
+                  they should see. Hidden sections do not appear in their menu.
                 </>
               )}
             </p>
@@ -331,134 +468,197 @@ export const ModuleAccessControlPanel = ({
 
         {!configured ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            <p className="font-medium">Access not customized yet</p>
+            <p className="font-medium">Not saved yet</p>
             <p className="mt-1 text-amber-900/90">
               {isPrimaryTeacher
-                ? "This is a teacher account. Teaching tools (syllabus, plans, attendance, homework, etc.) stay available. Turn on View/Manage only for extra admin sections they need. Job title (e.g. Principal) is display-only."
+                ? "Teaching tools stay on. Use the Administration list below only for extra college duties (for example Vice Principal). Job title is a name tag — it does not open any menu by itself."
                 : accessQuery.data?.role === "COLLEGE_ADMIN"
-                  ? "This Administrator currently has full access from their role. Save the options below to limit which ERP sections they can open. Until you save, nothing is restricted."
-                  : "Right now they only see menus from their job role. Save the options below to control exactly which admin sections they get. If they also teach, enable “Also teaches” under Advanced."}
+                  ? "This Administrator currently has full access. Save below to limit which sections they can open."
+                  : "They currently see menus from their job role only. Save below to add or limit Administration sections."}
             </p>
           </div>
         ) : (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
-            <p className="font-medium">Custom access is active</p>
+            <p className="font-medium">Saved access is active</p>
             <p className="mt-1 text-emerald-900/90">
-              {isPrimaryTeacher || secondaryRoles.includes("TEACHER")
-                ? "Admin sections you enable appear in their menu. Teaching tools stay available for teacher accounts even when job title is Principal."
-                : accessQuery.data?.role === "COLLEGE_ADMIN"
-                  ? "This Administrator’s menu and API access only include the sections you allow below (plus dashboard and profile)."
-                  : "Their menu only includes the sections you allow below (plus their personal tools such as dashboard and profile)."}
+              They must refresh or sign in again to see menu changes.
             </p>
           </div>
         )}
       </CardHeader>
 
       <CardContent className="space-y-6">
-        <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Job title
-            </label>
-            <Select
-              value={designation}
-              disabled={readOnly}
-              onChange={(event) => {
-                setDirty(true);
-                setDesignation(event.target.value);
-              }}
-            >
-              <option value="">— Not set —</option>
-              {(
-                accessQuery.data?.leadershipDesignations ??
-                LEADERSHIP_DESIGNATIONS
-              ).map((label) => (
-                <option key={label} value={label}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-            {designation === "Other" ? (
-              <Input
-                className="mt-2"
-                placeholder="Custom title"
-                value={customDesignation}
+        <section className="rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Step 1 · Who they are
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="mb-1 text-sm font-medium text-slate-700">
+                Account role
+              </p>
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                {primaryRole.replaceAll("_", " ") || "—"}
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Job title (name tag only)
+              </label>
+              <Select
+                value={designation}
                 disabled={readOnly}
                 onChange={(event) => {
                   setDirty(true);
-                  setCustomDesignation(event.target.value);
+                  setDesignation(event.target.value);
                 }}
-              />
-            ) : null}
-            <p className="mt-1 text-xs text-slate-500">
-              Shown on their profile and login (e.g. Vice Principal). Does not
-              grant permissions by itself — turn on sections below.
-            </p>
+              >
+                <option value="">— Not set —</option>
+                {(
+                  accessQuery.data?.leadershipDesignations ??
+                  LEADERSHIP_DESIGNATIONS
+                ).map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+              {designation === "Other" ? (
+                <Input
+                  className="mt-2"
+                  placeholder="Custom title"
+                  value={customDesignation}
+                  disabled={readOnly}
+                  onChange={(event) => {
+                    setDirty(true);
+                    setCustomDesignation(event.target.value);
+                  }}
+                />
+              ) : null}
+            </div>
           </div>
-          <div className="flex flex-col justify-center text-sm text-slate-600">
-            <p>
-              Current title:{" "}
-              <strong className="text-slate-900">
-                {designation === "Other"
-                  ? customDesignation.trim() || "Custom"
-                  : designation.trim() || "Not set"}
-              </strong>
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Save access after changing the title or any section.
-            </p>
-          </div>
-        </div>
+          <p className="mt-2 text-xs text-amber-800">
+            Vice Principal / Principal / Coordinator does <strong>not</strong>{" "}
+            open Administration by itself. Turn on sections in step 3.
+          </p>
+        </section>
 
-        {/* Quick start */}
-        {!readOnly ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-xs font-medium uppercase tracking-wide text-slate-500">
-              Quick start
-            </span>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => applyQuickStart("NO_ACCESS")}
-            >
-              <Lock className="mr-1.5 h-3.5 w-3.5" />
-              Start from none
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => applyQuickStart("READ_ONLY")}
-            >
-              <Eye className="mr-1.5 h-3.5 w-3.5" />
-              View everything
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => applyQuickStart("FULL_ACCESS")}
-            >
-              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-              Full access
-            </Button>
-          </div>
+        {isPrimaryTeacher || secondaryRoles.includes("TEACHER") ? (
+          <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-sky-800">
+              <BookOpen className="h-3.5 w-3.5" />
+              Step 2 · Teaching (My Work) — always on
+            </p>
+            <p className="mt-2 text-sm text-sky-950">
+              They keep their own teaching menu. You do not turn these off here.
+            </p>
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {TEACHING_MY_WORK_PREVIEW.map((label) => (
+                <li
+                  key={label}
+                  className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-sky-900 ring-1 ring-sky-100"
+                >
+                  {label}
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
-        {/* Note */}
-        <div className="flex flex-wrap gap-4 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-          {MODE_OPTIONS.map((opt) => {
-            const Icon = opt.icon;
-            return (
-              <span key={opt.value} className="inline-flex items-center gap-1.5">
-                <Icon className="h-3.5 w-3.5" />
-                <strong className="text-slate-800">{opt.label}</strong>
-                <span className="text-slate-500">— {opt.hint}</span>
+        <section className="space-y-3">
+          <div>
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <Briefcase className="h-3.5 w-3.5" />
+              {isPrimaryTeacher
+                ? "Step 3 · Extra Administration"
+                : "Administration sections"}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              <strong>Off</strong> = hidden. <strong>View</strong> = read only.{" "}
+              <strong>Manage</strong> = can change. Only View/Manage appear in
+              their Administration menu.
+            </p>
+            {isPrimaryTeacher ? (
+              <p className="mt-1 text-xs text-slate-500">
+                If you turn on <strong>any</strong> section below, they also get
+                separate Administration screens for Student Management, Academic
+                Management (approvals), and Timetable Management — in addition to
+                My Work.
+              </p>
+            ) : null}
+          </div>
+
+          {!readOnly ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Quick start
               </span>
-            );
-          })}
-        </div>
+              {isPrimaryTeacher ? (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyQuickStart("NO_ACCESS")}
+                  >
+                    <Lock className="mr-1.5 h-3.5 w-3.5" />
+                    Teacher only
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyLeadershipPreset()}
+                  >
+                    <Shield className="mr-1.5 h-3.5 w-3.5" />
+                    Typical VP / Principal
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => applyQuickStart("NO_ACCESS")}
+                >
+                  <Lock className="mr-1.5 h-3.5 w-3.5" />
+                  Start from none
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => applyQuickStart("READ_ONLY")}
+              >
+                <Eye className="mr-1.5 h-3.5 w-3.5" />
+                View everything
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => applyQuickStart("FULL_ACCESS")}
+              >
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                Full access
+              </Button>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-4 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+            {MODE_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              return (
+                <span key={opt.value} className="inline-flex items-center gap-1.5">
+                  <Icon className="h-3.5 w-3.5" />
+                  <strong className="text-slate-800">{opt.label}</strong>
+                  <span className="text-slate-500">— {opt.hint}</span>
+                </span>
+              );
+            })}
+          </div>
+        </section>
 
         {/* Grouped modules */}
         <div className="space-y-4">
@@ -467,11 +667,44 @@ export const ModuleAccessControlPanel = ({
               key={group.id}
               className="overflow-hidden rounded-2xl border border-slate-200"
             >
-              <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  {group.title}
-                </h3>
-                <p className="text-xs text-slate-500">{group.description}</p>
+              <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {group.title}
+                  </h3>
+                  <p className="text-xs text-slate-500">{group.description}</p>
+                </div>
+                {!readOnly ? (
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setGroupMode(group.keys, "NONE")}
+                    >
+                      All off
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setGroupMode(group.keys, "READ_ONLY")}
+                    >
+                      All view
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setGroupMode(group.keys, "WRITE")}
+                    >
+                      All manage
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <ul className="divide-y divide-slate-100">
                 {group.keys.map((key) => {
@@ -554,39 +787,78 @@ export const ModuleAccessControlPanel = ({
           ))}
         </div>
 
-        {/* Live preview of what they will see */}
         <div className="rounded-2xl border border-brand-100 bg-brand-50/40 px-4 py-3">
           <p className="text-sm font-semibold text-slate-900">
-            What they will see in the menu
+            Preview of their menu after save
           </p>
-          {enabledModules.length === 0 ? (
-            <p className="mt-1 text-sm text-slate-600">
-              No admin sections yet — only their normal role tools (dashboard,
-              profile, etc.).
-            </p>
-          ) : (
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {enabledModules.map((m) => {
-                const mode = draftAccess[m.key] ?? "NONE";
-                return (
-                  <li
-                    key={m.key}
-                    className={cn(
-                      "rounded-full px-2.5 py-1 text-xs font-medium",
-                      mode === "WRITE"
-                        ? "bg-emerald-100 text-emerald-900"
-                        : "bg-amber-100 text-amber-950",
-                    )}
-                  >
-                    {m.label}
-                    <span className="ml-1 opacity-70">
-                      · {mode === "WRITE" ? "manage" : "view"}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <div
+            className={cn(
+              "mt-3 grid gap-4",
+              isPrimaryTeacher || secondaryRoles.includes("TEACHER")
+                ? "sm:grid-cols-2"
+                : "",
+            )}
+          >
+            {isPrimaryTeacher || secondaryRoles.includes("TEACHER") ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  My Work
+                </p>
+                <ul className="mt-2 flex flex-wrap gap-1.5">
+                  {TEACHING_MY_WORK_PREVIEW.map((label) => (
+                    <li
+                      key={label}
+                      className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-900"
+                    >
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Administration
+              </p>
+              {enabledModules.length === 0 && extraEnabled.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-600">
+                  None yet — only their normal job menu.
+                </p>
+              ) : (
+                <ul className="mt-2 flex flex-wrap gap-1.5">
+                  {isPrimaryTeacher && extraEnabled.length > 0 ? (
+                    <>
+                      <li className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-900">
+                        Student Management
+                      </li>
+                      <li className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-900">
+                        Academic Management
+                      </li>
+                      <li className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-900">
+                        Timetable Management
+                      </li>
+                    </>
+                  ) : null}
+                  {enabledModules.map((m) => (
+                    <li
+                      key={m.key}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-xs font-medium",
+                        m.mode === "WRITE"
+                          ? "bg-emerald-100 text-emerald-900"
+                          : "bg-amber-100 text-amber-950",
+                      )}
+                    >
+                      {m.label}
+                      <span className="ml-1 opacity-70">
+                        · {m.mode === "WRITE" ? "manage" : "view"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Advanced */}

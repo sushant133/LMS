@@ -4,6 +4,7 @@ import type {
   AttendanceRegisterRowSummary,
 } from "@phit-erp/shared";
 import { getPrintInstitutionBranding } from "lib/printBranding";
+import { csvCell } from "lib/csvCell";
 
 export const REGISTER_CODE_COLORS: Record<string, string> = {
   P: "bg-emerald-100 text-emerald-800",
@@ -120,10 +121,9 @@ export const buildRegisterCsv = (data: AttendanceRegisterResponse): string => {
   return lines.join("\n");
 };
 
-const csvEscape = (value: string): string => {
-  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
-};
+// csvCell also neutralizes leading =/@/+/- so exported names and remarks
+// cannot execute as a spreadsheet formula when the file is opened.
+const csvEscape = (value: string): string => csvCell(value);
 
 export const downloadTextFile = (
   content: string,

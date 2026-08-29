@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  canManageInstitution,
   DAYS_OF_WEEK,
   TIMETABLE_BREAK_LABELS,
   TIMETABLE_ROOM_KINDS,
@@ -29,6 +28,7 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { useCanEditOrDeleteRecords, useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
@@ -50,7 +50,7 @@ import {
   type ScopeOption,
 } from "lib/teacherScopeUtils";
 import { cn, parseErrorMessage } from "lib/utils";
-import { useWorkspaceMode } from "lib/workspace";
+
 import { SESSION_COLORS, SESSION_LABELS } from "./timetableColors";
 import { TimetablePrintView } from "./TimetablePrintView";
 import {
@@ -116,14 +116,13 @@ const isProgramYear = (year: ScopeOption & { level?: number; name?: string }) =>
 
 export const TimetableManager = () => {
   const { user } = useAuth();
-  const workspace = useWorkspaceMode();
-  const adminWorkspace = workspace === "admin";
+  const isAdmin = useIsGrantedAdmin("timetable");
+  const canEditDelete = useCanEditOrDeleteRecords();
   const isTeacher =
     (user?.role === "TEACHER" ||
       (user?.secondaryRoles ?? []).includes("TEACHER")) &&
-    !adminWorkspace;
+    !isAdmin;
   const isStudent = user?.role === "STUDENT";
-  const isAdmin = canManageInstitution(user?.role ?? "") || adminWorkspace;
   const canWrite = isAdmin || isTeacher;
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
@@ -1325,7 +1324,7 @@ export const TimetableManager = () => {
                         Add period
                       </Button>
                     ) : null}
-                    {isAdmin && table.slots.length > 0 && viewMode === "group" ? (
+                    {canEditDelete && table.slots.length > 0 && viewMode === "group" ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -1361,8 +1360,8 @@ export const TimetableManager = () => {
                   ) : (
                     <WeeklyTimetableGrid
                       matrix={matrix}
-                      onEditSlot={canWrite ? startEdit : undefined}
-                      onDeleteSlot={canWrite ? handleDeleteSlot : undefined}
+                      onEditSlot={canEditDelete ? startEdit : undefined}
+                      onDeleteSlot={canEditDelete ? handleDeleteSlot : undefined}
                       onChangePeriodTime={
                         isAdmin && viewMode === "group"
                           ? (period) =>

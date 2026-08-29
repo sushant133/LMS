@@ -5,6 +5,7 @@ import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherLabAccess } from "hooks/useTeacherLabAccess";
 import { getRoleRedirectPath } from "lib/auth";
 import { normalizeUserRole } from "@phit-erp/shared";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
 
 /**
@@ -15,6 +16,7 @@ export const LaboratoryPage = () => {
   const { user } = useAuth();
   const workspace = useWorkspaceMode();
   const role = user ? normalizeUserRole(user.role) : null;
+  const staffGranted = useCanManageGrantedModule("laboratory");
   const isTeacher = role === "TEACHER" && workspace !== "admin";
   const labAccessQuery = useTeacherLabAccess(isTeacher);
 
@@ -22,7 +24,7 @@ export const LaboratoryPage = () => {
     workspace === "admin" &&
     role === "TEACHER" &&
     !isDualRoleTeacher(user) &&
-    role !== "LABORATORY_STAFF"
+    !staffGranted
   ) {
     return (
       <Navigate

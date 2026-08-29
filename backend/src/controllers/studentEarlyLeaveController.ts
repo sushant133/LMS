@@ -8,6 +8,7 @@ import {
   studentEarlyLeaveUpdateSchema,
   type ModuleAccessMap
 } from "@phit-erp/shared";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import { StudentEarlyLeave } from "../models/StudentEarlyLeave.js";
 import { Student } from "../models/Student.js";
 import { DailyAttendance } from "../models/DailyAttendance.js";
@@ -243,7 +244,9 @@ export const listStudentEarlyLeaves = asyncHandler(async (req: Request, res: Res
     filter.sectionId = req.query.sectionId.trim();
   }
   if (typeof req.query.reason === "string" && req.query.reason.trim()) {
-    filter.reason = { $regex: req.query.reason.trim(), $options: "i" };
+    // Escape before building $regex — a raw term lets the caller inject regex
+    // metacharacters and stall the query (ReDoS).
+    filter.reason = { $regex: escapeRegex(req.query.reason.trim()), $options: "i" };
   }
 
   const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);

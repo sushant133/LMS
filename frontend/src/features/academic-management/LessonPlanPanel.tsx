@@ -490,6 +490,8 @@ export const LessonPlanPanel = ({
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
   const canMutate = writeAccess;
+  const canEditDelete =
+    writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
   const [showForm, setShowForm] = useState(false);
   const [savingTable, setSavingTable] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2522,7 +2524,7 @@ export const LessonPlanPanel = ({
                                     <Td className="no-print">
                                       {isFirst && plan ? (
                                         <div className="flex flex-wrap gap-1">
-                                          {canMutate &&
+                                          {canEditDelete &&
                                           (plan.status === "DRAFT" ||
                                             plan.status === "REJECTED") ? (
                                             <>
@@ -2548,7 +2550,7 @@ export const LessonPlanPanel = ({
                                               </Button>
                                             </>
                                           ) : null}
-                                          {canMutate &&
+                                          {canEditDelete &&
                                           (isAdmin ||
                                             plan.status === "DRAFT" ||
                                             plan.status === "REJECTED") ? (

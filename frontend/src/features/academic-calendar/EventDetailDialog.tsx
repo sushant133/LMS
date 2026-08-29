@@ -9,6 +9,7 @@ interface EventDetailDialogProps {
   dateBs: string;
   events: AcademicCalendarEventRecord[];
   canManage: boolean;
+  canEditDelete?: boolean;
   deleting?: boolean;
   onClose: () => void;
   onEdit: (event: AcademicCalendarEventRecord) => void;
@@ -21,6 +22,7 @@ export const EventDetailDialog = ({
   dateBs,
   events,
   canManage,
+  canEditDelete = false,
   deleting = false,
   onClose,
   onEdit,
@@ -83,7 +85,7 @@ export const EventDetailDialog = ({
                         {getEventTypeLabel(event.eventType)}
                       </Badge>
                     </div>
-                    {canManage && !isSystem ? (
+                    {canEditDelete && !isSystem ? (
                       <div className="flex gap-1">
                         <Button
                           type="button"

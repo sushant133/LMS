@@ -16,6 +16,7 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { useCanEditOrDeleteRecords } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -58,6 +59,7 @@ const formatVisibleToSummary = (visibleTo?: BannerTargetRole[]): string => {
 };
 
 export const BannerManager = () => {
+  const canEditDelete = useCanEditOrDeleteRecords();
   const [form, setForm] = useState<BannerInput>(defaultBanner);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [preview, setPreview] = useState<UploadedBannerImage | null>(null);
@@ -527,6 +529,8 @@ export const BannerManager = () => {
                             <Eye className="mr-1 h-3.5 w-3.5" />
                             View
                           </Button>
+                          {canEditDelete ? (
+                          <>
                           <Button
                             type="button"
                             size="sm"
@@ -549,6 +553,8 @@ export const BannerManager = () => {
                             <RefreshCw className="mr-1 h-3.5 w-3.5" />
                             Replace
                           </Button>
+                          </>
+                          ) : null}
                           <Button
                             type="button"
                             size="sm"
@@ -560,6 +566,7 @@ export const BannerManager = () => {
                           >
                             {banner.isActive ? "Disable" : "Enable"}
                           </Button>
+                          {canEditDelete ? (
                           <Button
                             type="button"
                             size="sm"
@@ -572,6 +579,7 @@ export const BannerManager = () => {
                             <Trash2 className="mr-1 h-3.5 w-3.5" />
                             Delete
                           </Button>
+                          ) : null}
                         </div>
                       </Td>
                     </tr>

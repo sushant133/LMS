@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { api } from "lib/api";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -14,7 +15,8 @@ export const ReportsPage = () => {
   const { user, activeSchoolId } = useAuth();
   const [loading, setLoading] = useState<string | null>(null);
 
-  const canExport = hasInstitutionAccess(user?.role ?? "");
+  const grantedReports = useCanManageGrantedModule("reports");
+  const canExport = hasInstitutionAccess(user?.role ?? "") || grantedReports;
 
   const downloadExport = async (endpoint: string, label: string) => {
     if (!activeSchoolId) {

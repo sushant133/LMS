@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import { Link } from "react-router-dom";
 import {
-  canManageInstitution,
   laboratoryEquipmentSchema,
   laboratoryIssueSchema,
   laboratorySchema,
@@ -47,8 +46,8 @@ import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
-import { useModuleAccess } from "hooks/useModuleAccess";
-import { useWorkspaceMode } from "lib/workspace";
+import { useCanEditOrDeleteRecords, useIsGrantedAdmin, useModuleAccess } from "hooks/useModuleAccess";
+
 import { LaboratoryAllotPanel } from "features/laboratory/LaboratoryAllotPanel";
 import { LaboratoryPrintInventoryPanel } from "features/laboratory/LaboratoryPrintInventoryPanel";
 import { StockStatusBadge } from "features/library/StockStatusBadge";
@@ -110,10 +109,10 @@ type TeacherOption = { _id: string; user: { fullName: string } };
 
 export const LaboratoryManager = () => {
   const { user } = useAuth();
-  const workspace = useWorkspaceMode();
-  const isAdmin =
-    canManageInstitution(user?.role ?? "") || workspace === "admin";
-  const isTeacher = user?.role === "TEACHER" && workspace !== "admin";
+  const isAdmin = useIsGrantedAdmin("laboratory");
+  const canEditDelete =
+    useCanEditOrDeleteRecords() || user?.role === "LABORATORY_STAFF";
+  const isTeacher = user?.role === "TEACHER" && !isAdmin;
   const { canWrite: labModuleWrite, isReadOnly: labReadOnly } =
     useModuleAccess("laboratory");
   /** Full lab inventory/meta management: Admin or Lab Staff with write access. */
@@ -124,6 +123,20 @@ export const LaboratoryManager = () => {
    * requests without Module Access write — allotment is independent.
    */
   const canRequestLabItems = canManageLabsMeta || isTeacher;
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const interceptor = api.interceptors.request.use((config) => {
+      const url = String(config.url ?? "");
+      if (url.includes("/laboratory")) {
+        config.params = { ...(config.params ?? {}), adminScope: "1" };
+      }
+      return config;
+    });
+    return () => {
+      api.interceptors.request.eject(interceptor);
+    };
+  }, [isAdmin]);
 
   const [tab, setTab] = useState<LabTab>("dashboard");
   const [labForm, setLabForm] = useState<LaboratoryInput>(defaultLabForm);
@@ -1341,7 +1354,7 @@ export const LaboratoryManager = () => {
                               {lab.isActive ? "Active" : "Inactive"}
                             </Badge>
                           </Td>
-                          {canManageLabsMeta ? (
+                          {canEditDelete ? (
                             <Td className="whitespace-nowrap text-right">
                               <div className="inline-flex gap-2">
                                 <Button
@@ -1351,8 +1364,7 @@ export const LaboratoryManager = () => {
                                 >
                                   Edit
                                 </Button>
-                                {isAdmin ? (
-                                  <Button
+                                <Button
                                     size="sm"
                                     variant="secondary"
                                     onClick={() => {
@@ -1363,7 +1375,6 @@ export const LaboratoryManager = () => {
                                   >
                                     Delete
                                   </Button>
-                                ) : null}
                               </div>
                             </Td>
                           ) : null}
@@ -2389,7 +2400,7 @@ export const LaboratoryManager = () => {
                                                 Stock
                                               </Button>
                                             ) : null}
-                                            {canManageLabsMeta ? (
+                                            {canEditDelete ? (
                                               <Button
                                                 size="sm"
                                                 variant="secondary"
@@ -2415,7 +2426,7 @@ export const LaboratoryManager = () => {
                                                 Request
                                               </Button>
                                             ) : null}
-                                            {canManageLabsMeta ? (
+                                            {canEditDelete ? (
                                               <Button
                                                 size="sm"
                                                 variant="outline"
@@ -2916,7 +2927,7 @@ export const LaboratoryManager = () => {
                                         Received
                                       </Button>
                                     ) : null}
-                                    {isAdmin ? (
+                                    {canEditDelete ? (
                                       <Button
                                         size="sm"
                                         variant="destructive"

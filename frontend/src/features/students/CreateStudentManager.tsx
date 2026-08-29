@@ -15,8 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { LoadingState } from "components/shared/LoadingState";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
-import { isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
+import { useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
@@ -53,10 +52,7 @@ export const CreateStudentManager = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isCollege = useIsCollege();
-  const workspace = useWorkspaceMode();
-  const canManage =
-    useIsTenantAdmin() ||
-    (workspace === "admin" && isDualRoleTeacher(user));
+  const canManage = useIsGrantedAdmin("students");
   const editState =
     (location.state as StudentEditLocationState | null)?.student ?? null;
 

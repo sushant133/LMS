@@ -17,7 +17,10 @@ import { SalaryPayment } from "../models/SalaryPayment.js";
 import { School } from "../models/School.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
-import { loadTenderSyllabusProgress } from "./tenderSyllabusProgress.js";
+import {
+  lookupFamilyValue,
+  loadTenderSyllabusProgress
+} from "./tenderSyllabusProgress.js";
 
 export {
   calculateSalarySheetLine,
@@ -63,6 +66,7 @@ type TeacherPayFacts = {
   tenderPaidByTeacher: Map<string, number>;
   tenderPaidPercentByTeacher: Map<string, number>;
   subjectNameById: Map<string, string>;
+  subjectFamilyById: Map<string, string[]>;
   academicYearBs: string;
 };
 
@@ -80,6 +84,7 @@ const loadTeacherPayFacts = async (
     tenderPaidByTeacher: new Map(),
     tenderPaidPercentByTeacher: new Map(),
     subjectNameById: new Map(),
+    subjectFamilyById: new Map(),
     academicYearBs: ""
   };
   if (teacherIds.length === 0) return empty;
@@ -113,7 +118,7 @@ const loadTeacherPayFacts = async (
         "teacherId monthBs paymentType tenderThisMonthNpr tenderAmountNpr basicSalaryNpr syllabusCompletedPercent syllabusAlreadyPaidPercent syllabusThisMonthPercent academicYearBs"
       )
       .lean(),
-    Subject.find({ schoolId }).select("name code").lean(),
+    Subject.find({ schoolId }).select("name code masterSubjectId").lean(),
     loadTenderSyllabusProgress({
       schoolId,
       teacherIds,
@@ -132,7 +137,7 @@ const loadTeacherPayFacts = async (
     for (const row of rows) {
       const rowAy = String(row.academicYearBs || "").trim();
       if (requireAy && academicYearBs && rowAy && rowAy !== academicYearBs) continue;
-      const key = `${String(row.teacherId)}:${String(row.subjectId)}`;
+      const key = `${idKey(row.teacherId)}:${idKey(row.subjectId)}`;
       const list = buckets.get(key) ?? [];
       list.push(Number(row.completedPercent) || 0);
       buckets.set(key, list);
@@ -147,9 +152,40 @@ const loadTeacherPayFacts = async (
     const avg = values.reduce((sum, n) => sum + n, 0) / Math.max(1, values.length);
     progressByTeacherSubject.set(key, round2(avg));
   }
-  // Official syllabus (allotted portion) wins over session-plan AcademicProgress.
+  // Official syllabus wins when it reflects taught work. Keep session-plan %
+  // when syllabus leaves are unmarked so Academic Management completion is paid.
   for (const [key, percent] of syllabusProgress.percentByTeacherSubject) {
-    progressByTeacherSubject.set(key, percent);
+    const existing = progressByTeacherSubject.get(key) ?? 0;
+    progressByTeacherSubject.set(key, round2(Math.max(percent, existing)));
+  }
+
+  const inheritFamilyProgress = (teacherId: string, subjectId: string) => {
+    const key = `${teacherId}:${subjectId}`;
+    if ((progressByTeacherSubject.get(key) ?? 0) > 0) return;
+    const inherited = lookupFamilyValue(
+      progressByTeacherSubject,
+      teacherId,
+      subjectId,
+      syllabusProgress.subjectFamilyById,
+      (n) => n > 0
+    );
+    if (inherited && inherited > 0) progressByTeacherSubject.set(key, inherited);
+    const inheritedDetail = lookupFamilyValue(
+      syllabusProgress.detailByTeacherSubject,
+      teacherId,
+      subjectId,
+      syllabusProgress.subjectFamilyById,
+      (s) => Boolean(s)
+    );
+    if (inheritedDetail && !syllabusProgress.detailByTeacherSubject.has(key)) {
+      syllabusProgress.detailByTeacherSubject.set(key, inheritedDetail);
+    }
+  };
+  for (const [teacherId, subjectIds] of tenderSubjectIdsByTeacher) {
+    for (const subjectId of subjectIds) inheritFamilyProgress(teacherId, subjectId);
+  }
+  for (const [teacherId, subjectIds] of syllabusProgress.assignedSubjectsByTeacher) {
+    for (const subjectId of subjectIds) inheritFamilyProgress(teacherId, subjectId);
   }
 
   const tenderPaidByTeacher = new Map<string, number>();
@@ -225,6 +261,7 @@ const loadTeacherPayFacts = async (
     tenderPaidByTeacher,
     tenderPaidPercentByTeacher,
     subjectNameById,
+    subjectFamilyById: syllabusProgress.subjectFamilyById,
     academicYearBs
   };
 };
@@ -546,19 +583,6 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         }
       | undefined
   ) => {
-    const paymentType: TeacherPaymentType = saved?.paymentType
-      ? normalizeTeacherPaymentType(saved.paymentType)
-      : saved
-        ? "MONTHLY"
-        : normalizeTeacherPaymentType(teacher.paymentType);
-    const periodRateNpr = Math.max(
-      0,
-      Number(
-        saved?.periodRateNpr ??
-          teacher.periodRateNpr ??
-          (paymentType === "PERIOD" ? teacher.basicSalaryNpr : 0)
-      ) || 0
-    );
     const tenders = Array.isArray(teacher.tenders) ? teacher.tenders : [];
     const ayTenders = payFacts.academicYearBs
       ? tenders.filter(
@@ -568,12 +592,33 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       : tenders;
     const activeTenders = ayTenders.length > 0 ? ayTenders : tenders;
     const liveTenderAmount = sumTeacherTenderAmountNpr(activeTenders);
+    const teacherType = normalizeTeacherPaymentType(teacher.paymentType);
+    const savedType = saved?.paymentType
+      ? normalizeTeacherPaymentType(saved.paymentType)
+      : undefined;
+    const savedPaid = String(saved?.status || "").toUpperCase() === "PAID";
+    // Draft salary rows default to MONTHLY in the schema. Unpaid sheets must
+    // follow the teacher's live tender/period type so Botany tenders aren't 0%.
+    const paymentType: TeacherPaymentType = savedPaid
+      ? savedType || teacherType
+      : teacherType === "TENDER" || (liveTenderAmount > 0 && teacherType !== "PERIOD")
+        ? "TENDER"
+        : teacherType === "PERIOD"
+          ? "PERIOD"
+          : savedType || teacherType;
+    const periodRateNpr = Math.max(
+      0,
+      Number(
+        saved?.periodRateNpr ??
+          teacher.periodRateNpr ??
+          (paymentType === "PERIOD" ? teacher.basicSalaryNpr : 0)
+      ) || 0
+    );
 
     const livePeriods = payFacts.periodsByTeacher.get(teacherId) ?? 0;
     const alreadyPaidPercentLive =
       payFacts.tenderPaidPercentByTeacher.get(teacherId) ?? 0;
     const manualUnits = Boolean(saved?.attendanceManualOverride);
-    const savedPaid = String(saved?.status || "").toUpperCase() === "PAID";
 
     let periodsAttended = livePeriods;
     let tenderAmountNpr = liveTenderAmount;
@@ -612,9 +657,25 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       let weight = 0;
       for (const row of subjectRows) {
         const percent =
-          payFacts.progressByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ?? 0;
+          lookupFamilyValue(
+            payFacts.progressByTeacherSubject,
+            teacherId,
+            row.subjectId,
+            payFacts.subjectFamilyById,
+            (n) => n > 0
+          ) ??
+          payFacts.progressByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ??
+          0;
         const detail =
-          payFacts.progressDetailByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ?? "";
+          lookupFamilyValue(
+            payFacts.progressDetailByTeacherSubject,
+            teacherId,
+            row.subjectId,
+            payFacts.subjectFamilyById,
+            (s) => Boolean(s)
+          ) ??
+          payFacts.progressDetailByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ??
+          "";
         const amount = row.amount;
         const rowWeight = amount > 0 ? amount : 1;
         weighted += percent * rowWeight;

@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
 import {
+  canEditOrDeleteRecords,
+  EDIT_DELETE_ADMIN_ONLY_MESSAGE,
   ensurePendingRequiredDocuments,
   studentBackCountSchema,
   studentSchema
@@ -12,7 +14,10 @@ import { ApiError } from "../utils/apiError.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getStudentScopeFilter } from "../utils/parentScope.js";
 import { getTeacherStudentFilter, getTeacherScope } from "../utils/teacherScope.js";
-import { actorMayUseAdminWorkspaceScope } from "../utils/workspaceScope.js";
+import {
+  actorCanAdministerModule,
+  actorMayUseAdminWorkspaceScope
+} from "../utils/workspaceScope.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { recordAudit } from "../utils/audit.js";
 import {
@@ -194,7 +199,8 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
 
 export const getStudentById = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
-  const limitedView = usesLimitedStudentView(req.user?.role);
+  const adminStudentScope = await actorMayUseAdminWorkspaceScope(req);
+  const limitedView = usesLimitedStudentView(req.user?.role) && !adminStudentScope;
   let studentQuery = Student.findOne({ ...filter, _id: req.params.id }).populate(
     "user",
     limitedView ? "fullName role" : "-password"
@@ -258,7 +264,20 @@ const generateStudentLoginId = (admissionNumber: string): string => {
   return base.length >= 3 ? `s${base}` : `student${Date.now().toString(36)}`;
 };
 
+const assertStudentAdminWrite = async (req: Request): Promise<void> => {
+  if (!(await actorCanAdministerModule(req, "students"))) {
+    throw new ApiError(403, "You do not have permission to manage student records");
+  }
+};
+
+const assertStudentRecordEditDelete = (req: Request): void => {
+  if (!canEditOrDeleteRecords(req.user?.role ?? "")) {
+    throw new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE);
+  }
+};
+
 export const createStudent = asyncHandler(async (req: Request, res: Response) => {
+  await assertStudentAdminWrite(req);
   const payload = studentSchema.parse(req.body);
   if (payload.admissionDateBs) ensureValidBsDate(payload.admissionDateBs);
   if (payload.dateOfBirthBs) ensureValidBsDate(payload.dateOfBirthBs);
@@ -458,6 +477,8 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const updateStudent = asyncHandler(async (req: Request, res: Response) => {
+  await assertStudentAdminWrite(req);
+  assertStudentRecordEditDelete(req);
   const payload = studentSchema.parse(req.body);
   if (payload.admissionDateBs) ensureValidBsDate(payload.admissionDateBs);
   if (payload.dateOfBirthBs) ensureValidBsDate(payload.dateOfBirthBs);
@@ -923,6 +944,7 @@ export const updateCtevtExamFee = updateCtevtFeeStatus("exam");
  * When disabled, the student cannot sign in; existing sessions are rejected by protect().
  */
 export const setStudentLoginAccess = asyncHandler(async (req: Request, res: Response) => {
+  await assertStudentAdminWrite(req);
   const raw = req.body?.isActive ?? req.body?.status;
   let nextActive: boolean | null = null;
   if (raw === true || raw === "true" || raw === "ACTIVE" || raw === "ENABLED") {
@@ -978,6 +1000,8 @@ export const setStudentLoginAccess = asyncHandler(async (req: Request, res: Resp
  * (attendance entries, results, fee rows, parent links, library/transport issues, notifications).
  */
 export const deleteStudent = asyncHandler(async (req: Request, res: Response) => {
+  await assertStudentAdminWrite(req);
+  assertStudentRecordEditDelete(req);
   const schoolId = tenantObjectId(req);
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
 

@@ -120,6 +120,27 @@ const userSchema = new Schema<UserDocument, UserModel>(
 
 userSchema.index({ "fcmTokens.token": 1 }, { sparse: true });
 
+/**
+ * Defense in depth: never let a serialized User document carry the bcrypt hash
+ * or device push tokens to a client.
+ *
+ * Every controller is expected to `.select("-password")` or map to an explicit
+ * DTO, but that is a convention one new endpoint can forget — and forgetting it
+ * ships password hashes to the browser. These transforms make the safe result
+ * the default whenever a hydrated document is serialized (res.json, toObject,
+ * spread into a response). Queries using `.lean()` bypass Mongoose transforms,
+ * so explicit field selection is still required there.
+ */
+const stripSensitiveFields = (_doc: unknown, ret: unknown): unknown => {
+  const record = ret as Record<string, unknown>;
+  delete record.password;
+  delete record.fcmTokens;
+  return record;
+};
+
+userSchema.set("toJSON", { transform: stripSensitiveFields });
+userSchema.set("toObject", { transform: stripSensitiveFields });
+
 userSchema.pre("validate", function validateSchoolMembership(next) {
   const user = this as HydratedDocument<UserDocument>;
 

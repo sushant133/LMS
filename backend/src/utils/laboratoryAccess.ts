@@ -5,6 +5,10 @@ import { Teacher } from "../models/Teacher.js";
 import { TeacherLaboratoryAssignment } from "../models/TeacherLaboratoryAssignment.js";
 import { ApiError } from "./apiError.js";
 import { withTenantScope } from "./tenant.js";
+import {
+  actorCanAdministerModule,
+  actorMayUseAdminWorkspaceScope
+} from "./workspaceScope.js";
 
 export type LabAccessContext = {
   role: string;
@@ -22,7 +26,13 @@ export type LabAccessContext = {
  */
 export async function resolveLabAccess(req: Request): Promise<LabAccessContext> {
   const role = normalizeUserRole(req.user?.role ?? "");
-  const isAdmin = isInstitutionAdmin(role);
+  const grantedLabAdmin = await actorCanAdministerModule(req, "laboratory");
+  const teacherAdminView =
+    role === "TEACHER" && (await actorMayUseAdminWorkspaceScope(req));
+  const isAdmin =
+    isInstitutionAdmin(role) ||
+    teacherAdminView ||
+    (grantedLabAdmin && role !== "TEACHER");
   const isGlobalManager =
     isAdmin || role === "COLLEGE_VIEWER" || role === "LABORATORY_STAFF";
 

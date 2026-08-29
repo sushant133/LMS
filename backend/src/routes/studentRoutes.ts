@@ -23,6 +23,7 @@ const profileReaders = authorize(
   "SUPER_ADMIN",
   "COLLEGE_ADMIN",
   "TEACHER",
+  "COLLEGE_STAFF",
   "STUDENT",
   "PARENT",
   "ACCOUNTANT"
@@ -35,6 +36,7 @@ const studentReaders = authorize(
   "SUPER_ADMIN",
   "COLLEGE_ADMIN",
   "TEACHER",
+  "COLLEGE_STAFF",
   "ACCOUNTANT",
   "CASHIER",
   "AUDITOR",

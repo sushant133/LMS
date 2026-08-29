@@ -76,6 +76,8 @@ interface SessionPlanPanelProps {
   institutionName?: string;
   /** When false, hide create/edit/delete/submit actions (module read-only). */
   writeAccess?: boolean;
+  /** Academic Management admin hub (not teacher My Work). */
+  isAdminView?: boolean;
 }
 
 const emptyUnit = (unitNo = 1) => ({
@@ -125,11 +127,14 @@ export const SessionPlanPanel = ({
   isCollege = false,
   institutionName = "Institution",
   writeAccess = true,
+  isAdminView = false,
 }: SessionPlanPanelProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
   const canMutate = writeAccess;
+  const canEditDelete =
+    writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
@@ -849,11 +854,12 @@ export const SessionPlanPanel = ({
         </div>
         {canMutate ? (
           <div className="flex flex-wrap gap-2 no-print">
-            {(plan.status === "DRAFT" || plan.status === "REJECTED") && (
+            {canEditDelete &&
+            (plan.status === "DRAFT" || plan.status === "REJECTED") ? (
               <Button size="sm" variant="outline" onClick={() => openEditForm(plan)}>
                 Edit / Complete
               </Button>
-            )}
+            ) : null}
             {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
               <Button size="sm" onClick={() => submitMutation.mutate(plan._id)}>
                 <Send className="mr-2 h-4 w-4" />
@@ -892,9 +898,10 @@ export const SessionPlanPanel = ({
                 Unlock
               </Button>
             ) : null}
-            {(plan.status === "DRAFT" ||
+            {canEditDelete &&
+            (plan.status === "DRAFT" ||
               plan.status === "REJECTED" ||
-              isAdmin) && (
+              isAdmin) ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -903,7 +910,7 @@ export const SessionPlanPanel = ({
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
-            )}
+            ) : null}
           </div>
         ) : null}
         {plan.attachmentUrl ? (

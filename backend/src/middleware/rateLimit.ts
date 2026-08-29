@@ -9,12 +9,35 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
+/** Soft ceiling: above this we sweep expired buckets on the next request. */
+const PRUNE_THRESHOLD = 5000;
+/** Hard ceiling: above this we also evict the oldest live buckets. */
+const MAX_BUCKETS = 20000;
+
 const prune = (now: number): void => {
-  if (buckets.size < 5000) return;
+  if (buckets.size < PRUNE_THRESHOLD) return;
+
   for (const [key, value] of buckets) {
     if (value.resetAt < now && (!value.lockUntil || value.lockUntil < now)) {
       buckets.delete(key);
     }
+  }
+
+  /**
+   * Some bucket keys are attacker-chosen (the login limiter keys by submitted
+   * login ID), so a scripted run with fresh IDs could grow this map without
+   * bound between window rollovers. Once expired entries are gone and the map
+   * is still oversized, drop the oldest live buckets — Map preserves insertion
+   * order, and any bucket still holding a lockout is kept.
+   */
+  if (buckets.size <= MAX_BUCKETS) return;
+  const excess = buckets.size - MAX_BUCKETS;
+  let removed = 0;
+  for (const [key, value] of buckets) {
+    if (removed >= excess) break;
+    if (value.lockUntil && value.lockUntil > now) continue;
+    buckets.delete(key);
+    removed += 1;
   }
 };
 
@@ -41,13 +64,17 @@ export interface RateLimitOptions {
   countOnlyFailures?: boolean;
 }
 
-const clientIp = (req: Request): string => {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]!.trim();
-  }
-  return req.ip || req.socket.remoteAddress || "unknown";
-};
+/**
+ * Client IP for throttling.
+ *
+ * Never read X-Forwarded-For directly: the header is attacker-supplied, so
+ * trusting it let anyone reset their own bucket on every request (send a new
+ * fake IP each time) and completely bypass the login flood guard. Express
+ * already derives `req.ip` from X-Forwarded-* using the configured
+ * `trust proxy` hop count, which is the only trustworthy reading of it, and
+ * ignores the header entirely when TRUST_PROXY is 0.
+ */
+const clientIp = (req: Request): string => req.ip || req.socket.remoteAddress || "unknown";
 
 /**
  * In-memory rate limiter for sensitive auth routes.

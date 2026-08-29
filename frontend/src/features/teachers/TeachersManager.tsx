@@ -37,7 +37,7 @@ import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useCanManageGrantedModule } from "hooks/useModuleAccess";
+import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { TeacherAssignmentsPanel } from "./TeacherAssignmentsPanel";
 import { TeacherForm } from "./TeacherForm";
@@ -142,6 +142,7 @@ interface TeachersManagerProps {
 
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const canManage = useCanManageGrantedModule("teachers");
+  const canEditDelete = useCanEditOrDeleteRecords();
   const isCollege = useIsCollege();
   const { user, availableSchools } = useAuth();
   const institutionName = getCollegeDisplayName(availableSchools, user);
@@ -569,6 +570,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             >
                               Assignments
                             </Button>
+                            {canEditDelete ? (
                             <Button
                               variant="outline"
                               size="sm"
@@ -581,6 +583,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             >
                               Edit
                             </Button>
+                            ) : null}
                             <Button
                               variant="outline"
                               size="sm"
@@ -628,6 +631,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                                 Activate
                               </Button>
                             )}
+                            {canEditDelete ? (
                             <Button
                               variant="destructive"
                               size="sm"
@@ -644,6 +648,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             >
                               Delete
                             </Button>
+                            ) : null}
                           </div>
                         </Td>
                       ) : null}

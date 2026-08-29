@@ -2,6 +2,8 @@ import crypto from "crypto";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
+  canEditOrDeleteRecords,
+  EDIT_DELETE_ADMIN_ONLY_MESSAGE,
   ensurePendingRequiredDocuments,
   STUDENT_DOCUMENT_CATEGORIES
 } from "@phit-erp/shared";
@@ -38,6 +40,10 @@ import { sendSuccess } from "../utils/response.js";
 import { canViewPublishedResults } from "../utils/examResults.js";
 import { getTeacherScope, getTeacherStudentFilter } from "../utils/teacherScope.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import {
+  actorCanAdministerModule,
+  actorMayUseAdminWorkspaceScope
+} from "../utils/workspaceScope.js";
 
 const documentMutationSchema = z.object({
   type: z.string(),
@@ -65,11 +71,14 @@ const assertStudentProfileAccess = async (req: Request, studentId: string): Prom
   }
 
   if (role === "TEACHER") {
+    if (await actorMayUseAdminWorkspaceScope(req)) return;
     const filter = await getTeacherStudentFilter(req);
     const student = await Student.findOne({ ...filter, _id: studentId });
     if (!student) throw new ApiError(403, "You do not have access to this student profile");
     return;
   }
+
+  if (await actorCanAdministerModule(req, "students")) return;
 
   if (role === "STUDENT") {
     const student = await Student.findOne({ schoolId: tenantObjectId(req), user: req.user!.userId }).lean();
@@ -87,21 +96,22 @@ const assertStudentProfileAccess = async (req: Request, studentId: string): Prom
   throw new ApiError(403, "You do not have permission to view this student profile");
 };
 
-const assertDocumentManageAccess = (req: Request): void => {
-  const role = req.user?.role;
-  if (role !== "SUPER_ADMIN" && role !== "COLLEGE_ADMIN") {
-    throw new ApiError(403, "Only admins can manage student documents");
+const assertDocumentManageAccess = async (req: Request): Promise<void> => {
+  if (!canEditOrDeleteRecords(req.user?.role ?? "")) {
+    throw new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE);
   }
 };
 
-const getProfilePermissions = (req: Request) => {
+const getProfilePermissions = async (req: Request) => {
   const role = req.user?.role ?? "";
   const isAdminLike = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"].includes(role);
   const isTeacher = role === "TEACHER";
+  const teacherAdminView = isTeacher && (await actorMayUseAdminWorkspaceScope(req));
+  const grantedStudentAdmin = await actorCanAdministerModule(req, "students");
 
   // Teachers: assigned students only (enforced in assertStudentProfileAccess) +
   // academic/subject data only — no full personal, fees, library, transport, docs, activity.
-  if (isTeacher) {
+  if (isTeacher && !teacherAdminView) {
     return {
       canManageDocuments: false,
       canViewFinancial: false,
@@ -114,20 +124,17 @@ const getProfilePermissions = (req: Request) => {
     };
   }
 
+  const isStudentAdmin = isAdminLike || grantedStudentAdmin || teacherAdminView;
+
   return {
-    canManageDocuments: role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN",
-    canViewFinancial: [
-      "SUPER_ADMIN",
-      "COLLEGE_ADMIN",
-      "COLLEGE_VIEWER",
-      "ACCOUNTANT",
-      "STUDENT",
-      "PARENT"
-    ].includes(role),
-    canViewActivity: isAdminLike,
-    canViewLibrary: isAdminLike || role === "STUDENT" || role === "PARENT" || role === "LIBRARY_STAFF",
-    canViewTransport: isAdminLike || role === "STUDENT" || role === "PARENT",
-    canViewDocuments: isAdminLike || role === "STUDENT" || role === "PARENT",
+    canManageDocuments: canEditOrDeleteRecords(role),
+    canViewFinancial:
+      isStudentAdmin ||
+      ["ACCOUNTANT", "STUDENT", "PARENT"].includes(role),
+    canViewActivity: isStudentAdmin,
+    canViewLibrary: isStudentAdmin || role === "STUDENT" || role === "PARENT" || role === "LIBRARY_STAFF",
+    canViewTransport: isStudentAdmin || role === "STUDENT" || role === "PARENT",
+    canViewDocuments: isStudentAdmin || role === "STUDENT" || role === "PARENT",
     canViewFullPersonal: true,
     canViewAllSubjects: true
   };
@@ -246,7 +253,7 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
 
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
-  const permissions = getProfilePermissions(req);
+  const permissions = await getProfilePermissions(req);
   const role = req.user?.role;
 
   // Teacher: only their assigned subjects for this student group
@@ -547,7 +554,7 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
 });
 
 export const addStudentDocument = asyncHandler(async (req: Request, res: Response) => {
-  assertDocumentManageAccess(req);
+  await assertDocumentManageAccess(req);
   const payload = documentMutationSchema.parse(req.body);
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!student) throw new ApiError(404, "Student not found");
@@ -615,7 +622,7 @@ export const addStudentDocument = asyncHandler(async (req: Request, res: Respons
 });
 
 export const replaceStudentDocument = asyncHandler(async (req: Request, res: Response) => {
-  assertDocumentManageAccess(req);
+  await assertDocumentManageAccess(req);
   const payload = replaceDocumentSchema.parse(req.body);
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!student) throw new ApiError(404, "Student not found");
@@ -658,7 +665,7 @@ export const replaceStudentDocument = asyncHandler(async (req: Request, res: Res
 });
 
 export const deleteStudentDocument = asyncHandler(async (req: Request, res: Response) => {
-  assertDocumentManageAccess(req);
+  await assertDocumentManageAccess(req);
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!student) throw new ApiError(404, "Student not found");
 

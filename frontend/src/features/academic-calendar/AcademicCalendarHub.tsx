@@ -1,6 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  canManageInstitution,
   formatAcademicYearLabel,
   type AcademicCalendarEventInput,
   type AcademicCalendarEventRecord,
@@ -27,6 +26,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
+import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { getCollegeDisplayName } from "lib/auth";
 import { getPrintInstitutionBranding } from "lib/printBranding";
@@ -60,7 +60,8 @@ const EMPTY_EVENTS: AcademicCalendarEventRecord[] = [];
 
 export const AcademicCalendarHub = () => {
   const { user, availableSchools } = useAuth();
-  const canManage = canManageInstitution(user?.role ?? "");
+  const canManage = useCanManageGrantedModule("academic-calendar");
+  const canEditDelete = useCanEditOrDeleteRecords();
   const schoolAcademicYearBs = user?.school?.academicYearBs ?? "";
   const printBranding = getPrintInstitutionBranding();
   const institutionName =
@@ -607,7 +608,7 @@ export const AcademicCalendarHub = () => {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            {canManage ? (
+                            {canEditDelete ? (
                               <>
                                 <Button
                                   type="button"
@@ -730,6 +731,7 @@ export const AcademicCalendarHub = () => {
         dateBs={selectedDateBs}
         events={selectedEvents}
         canManage={canManage}
+        canEditDelete={canEditDelete}
         deleting={deleteMutation.isPending}
         onClose={() => setDetailOpen(false)}
         onEdit={(event) => {

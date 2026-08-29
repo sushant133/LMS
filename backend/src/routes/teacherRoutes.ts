@@ -30,6 +30,7 @@ const router = Router();
 const teacherReaders = authorize(
   "COLLEGE_ADMIN",
   "TEACHER",
+  "COLLEGE_STAFF",
   "LABORATORY_STAFF",
   "LIBRARY_STAFF"
 );

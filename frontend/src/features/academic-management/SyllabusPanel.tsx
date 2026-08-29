@@ -104,6 +104,8 @@ interface SyllabusPanelProps {
   institutionName?: string;
   /** When false, hide create/edit/delete/submit actions (module read-only). */
   writeAccess?: boolean;
+  /** Academic Management admin hub (not teacher My Work). */
+  isAdminView?: boolean;
 }
 
 export const SyllabusPanel = ({
@@ -117,16 +119,20 @@ export const SyllabusPanel = ({
   isCollege = false,
   institutionName = "Institution",
   writeAccess = true,
+  isAdminView = false,
 }: SyllabusPanelProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
   const isTeacher =
-    user?.role === "TEACHER" ||
-    (user?.secondaryRoles ?? []).includes("TEACHER");
+    !isAdmin &&
+    (user?.role === "TEACHER" ||
+      (user?.secondaryRoles ?? []).includes("TEACHER"));
   /** Teachers only view syllabi; admins create/edit structure. */
   const canManageStructure = writeAccess && isAdmin;
   const canMutate = writeAccess && !isTeacher;
+  const canEditDelete =
+    canMutate && (canManageInstitution(user?.role ?? "") || !isAdminView);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
@@ -1071,7 +1077,7 @@ export const SyllabusPanel = ({
   };
 
   const canEditStructure = (plan: AcademicSyllabusRecord) =>
-    canManageStructure &&
+    canEditDelete &&
     (plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin);
 
   /** Teachers may mark sub-unit progress while teaching; structure stays admin-only. */
@@ -1448,7 +1454,7 @@ export const SyllabusPanel = ({
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit units &amp; sub-units
                 </Button>
-              ) : (
+              ) : canEditDelete ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1462,7 +1468,7 @@ export const SyllabusPanel = ({
                 >
                   Unlock &amp; edit all
                 </Button>
-              )}
+              ) : null}
               {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
                 <Button
                   size="sm"
@@ -1508,6 +1514,7 @@ export const SyllabusPanel = ({
                   Unlock only
                 </Button>
               ) : null}
+              {canEditDelete ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -1516,6 +1523,7 @@ export const SyllabusPanel = ({
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
+              ) : null}
             </div>
           ) : isTeacher ? (
             <p className="text-xs text-slate-500 no-print">

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  canManageInstitution,
   LIBRARY_YEAR_LEVELS,
   libraryBookSchema,
   libraryIssueSchema,
@@ -40,6 +39,7 @@ import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { useCanEditOrDeleteRecords, useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { LibraryIssuedBooksPanel } from "features/library/LibraryIssuedBooksPanel";
 import {
   LibraryIssueLimitsPanel,
@@ -209,7 +209,9 @@ const tabs: Array<{
 export const LibraryManager = () => {
   const { user } = useAuth();
   const isCollege = useIsCollege();
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin = useIsGrantedAdmin("library");
+  const canEditDelete =
+    useCanEditOrDeleteRecords() || user?.role === "LIBRARY_STAFF";
   const [tab, setTab] = useState<Tab>("dashboard");
   /** When opening Issued Books from dashboard cards */
   const [issuedStatusFilter, setIssuedStatusFilter] = useState<
@@ -1550,7 +1552,7 @@ export const LibraryManager = () => {
                             </div>
                             <StockStatusBadge status={book.status} />
                           </button>
-                          {canManageInventory ? (
+                          {canManageInventory && canEditDelete ? (
                             <div className="flex shrink-0 gap-1">
                               <Button
                                 size="sm"
@@ -1840,7 +1842,7 @@ export const LibraryManager = () => {
                                                     )
                                                   : "—"}
                                               </Td>
-                                              {canManageInventory ? (
+                                              {canManageInventory && canEditDelete ? (
                                                 <Td className="text-right">
                                                   <div className="flex justify-end gap-1">
                                                     <Button

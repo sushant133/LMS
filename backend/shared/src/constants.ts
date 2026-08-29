@@ -76,6 +76,17 @@ export const canManageInstitution = (role: string): boolean => isInstitutionAdmi
 export const isSystemAdministrator = (role: string): boolean => normalizeUserRole(role) === "SUPER_ADMIN";
 
 /**
+ * Changing or removing an existing record is reserved for Administrator and
+ * System Administrator. Granted Vice Principal / Principal / staff may still
+ * create, view, approve, and operate the module.
+ */
+export const canEditOrDeleteRecords = (role: string): boolean =>
+  isInstitutionAdmin(role);
+
+export const EDIT_DELETE_ADMIN_ONLY_MESSAGE =
+  "Only the Administrator or System Administrator can edit or delete records.";
+
+/**
  * @deprecated Global College Administrator ban was removed.
  * Writes are controlled by Module Access (NONE / READ_ONLY / WRITE per module).
  * Kept for older clients that still display this string on 403.

@@ -731,17 +731,29 @@ export const AppLayout = () => {
     if (isAttendanceAdminHubPath(path)) return true;
     if (isExaminationManagementPath(path)) return true;
     const dualRole = isDualRoleTeacher(user);
+    const staffGrant = (key: "academic-management" | "timetable" | "laboratory" | "students" | "subject-assignment") =>
+      !hasTeachingCapability && canAccessModule(moduleAccessMap, key);
     if (
       path === "/academic-management-view" ||
       path.startsWith("/academic-management-view/")
     ) {
-      return dualRole || isAdmin || institutionAccess;
+      return (
+        dualRole ||
+        isAdmin ||
+        institutionAccess ||
+        staffGrant("academic-management")
+      );
     }
     if (path === "/timetable-view" || path.startsWith("/timetable-view/")) {
-      return dualRole || isAdmin || institutionAccess;
+      return dualRole || isAdmin || institutionAccess || staffGrant("timetable");
     }
     if (path === "/laboratory-view" || path.startsWith("/laboratory-view/")) {
-      return dualRole || isAdmin || institutionAccess;
+      return (
+        dualRole ||
+        isAdmin ||
+        institutionAccess ||
+        staffGrant("laboratory")
+      );
     }
     if (
       path === "/students" ||
@@ -749,13 +761,18 @@ export const AppLayout = () => {
       path === "/students/create" ||
       path.startsWith("/students/list")
     ) {
-      return dualRole || isAdmin || institutionAccess;
+      return dualRole || isAdmin || institutionAccess || staffGrant("students");
     }
     if (
       path === "/academics/subject-assignments" ||
       path.startsWith("/academics/subject-assignments/")
     ) {
-      return dualRole || isAdmin || institutionAccess;
+      return (
+        dualRole ||
+        isAdmin ||
+        institutionAccess ||
+        staffGrant("subject-assignment")
+      );
     }
 
     const moduleKey = resolveModuleFromRoutePath(path);

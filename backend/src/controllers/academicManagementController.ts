@@ -69,8 +69,8 @@ import {
   getSessionPlanSyllabusCoverage,
   getTodayTimetable,
   actorIsAcademicAdmin,
-  notifyAdmins,
-  notifyTeacher,
+  notifyAdminsOfPendingAcademic,
+  notifyTeacherOfAcademicDecision,
   recordApproval,
   sanitizeTeacherOwnedUpdate,
   serializeLessonPlan,
@@ -607,7 +607,11 @@ export const submitSessionPlan = asyncHandler(async (req: Request, res: Response
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "SESSION_PLAN", existing._id.toString(), "SUBMITTED");
-  await notifyAdmins(req, "Session Plan Submitted", "A teacher submitted a session plan for approval.", {
+  await notifyAdminsOfPendingAcademic(req, {
+    kind: "SESSION_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.academicYearBs,
     entityId: existing._id.toString()
   });
 
@@ -633,7 +637,12 @@ export const approveSessionPlan = asyncHandler(async (req: Request, res: Respons
   };
   await existing.save();
   await recordApproval(req, "SESSION_PLAN", existing._id.toString(), "APPROVED", remarks);
-  await notifyTeacher(req, existing.teacherId.toString(), "Session Plan Approved", "Your session plan has been approved.", {
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "SESSION_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.academicYearBs,
+    action: "APPROVED",
     entityId: existing._id.toString()
   });
 
@@ -660,7 +669,15 @@ export const rejectSessionPlan = asyncHandler(async (req: Request, res: Response
   };
   await existing.save();
   await recordApproval(req, "SESSION_PLAN", existing._id.toString(), "REJECTED", remarks);
-  await notifyTeacher(req, existing.teacherId.toString(), "Session Plan Rejected", remarks, { entityId: existing._id.toString() });
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "SESSION_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.academicYearBs,
+    action: "REJECTED",
+    remarks,
+    entityId: existing._id.toString()
+  });
 
   const serialized = await serializeSessionPlan(existing._id.toString());
   return sendSuccess(res, "Session plan rejected", serialized);
@@ -675,7 +692,12 @@ export const unlockSessionPlan = asyncHandler(async (req: Request, res: Response
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "SESSION_PLAN", existing._id.toString(), "UNLOCKED");
-  await notifyTeacher(req, existing.teacherId.toString(), "Session Plan Unlocked", "Your session plan has been unlocked for corrections.", {
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "SESSION_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.academicYearBs,
+    action: "UNLOCKED",
     entityId: existing._id.toString()
   });
 
@@ -1528,7 +1550,11 @@ export const submitSyllabus = asyncHandler(async (req: Request, res: Response) =
   existing.status = "PENDING_APPROVAL";
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
-  await notifyAdmins(req, "Syllabus Submitted", "A syllabus was submitted for approval.", {
+  await notifyAdminsOfPendingAcademic(req, {
+    kind: "SYLLABUS",
+    teacherId: existing.teacherId?.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.academicYearBs,
     entityId: existing._id.toString()
   });
   const serialized = await serializeSyllabus(existing._id.toString());
@@ -1557,13 +1583,14 @@ export const approveSyllabus = asyncHandler(async (req: Request, res: Response) 
   await existing.save();
   await recordApproval(req, "SYLLABUS", existing._id.toString(), "APPROVED", req.body?.remarks);
   if (existing.teacherId) {
-    await notifyTeacher(
-      req,
-      existing.teacherId.toString(),
-      "Syllabus Approved",
-      "Your syllabus has been approved.",
-      { entityId: existing._id.toString() }
-    );
+    await notifyTeacherOfAcademicDecision(req, {
+      kind: "SYLLABUS",
+      teacherId: existing.teacherId.toString(),
+      subjectId: existing.subjectId.toString(),
+      extra: existing.academicYearBs,
+      action: "APPROVED",
+      entityId: existing._id.toString()
+    });
   }
   const serialized = await serializeSyllabus(existing._id.toString());
   return sendSuccess(res, "Syllabus approved", serialized);
@@ -1591,13 +1618,15 @@ export const rejectSyllabus = asyncHandler(async (req: Request, res: Response) =
   await existing.save();
   await recordApproval(req, "SYLLABUS", existing._id.toString(), "REJECTED", payload.remarks);
   if (existing.teacherId) {
-    await notifyTeacher(
-      req,
-      existing.teacherId.toString(),
-      "Syllabus Rejected",
-      payload.remarks,
-      { entityId: existing._id.toString() }
-    );
+    await notifyTeacherOfAcademicDecision(req, {
+      kind: "SYLLABUS",
+      teacherId: existing.teacherId.toString(),
+      subjectId: existing.subjectId.toString(),
+      extra: existing.academicYearBs,
+      action: "REJECTED",
+      remarks: payload.remarks,
+      entityId: existing._id.toString()
+    });
   }
   const serialized = await serializeSyllabus(existing._id.toString());
   return sendSuccess(res, "Syllabus rejected", serialized);
@@ -1617,13 +1646,14 @@ export const unlockSyllabus = asyncHandler(async (req: Request, res: Response) =
   await existing.save();
   await recordApproval(req, "SYLLABUS", existing._id.toString(), "UNLOCKED");
   if (existing.teacherId) {
-    await notifyTeacher(
-      req,
-      existing.teacherId.toString(),
-      "Syllabus Unlocked",
-      "Your syllabus has been unlocked for corrections.",
-      { entityId: existing._id.toString() }
-    );
+    await notifyTeacherOfAcademicDecision(req, {
+      kind: "SYLLABUS",
+      teacherId: existing.teacherId.toString(),
+      subjectId: existing.subjectId.toString(),
+      extra: existing.academicYearBs,
+      action: "UNLOCKED",
+      entityId: existing._id.toString()
+    });
   }
   const serialized = await serializeSyllabus(existing._id.toString());
   return sendSuccess(res, "Syllabus unlocked", serialized);
@@ -2021,7 +2051,11 @@ export const submitLessonPlan = asyncHandler(async (req: Request, res: Response)
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "LESSON_PLAN", existing._id.toString(), "SUBMITTED");
-  await notifyAdmins(req, "Lesson Plan Pending Approval", "A teacher submitted a lesson plan for review.", {
+  await notifyAdminsOfPendingAcademic(req, {
+    kind: "LESSON_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.teachingDateBs || existing.month,
     entityId: existing._id.toString()
   });
 
@@ -2044,7 +2078,12 @@ export const approveLessonPlan = asyncHandler(async (req: Request, res: Response
   existing.audit = { ...existing.audit, approvedBy: actorObjectId(req), approvedAt: new Date(), updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "LESSON_PLAN", existing._id.toString(), "APPROVED", remarks);
-  await notifyTeacher(req, existing.teacherId.toString(), "Lesson Plan Approved", "Your lesson plan has been approved.", {
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "LESSON_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.teachingDateBs || existing.month,
+    action: "APPROVED",
     entityId: existing._id.toString()
   });
 
@@ -2071,7 +2110,15 @@ export const rejectLessonPlan = asyncHandler(async (req: Request, res: Response)
   };
   await existing.save();
   await recordApproval(req, "LESSON_PLAN", existing._id.toString(), "REJECTED", remarks);
-  await notifyTeacher(req, existing.teacherId.toString(), "Lesson Plan Rejected", remarks, { entityId: existing._id.toString() });
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "LESSON_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.teachingDateBs || existing.month,
+    action: "REJECTED",
+    remarks,
+    entityId: existing._id.toString()
+  });
 
   const serialized = await serializeLessonPlan(existing._id.toString());
   return sendSuccess(res, "Lesson plan rejected", serialized);
@@ -2612,7 +2659,15 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
   await existing.save();
 
   if (existing.lessonPlanItemId) await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
-  await notifyTeacher(req, existing.teacherId.toString(), "Log Book Reviewed", payload.adminRemarks ?? "Your log book entry was reviewed.", {
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "LOG_BOOK",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: [existing.dateBs, payload.reviewStatus.replace(/_/g, " ").toLowerCase()]
+      .filter(Boolean)
+      .join(" · "),
+    action: "REVIEWED",
+    remarks: payload.adminRemarks,
     entityId: existing._id.toString()
   });
 
@@ -2717,13 +2772,26 @@ export const addComment = asyncHandler(async (req: Request, res: Response) => {
     entity.teacherId &&
     (await actorIsAcademicAdmin(req))
   ) {
-    await notifyTeacher(
-      req,
-      entity.teacherId.toString(),
-      "Admin Comment Added",
-      payload.comment,
-      { entityId: payload.entityId }
-    );
+    const kind =
+      payload.entityType === "SYLLABUS"
+        ? "SYLLABUS"
+        : payload.entityType === "SESSION_PLAN"
+          ? "SESSION_PLAN"
+          : payload.entityType === "LESSON_PLAN"
+            ? "LESSON_PLAN"
+            : "LOG_BOOK";
+    const subjectId =
+      "subjectId" in entity && entity.subjectId
+        ? entity.subjectId.toString()
+        : undefined;
+    await notifyTeacherOfAcademicDecision(req, {
+      kind,
+      teacherId: entity.teacherId.toString(),
+      subjectId,
+      action: "COMMENT",
+      remarks: payload.comment,
+      entityId: payload.entityId
+    });
   }
 
   return sendSuccess(res, "Comment added", comment, 201);
@@ -2738,7 +2806,12 @@ export const unlockLessonPlan = asyncHandler(async (req: Request, res: Response)
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "LESSON_PLAN", existing._id.toString(), "UNLOCKED");
-  await notifyTeacher(req, existing.teacherId.toString(), "Lesson Plan Unlocked", "Your lesson plan has been unlocked for corrections.", {
+  await notifyTeacherOfAcademicDecision(req, {
+    kind: "LESSON_PLAN",
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    extra: existing.teachingDateBs || existing.month,
+    action: "UNLOCKED",
     entityId: existing._id.toString()
   });
 

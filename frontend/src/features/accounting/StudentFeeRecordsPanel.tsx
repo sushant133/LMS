@@ -181,6 +181,7 @@ const emptyPaymentForm = () => ({
   studentId: "",
   programYear: "1",
   feeStructureId: "",
+  receiptNumber: "",
   paidDateBs: "",
   paidDateAd: "",
   currentChargesNpr: "",
@@ -564,6 +565,7 @@ export const StudentFeeRecordsPanel = () => {
       feeStructureId: row.feeStructureId
         ? String(row.feeStructureId)
         : "",
+      receiptNumber: row.receiptNumber ?? "",
       paidDateBs,
       paidDateAd,
       currentChargesNpr: String(row.currentChargesNpr ?? 0),
@@ -901,6 +903,11 @@ export const StudentFeeRecordsPanel = () => {
       toast.error("Could not convert AD date to BS — check the AD date");
       return null;
     }
+    const receiptNumber = paymentForm.receiptNumber.trim();
+    if (!receiptNumber) {
+      toast.error("Enter receipt number");
+      return null;
+    }
     const amountPaid = Number(paymentForm.amountPaidNpr);
     const charges = Number(paymentForm.currentChargesNpr);
     // Security deposits are recorded in Security Deposit Records — not here.
@@ -938,6 +945,7 @@ export const StudentFeeRecordsPanel = () => {
     return {
       studentId: paymentForm.studentId,
       feeStructureId: paymentForm.feeStructureId || undefined,
+      receiptNumber,
       paidDateBs,
       paidDateAd: paidDateAd || undefined,
       programYear: Number(paymentForm.programYear),
@@ -2043,6 +2051,19 @@ export const StudentFeeRecordsPanel = () => {
                         scholarshipNpr: e.target.value,
                       }))
                     }
+                  />
+                </FormField>
+                <FormField label="Receipt no.">
+                  <Input
+                    value={paymentForm.receiptNumber}
+                    onChange={(e) =>
+                      setPaymentForm((f) => ({
+                        ...f,
+                        receiptNumber: e.target.value,
+                      }))
+                    }
+                    placeholder="As printed on the receipt book"
+                    autoComplete="off"
                   />
                 </FormField>
                 <FormField label="Payment method">

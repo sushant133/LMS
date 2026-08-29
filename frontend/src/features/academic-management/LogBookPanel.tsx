@@ -252,6 +252,8 @@ interface LogBookPanelProps {
   isCollege?: boolean;
   institutionName?: string;
   writeAccess?: boolean;
+  /** Academic Management admin hub (not teacher My Work). */
+  isAdminView?: boolean;
 }
 
 export const LogBookPanel = ({
@@ -266,11 +268,14 @@ export const LogBookPanel = ({
   isCollege = false,
   institutionName = "Institution",
   writeAccess = true,
+  isAdminView = false,
 }: LogBookPanelProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
   const canMutate = writeAccess;
+  const canEditDelete =
+    writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
   const defaultSignature = user?.fullName || "";
 
   const makeBlankRow = (dateBs = formatTodayBs()): DraftLogRow => ({
@@ -1519,7 +1524,7 @@ export const LogBookPanel = ({
                                 </Td>
                                 <Td className="no-print">
                                   <div className="flex flex-wrap gap-1">
-                                    {canMutate ? (
+                                    {canEditDelete ? (
                                       <Button
                                         size="sm"
                                         variant="outline"

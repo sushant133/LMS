@@ -3388,10 +3388,11 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Receipt Number (optional)">
+              <FormField label="Receipt no.">
                 <Input
                   value={incomeForm.receiptNumber ?? ""}
-                  placeholder="Auto if blank"
+                  placeholder="As printed on the receipt book"
+                  autoComplete="off"
                   onChange={(e) =>
                     setIncomeForm((c) => ({
                       ...c,
@@ -3416,6 +3417,9 @@ export const AccountingManager = () => {
                 ) : null}
                 <Button
                   onClick={() => {
+                    if (!(incomeForm.receiptNumber ?? "").trim()) {
+                      return toast.error("Enter receipt number");
+                    }
                     const parsed = accountingIncomeSchema.safeParse(incomeForm);
                     if (!parsed.success)
                       return toast.error(

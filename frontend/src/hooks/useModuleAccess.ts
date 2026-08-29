@@ -2,6 +2,7 @@ import {
   applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
   canAccessModule,
+  canEditOrDeleteRecords,
   hasModuleAction,
   isInstitutionAdmin,
   isSystemAdministrator,
@@ -18,6 +19,8 @@ import {
 import { useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "features/auth/AuthProvider";
+import { userIsTeacher } from "lib/teacherRole";
+import { isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
 
 /**
  * Resolve module access for the signed-in user.
@@ -105,6 +108,7 @@ export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
     mode,
     canAccess,
     canWrite,
+    isUnrestricted,
     isReadOnly,
     isDenied,
     canDo,
@@ -141,7 +145,39 @@ export const useCanManageGrantedModule = (moduleKey: ErpModuleKey): boolean => {
   if (isUnrestricted) return true;
   if (!canWrite) return false;
   if (isInstitutionAdmin(user?.role ?? "")) return true;
-  return !(TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(
-    moduleKey,
-  );
+  if (isDualRoleTeacher(user)) return true;
+  if (userIsTeacher(user)) {
+    return !(TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(
+      moduleKey,
+    );
+  }
+  return true;
+};
+
+/**
+ * Administration UI for a department (Approve, create students, manage library…).
+ * Institution admins always. Staff with Manage. Dual-role teachers only on
+ * Administration routes for teaching-baseline modules (My Work stays teaching-only).
+ */
+export const useIsGrantedAdmin = (moduleKey: ErpModuleKey): boolean => {
+  const { user } = useAuth();
+  const workspace = useWorkspaceMode();
+  const canManage = useCanManageGrantedModule(moduleKey);
+  if (!canManage) return false;
+  if (isInstitutionAdmin(user?.role ?? "") || isSystemAdministrator(user?.role ?? "")) {
+    return true;
+  }
+  if (
+    userIsTeacher(user) &&
+    (TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(moduleKey)
+  ) {
+    return workspace === "admin";
+  }
+  return true;
+};
+
+/** Edit / Delete on existing records — Administrator and System Administrator only. */
+export const useCanEditOrDeleteRecords = (): boolean => {
+  const { user } = useAuth();
+  return canEditOrDeleteRecords(user?.role ?? "");
 };

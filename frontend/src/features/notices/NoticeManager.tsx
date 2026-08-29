@@ -9,6 +9,8 @@ import {
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
+import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
+import { isDualRoleTeacher } from "lib/workspace";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -59,7 +61,11 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const [form, setForm] = useState<NoticeInput>(adminDefaultNoticeValue);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const canManageNotices = canManageInstitution(user?.role ?? "") || isTeacher;
+  const grantedNotices = useCanManageGrantedModule("notices");
+  const canManageNotices =
+    canManageInstitution(user?.role ?? "") || isTeacher || grantedNotices;
+  const canEditDeleteNotices =
+    useCanEditOrDeleteRecords() || (isTeacher && !isDualRoleTeacher(user));
   const isReadOnlyViewer = user?.role === "STUDENT" || user?.role === "PARENT";
 
   useEffect(() => {
@@ -505,7 +511,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                       </Td>
                       <Td>{notice.publishDateBs}</Td>
                       <Td className="text-right">
-                        {canManageNotices ? (
+                        {canManageNotices && canEditDeleteNotices ? (
                           <div className="flex justify-end gap-2">
                             <Button
                               size="sm"

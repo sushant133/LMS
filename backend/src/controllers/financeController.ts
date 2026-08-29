@@ -19,6 +19,7 @@ import { FinanceTransaction } from "../models/FinanceTransaction.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import { deleteStoredMediaUrls } from "../utils/mediaCleanup.js";
 import { sendSuccess } from "../utils/response.js";
 import { withTenantScope, tenantObjectId } from "../utils/tenant.js";
@@ -455,7 +456,9 @@ const buildTransactionFilter = (req: Request): Record<string, unknown> => {
   }
 
   if (typeof search === "string" && search.trim()) {
-    const q = search.trim();
+    // Escape before building $regex — a raw term lets the caller inject regex
+    // metacharacters and stall the query (ReDoS) on the archive collection.
+    const q = escapeRegex(search.trim());
     filter.$or = [
       { title: { $regex: q, $options: "i" } },
       { description: { $regex: q, $options: "i" } },

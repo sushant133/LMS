@@ -814,7 +814,9 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
     }
 
     if (tab === "STUDENT") {
-      const student = await Student.findById(personId)
+      // Scope by tenant: findById alone returned the name of any student in
+      // any institution for a guessed id, leaking PII across colleges.
+      const student = await Student.findOne({ _id: personId, schoolId })
         .populate("user", "fullName")
         .lean();
       const personName =

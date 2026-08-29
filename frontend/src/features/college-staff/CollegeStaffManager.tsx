@@ -51,7 +51,7 @@ import {
 import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
-import { useCanManageGrantedModule } from "hooks/useModuleAccess";
+import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import {
   categoryDisplayLabel,
@@ -110,6 +110,7 @@ export const CollegeStaffManager = ({
   showCreateForm = true,
 }: CollegeStaffManagerProps) => {
   const canManage = useCanManageGrantedModule("staff");
+  const canEditDelete = useCanEditOrDeleteRecords();
   const { user, availableSchools } = useAuth();
   const institutionName = getCollegeDisplayName(availableSchools, user);
   const printBranding = getPrintInstitutionBranding();
@@ -1291,6 +1292,7 @@ export const CollegeStaffManager = ({
                                         Profile
                                       </Link>
                                     </Button>
+                                    {canEditDelete ? (
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -1300,6 +1302,7 @@ export const CollegeStaffManager = ({
                                     >
                                       Edit
                                     </Button>
+                                    ) : null}
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -1394,6 +1397,7 @@ export const CollegeStaffManager = ({
                                     >
                                       Resend credentials
                                     </Button>
+                                    {canEditDelete ? (
                                     <Button
                                       size="sm"
                                       variant="destructive"
@@ -1410,6 +1414,7 @@ export const CollegeStaffManager = ({
                                     >
                                       Delete
                                     </Button>
+                                    ) : null}
                                   </div>
                                 </Td>
                               ) : null}

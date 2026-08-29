@@ -42,14 +42,11 @@ import { compareBsDates, getDayOfWeekFromBs, getOffsetFromBsDate, getTodayBs } f
 import { sendNotification, getSchoolIdFromRequest } from "./notificationService.js";
 import { getTeacherScope, requireTeacherScope } from "./teacherScope.js";
 import { tenantObjectId } from "./tenant.js";
-import { actorHasExtraAdminGrants, actorMayUseAdminWorkspaceScope } from "./workspaceScope.js";
+import { actorCanAdministerModule, actorMayUseAdminWorkspaceScope } from "./workspaceScope.js";
 
-/** Institution Administrator, or a dual-role teacher with extra admin grants. */
-export const actorIsAcademicAdmin = async (req: Request): Promise<boolean> => {
-  if (!req.user) return false;
-  if (canManageInstitution(req.user.role)) return true;
-  return actorHasExtraAdminGrants(req);
-};
+/** Institution Administrator, staff with Academic Management write, or dual-role teacher. */
+export const actorIsAcademicAdmin = async (req: Request): Promise<boolean> =>
+  actorCanAdministerModule(req, "academic-management");
 
 /** Nepali month names aligned with BS month index 1–12 (Baisakh=1 … Chaitra=12). */
 export const NEPALI_MONTH_NAMES = [
@@ -66,6 +63,8 @@ export const NEPALI_MONTH_NAMES = [
   "Falgun",
   "Chaitra"
 ] as const;
+
+const BS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const isBsDateString = (value?: string | null): value is string => Boolean(value && BS_DATE_RE.test(value.trim()));
 
@@ -432,6 +431,151 @@ export const notifyAdmins = async (req: Request, title: string, message: string,
       })
     )
   );
+};
+
+export type AcademicNotifyKind = "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK";
+
+const ACADEMIC_KIND_NOUN: Record<AcademicNotifyKind, string> = {
+  SYLLABUS: "syllabus",
+  SESSION_PLAN: "session plan",
+  LESSON_PLAN: "lesson plan",
+  LOG_BOOK: "log book"
+};
+
+const ACADEMIC_KIND_TITLE: Record<AcademicNotifyKind, string> = {
+  SYLLABUS: "Syllabus",
+  SESSION_PLAN: "Session plan",
+  LESSON_PLAN: "Lesson plan",
+  LOG_BOOK: "Log book"
+};
+
+export const academicKindNoun = (kind: AcademicNotifyKind): string => ACADEMIC_KIND_NOUN[kind];
+export const academicKindTitle = (kind: AcademicNotifyKind): string => ACADEMIC_KIND_TITLE[kind];
+
+export const academicNotifyNames = async (
+  teacherId?: string | null,
+  subjectId?: string | null
+): Promise<{ teacherName: string; subjectName: string }> => {
+  const [teacher, subject] = await Promise.all([
+    teacherId
+      ? Teacher.findById(teacherId).select("teacherCode user").populate("user", "fullName").lean()
+      : null,
+    subjectId ? Subject.findById(subjectId).select("name code").lean() : null
+  ]);
+  const teacherName =
+    (teacher?.user as { fullName?: string } | undefined)?.fullName?.trim() ||
+    String(teacher?.teacherCode || "").trim() ||
+    "a teacher";
+  const subjectName = String(subject?.name || "").trim() || "a subject";
+  return { teacherName, subjectName };
+};
+
+const subjectWithExtra = (subjectName: string, extra?: string): string =>
+  extra?.trim() ? `${subjectName} (${extra.trim()})` : subjectName;
+
+export const academicAdminPendingCopy = (
+  kind: AcademicNotifyKind,
+  teacherName: string,
+  subjectName: string,
+  extra?: string
+): { title: string; message: string } => ({
+  title: `${ACADEMIC_KIND_TITLE[kind]} pending review`,
+  message: `${teacherName} submitted the ${subjectWithExtra(subjectName, extra)} ${ACADEMIC_KIND_NOUN[kind]} for administrator review.`
+});
+
+export const academicTeacherDecisionCopy = (
+  kind: AcademicNotifyKind,
+  action: "APPROVED" | "REJECTED" | "UNLOCKED" | "REVIEWED" | "COMMENT",
+  subjectName: string,
+  extra?: string,
+  remarks?: string
+): { title: string; message: string } => {
+  const item = `${subjectWithExtra(subjectName, extra)} ${ACADEMIC_KIND_NOUN[kind]}`;
+  const note = remarks?.trim();
+  switch (action) {
+    case "APPROVED":
+      return {
+        title: `${ACADEMIC_KIND_TITLE[kind]} approved`,
+        message: `Your ${item} has been approved.`
+      };
+    case "REJECTED":
+      return {
+        title: `${ACADEMIC_KIND_TITLE[kind]} rejected`,
+        message: note
+          ? `Your ${item} was rejected. Reason: ${note}`
+          : `Your ${item} was rejected. Please review the administrator remarks and resubmit.`
+      };
+    case "UNLOCKED":
+      return {
+        title: `${ACADEMIC_KIND_TITLE[kind]} unlocked`,
+        message: `Your ${item} has been unlocked so you can make corrections.`
+      };
+    case "REVIEWED":
+      return {
+        title: "Log book reviewed",
+        message: note ? `Your ${item} was reviewed. Remarks: ${note}` : `Your ${item} was reviewed.`
+      };
+    case "COMMENT":
+      return {
+        title: `Comment on ${ACADEMIC_KIND_NOUN[kind]}`,
+        message: note
+          ? `An administrator commented on your ${item}: ${note}`
+          : `An administrator commented on your ${item}.`
+      };
+  }
+};
+
+export const notifyAdminsOfPendingAcademic = async (
+  req: Request,
+  input: {
+    kind: AcademicNotifyKind;
+    teacherId?: string | null;
+    subjectId?: string | null;
+    extra?: string;
+    entityId: string;
+  }
+): Promise<void> => {
+  const names = await academicNotifyNames(input.teacherId, input.subjectId);
+  const copy = academicAdminPendingCopy(
+    input.kind,
+    names.teacherName,
+    names.subjectName,
+    input.extra
+  );
+  await notifyAdmins(req, copy.title, copy.message, {
+    entityId: input.entityId,
+    kind: input.kind,
+    teacherId: input.teacherId ? String(input.teacherId) : "",
+    subjectId: input.subjectId ? String(input.subjectId) : ""
+  });
+};
+
+export const notifyTeacherOfAcademicDecision = async (
+  req: Request,
+  input: {
+    kind: AcademicNotifyKind;
+    teacherId: string;
+    subjectId?: string | null;
+    extra?: string;
+    action: "APPROVED" | "REJECTED" | "UNLOCKED" | "REVIEWED" | "COMMENT";
+    remarks?: string;
+    entityId: string;
+  }
+): Promise<void> => {
+  if (!input.teacherId) return;
+  const names = await academicNotifyNames(input.teacherId, input.subjectId);
+  const copy = academicTeacherDecisionCopy(
+    input.kind,
+    input.action,
+    names.subjectName,
+    input.extra,
+    input.remarks
+  );
+  await notifyTeacher(req, input.teacherId, copy.title, copy.message, {
+    entityId: input.entityId,
+    kind: input.kind,
+    subjectId: input.subjectId ? String(input.subjectId) : ""
+  });
 };
 
 /** Session Plan statuses that may feed Lesson Plans for the owning teacher. */
@@ -1764,6 +1908,164 @@ const countCurriculumSubjects = async (
   return rows.length;
 };
 
+const roundPct = (n: number): number => Math.max(0, Math.min(100, Math.round(n)));
+
+const namedPercent = (percent: number) => ({
+  percent: roundPct(percent),
+  remainingPercent: roundPct(100 - roundPct(percent))
+});
+
+/** Join by stringified ObjectId so mixed string/ObjectId refs still resolve names. */
+const lookupByStringId = (
+  from: string,
+  localField: string,
+  as: string,
+  project: Record<string, 1>
+) => ({
+  $lookup: {
+    from,
+    let: { local: `$${localField}` },
+    pipeline: [
+      {
+        $match: {
+          $expr: {
+            $and: [
+              { $gt: [{ $strLenCP: { $toString: { $ifNull: ["$$local", ""] } } }, 0] },
+              {
+                $eq: [
+                  { $toString: "$_id" },
+                  { $toString: { $ifNull: ["$$local", ""] } }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      { $project: project }
+    ],
+    as
+  }
+});
+
+type SyllabusCompletionRow = {
+  subjectId: string;
+  subjectName: string;
+  percent: number;
+  remainingPercent: number;
+};
+
+const loadSyllabusCompletionRows = async (
+  schoolId: mongoose.Types.ObjectId,
+  filters: AcademicManagementFilters,
+  allowedSubjectIds?: string[]
+): Promise<SyllabusCompletionRow[]> => {
+  const match: Record<string, unknown> = { schoolId, isDeleted: { $ne: true } };
+  if (filters.academicYearBs) match.academicYearBs = filters.academicYearBs;
+  if (filters.subjectId) {
+    const ids = await expandCurriculumSubjectIds(schoolId, filters.subjectId);
+    match.subjectId = ids.length === 1 ? ids[0] : { $in: ids };
+  } else if (allowedSubjectIds?.length) {
+    const allowed = new Set<string>(allowedSubjectIds.map(String));
+    for (const id of allowedSubjectIds) {
+      for (const sib of await expandCurriculumSubjectIds(schoolId, String(id))) {
+        allowed.add(sib);
+      }
+    }
+    match.subjectId = { $in: [...allowed] };
+  }
+
+  const syllabi = await AcademicSyllabus.find(match).select("_id subjectId").lean();
+  if (syllabi.length === 0) return [];
+
+  const syllabusIds = syllabi.map((row) => row._id);
+  const [subUnits, legacyUnits, subjectDocs] = await Promise.all([
+    AcademicSyllabusSubUnit.find({ syllabusId: { $in: syllabusIds } })
+      .select("syllabusId parentSubUnitId status")
+      .lean(),
+    AcademicSyllabusUnit.find({ syllabusId: { $in: syllabusIds } })
+      .select("syllabusId status")
+      .lean(),
+    Subject.find({ _id: { $in: syllabi.map((row) => row.subjectId) } })
+      .select("name code masterSubjectId")
+      .lean()
+  ]);
+
+  const parentIds = new Set(
+    subUnits
+      .map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : ""))
+      .filter(Boolean)
+  );
+  const leavesBySyllabus = new Map<string, { total: number; done: number }>();
+  for (const sub of subUnits) {
+    if (parentIds.has(String(sub._id))) continue;
+    const sid = String(sub.syllabusId);
+    const bucket = leavesBySyllabus.get(sid) ?? { total: 0, done: 0 };
+    bucket.total += 1;
+    if (sub.status === "COMPLETED" || sub.status === "SKIPPED") bucket.done += 1;
+    leavesBySyllabus.set(sid, bucket);
+  }
+  const hasHierarchy = new Set(leavesBySyllabus.keys());
+  const legacyBySyllabus = new Map<string, { total: number; done: number }>();
+  for (const unit of legacyUnits) {
+    const sid = String(unit.syllabusId);
+    if (hasHierarchy.has(sid)) continue;
+    const bucket = legacyBySyllabus.get(sid) ?? { total: 0, done: 0 };
+    bucket.total += 1;
+    if (unit.status === "COMPLETED") bucket.done += 1;
+    legacyBySyllabus.set(sid, bucket);
+  }
+
+  const subjectMeta = new Map(
+    subjectDocs.map((subject) => {
+      const name = String(subject.name || "").trim() || "Subject";
+      const master = subject.masterSubjectId ? String(subject.masterSubjectId) : "";
+      const code = String(subject.code || "").trim().toLowerCase();
+      return [
+        String(subject._id),
+        {
+          name,
+          key: master
+            ? `master:${master}`
+            : code
+              ? `code:${code}`
+              : `name:${name.toLowerCase()}`
+        }
+      ] as const;
+    })
+  );
+
+  const grouped = new Map<
+    string,
+    { subjectId: string; subjectName: string; percents: number[] }
+  >();
+  for (const syllabus of syllabi) {
+    const sid = String(syllabus._id);
+    const stats = leavesBySyllabus.get(sid) ?? legacyBySyllabus.get(sid);
+    if (!stats || stats.total === 0) continue;
+    const percent = roundPct((stats.done / stats.total) * 100);
+    const subjectId = String(syllabus.subjectId);
+    const meta = subjectMeta.get(subjectId);
+    const subjectName = meta?.name ?? "Subject";
+    const key = meta?.key ?? `id:${subjectId}`;
+    const row = grouped.get(key) ?? { subjectId, subjectName, percents: [] };
+    row.percents.push(percent);
+    grouped.set(key, row);
+  }
+
+  return [...grouped.values()]
+    .map((row) => {
+      const percent = roundPct(
+        row.percents.reduce((sum, n) => sum + n, 0) / Math.max(1, row.percents.length)
+      );
+      return {
+        subjectId: row.subjectId,
+        subjectName: row.subjectName,
+        ...namedPercent(percent)
+      };
+    })
+    .sort((a, b) => b.percent - a.percent || a.subjectName.localeCompare(b.subjectName));
+};
+
 const emptyDashboard = (): AcademicManagementDashboard => ({
   totalSubjects: 0,
   totalSessionPlans: 0,
@@ -1808,15 +2110,20 @@ const buildDashboardInner = async (
   const teacherScope = await getTeacherScope(req);
 
   const liveSessionPlanIds = (
-    await AcademicSessionPlan.find({ schoolId, isDeleted: false, ...(teacherScope ? { teacherId: teacherScope.teacherId } : {}) })
+    await AcademicSessionPlan.find({
+      schoolId,
+      isDeleted: { $ne: true },
+      ...(teacherScope ? { teacherId: teacherScope.teacherId } : {})
+    })
       .select("_id")
       .lean()
   ).map((plan) => plan._id);
 
-  const progressQuery: Record<string, unknown> = {
-    schoolId,
-    sessionPlanId: { $in: liveSessionPlanIds }
-  };
+  const progressQuery: Record<string, unknown> = { schoolId };
+  // `$in: []` matches nothing in MongoDB and zeros every dashboard graph.
+  if (liveSessionPlanIds.length > 0) {
+    progressQuery.sessionPlanId = { $in: liveSessionPlanIds };
+  }
   if (teacherScope) progressQuery.teacherId = teacherScope.teacherId;
   if (filters.academicYearBs) progressQuery.academicYearBs = filters.academicYearBs;
   if (filters.teacherId && !teacherScope) progressQuery.teacherId = filters.teacherId;
@@ -1977,7 +2284,7 @@ const buildDashboardInner = async (
   const typeOrder = { LESSON_PLAN_OVERDUE: 0, LESSON_PLAN_APPROACHING: 1, LOG_BOOK_MISSING: 2 } as const;
   teacherAlerts.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || b.remainingPercent - a.remainingPercent);
 
-  const monthlyMatch: Record<string, unknown> = { schoolId, isDeleted: false };
+  const monthlyMatch: Record<string, unknown> = { schoolId, isDeleted: { $ne: true } };
   if (teacherScope) monthlyMatch.teacherId = teacherScope.teacherId;
   if (filters.teacherId && !teacherScope) monthlyMatch.teacherId = filters.teacherId;
   if (filters.academicYearBs) monthlyMatch.academicYearBs = filters.academicYearBs;
@@ -1989,73 +2296,164 @@ const buildDashboardInner = async (
     { $sort: { _id: 1 } }
   ]);
 
-  const teacherPerformance = await AcademicProgress.aggregate([
-    { $match: progressQuery },
-    { $group: { _id: "$teacherId", completionPercent: { $avg: "$completedPercent" } } },
-    { $limit: 10 }
+  const teacherScopeSubjectIds = teacherScope?.subjectIds?.map(String);
+  const [
+    teacherPerformanceRows,
+    subjectProgressRows,
+    facultyProgressRows,
+    syllabusCompletionRows
+  ] = await Promise.all([
+    AcademicProgress.aggregate<{
+      _id: string;
+      completionPercent: number;
+      teacher?: { teacherCode?: string };
+      user?: { fullName?: string };
+    }>([
+      { $match: progressQuery },
+      {
+        $group: {
+          _id: { $toString: "$teacherId" },
+          completionPercent: { $avg: "$completedPercent" }
+        }
+      },
+      lookupByStringId("teachers", "_id", "teacher", { teacherCode: 1, user: 1 }),
+      { $unwind: { path: "$teacher", preserveNullAndEmptyArrays: true } },
+      lookupByStringId("users", "teacher.user", "user", { fullName: 1 }),
+      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+      { $sort: { completionPercent: -1 } },
+      { $limit: 25 }
+    ]),
+    AcademicProgress.aggregate<{
+      _id: string;
+      completionPercent: number;
+      subject?: { name?: string; code?: string; masterSubjectId?: unknown };
+    }>([
+      { $match: progressQuery },
+      {
+        $group: {
+          _id: { $toString: "$subjectId" },
+          completionPercent: { $avg: "$completedPercent" }
+        }
+      },
+      lookupByStringId("subjects", "_id", "subject", { name: 1, code: 1, masterSubjectId: 1 }),
+      { $unwind: { path: "$subject", preserveNullAndEmptyArrays: true } },
+      { $sort: { completionPercent: -1 } },
+      { $limit: 40 }
+    ]),
+    AcademicSessionPlan.aggregate<{ _id: string; completionPercent: number }>([
+      {
+        $match: {
+          schoolId,
+          isDeleted: { $ne: true },
+          ...(teacherScope ? { teacherId: teacherScope.teacherId } : {}),
+          ...(filters.teacherId && !teacherScope ? { teacherId: filters.teacherId } : {}),
+          ...(filters.academicYearBs ? { academicYearBs: filters.academicYearBs } : {}),
+          ...(filters.subjectId ? { subjectId: progressQuery.subjectId } : {})
+        }
+      },
+      {
+        $lookup: {
+          from: "academicprogresses",
+          localField: "_id",
+          foreignField: "sessionPlanId",
+          as: "progress"
+        }
+      },
+      { $unwind: { path: "$progress", preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: {
+            $let: {
+              vars: { raw: { $ifNull: ["$faculty", ""] } },
+              in: {
+                $cond: [{ $eq: [{ $trim: { input: "$$raw" } }, ""] }, "Unspecified", { $trim: { input: "$$raw" } }]
+              }
+            }
+          },
+          completionPercent: { $avg: { $ifNull: ["$progress.completedPercent", 0] } }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]),
+    loadSyllabusCompletionRows(schoolId, filters, teacherScopeSubjectIds)
   ]);
 
-  const teacherPerfIds = teacherPerformance
-    .map((row) => row._id)
-    .filter((id): id is NonNullable<typeof id> => id != null);
-  const teacherDocs = teacherPerfIds.length
-    ? await Teacher.find({ _id: { $in: teacherPerfIds } })
-        .populate("user", "fullName")
-        .lean()
-    : [];
+  const teacherPerformance = teacherPerformanceRows
+    .filter((row) => row._id)
+    .map((row) => {
+      const pct = roundPct(Number(row.completionPercent) || 0);
+      const teacherName =
+        String(row.user?.fullName || "").trim() ||
+        String(row.teacher?.teacherCode || "").trim() ||
+        "Teacher";
+      return {
+        teacherId: String(row._id),
+        teacherName,
+        completionPercent: pct,
+        remainingPercent: roundPct(100 - pct)
+      };
+    });
 
-  const teacherNameMap = new Map(
-    teacherDocs.map((teacher) => [
-      teacher._id.toString(),
-      (teacher.user as { fullName?: string } | undefined)?.fullName ?? teacher.teacherCode
-    ])
-  );
+  const subjectGrouped = new Map<
+    string,
+    { subjectId: string; subjectName: string; percents: number[] }
+  >();
+  for (const row of subjectProgressRows) {
+    if (!row._id) continue;
+    const name = String(row.subject?.name || "").trim() || "Subject";
+    const master = row.subject?.masterSubjectId ? String(row.subject.masterSubjectId) : "";
+    const code = String(row.subject?.code || "").trim().toLowerCase();
+    const key = master ? `master:${master}` : code ? `code:${code}` : `name:${name.toLowerCase()}`;
+    const current = subjectGrouped.get(key) ?? {
+      subjectId: String(row._id),
+      subjectName: name,
+      percents: []
+    };
+    current.percents.push(Number(row.completionPercent) || 0);
+    subjectGrouped.set(key, current);
+  }
+  const subjectProgress = [...subjectGrouped.values()]
+    .map((row) => {
+      const pct = roundPct(
+        row.percents.reduce((sum, n) => sum + n, 0) / Math.max(1, row.percents.length)
+      );
+      return {
+        subjectId: row.subjectId,
+        subjectName: row.subjectName,
+        completionPercent: pct,
+        remainingPercent: roundPct(100 - pct)
+      };
+    })
+    .sort((a, b) => b.completionPercent - a.completionPercent || a.subjectName.localeCompare(b.subjectName))
+    .slice(0, 25);
 
-  const subjectProgress = await AcademicProgress.aggregate([
-    { $match: progressQuery },
-    { $group: { _id: "$subjectId", completionPercent: { $avg: "$completedPercent" } } },
-    { $limit: 10 }
-  ]);
+  const facultyProgress = facultyProgressRows
+    .filter((row) => row._id != null && String(row._id).trim() !== "")
+    .map((row) => {
+      const pct = roundPct(Number(row.completionPercent) || 0);
+      return {
+        faculty: String(row._id),
+        completionPercent: pct,
+        remainingPercent: roundPct(100 - pct)
+      };
+    });
 
-  const subjectPerfIds = subjectProgress
-    .map((row) => row._id)
-    .filter((id): id is NonNullable<typeof id> => id != null);
-  const subjectDocs = subjectPerfIds.length
-    ? await Subject.find({ _id: { $in: subjectPerfIds } })
-        .select("name")
-        .lean()
-    : [];
-  const subjectNameMap = new Map(subjectDocs.map((subject) => [subject._id.toString(), subject.name]));
+  const syllabusCompletion =
+    syllabusCompletionRows.length > 0
+      ? syllabusCompletionRows.slice(0, 25)
+      : subjectProgress.map((row) => ({
+          subjectName: row.subjectName,
+          percent: row.completionPercent,
+          remainingPercent: row.remainingPercent
+        }));
 
-  const facultyMatch: Record<string, unknown> = {
-    schoolId,
-    isDeleted: false,
-    faculty: { $exists: true, $ne: "" }
-  };
-  if (teacherScope) facultyMatch.teacherId = teacherScope.teacherId;
-  if (filters.teacherId && !teacherScope) facultyMatch.teacherId = filters.teacherId;
-  if (filters.academicYearBs) facultyMatch.academicYearBs = filters.academicYearBs;
-  if (filters.subjectId) facultyMatch.subjectId = filters.subjectId;
-
-  const facultyProgressRows = await AcademicSessionPlan.aggregate([
-    { $match: facultyMatch },
-    {
-      $lookup: {
-        from: "academicprogresses",
-        localField: "_id",
-        foreignField: "sessionPlanId",
-        as: "progress"
-      }
-    },
-    { $unwind: { path: "$progress", preserveNullAndEmptyArrays: true } },
-    {
-      $group: {
-        _id: "$faculty",
-        completionPercent: { $avg: "$progress.completedPercent" }
-      }
-    },
-    { $sort: { _id: 1 } }
-  ]);
+  const syllabusAvg =
+    syllabusCompletionRows.length > 0
+      ? roundPct(
+          syllabusCompletionRows.reduce((sum, row) => sum + row.percent, 0) /
+            syllabusCompletionRows.length
+        )
+      : avgCompletion;
 
   return {
     totalSubjects: subjects,
@@ -2065,60 +2463,21 @@ const buildDashboardInner = async (
     approvedPlans,
     pendingApprovals,
     delayedLessonPlans: delayedItems,
-    syllabusCompletionPercent: avgCompletion,
-    syllabusRemainingPercent: avgRemaining,
+    syllabusCompletionPercent: syllabusAvg,
+    syllabusRemainingPercent: roundPct(100 - syllabusAvg),
     teachersPendingLogBook,
     teacherAlerts: teacherAlerts.slice(0, 30),
-    monthlyProgress: monthlyProgress.map((row) => ({
-      month: row._id as string,
-      planned: row.planned as number,
-      completed: row.completed as number
-    })),
-    teacherPerformance: teacherPerformance
-      .filter((row) => row._id != null)
-      .map((row) => {
-        const id = String(row._id);
-        const pct = Math.round(Number(row.completionPercent) || 0);
-        return {
-          teacherId: id,
-          teacherName: teacherNameMap.get(id) ?? "Teacher",
-          completionPercent: pct,
-          remainingPercent: Math.max(0, 100 - pct)
-        };
-      }),
-    subjectProgress: subjectProgress
-      .filter((row) => row._id != null)
-      .map((row) => {
-        const id = String(row._id);
-        const pct = Math.round(Number(row.completionPercent) || 0);
-        return {
-          subjectId: id,
-          subjectName: subjectNameMap.get(id) ?? "Subject",
-          completionPercent: pct,
-          remainingPercent: Math.max(0, 100 - pct)
-        };
-      }),
-    facultyProgress: facultyProgressRows
-      .filter((row) => row._id != null && String(row._id).trim() !== "")
-      .map((row) => {
-        const pct = Math.round(Number(row.completionPercent) || 0);
-        return {
-          faculty: String(row._id),
-          completionPercent: pct,
-          remainingPercent: Math.max(0, 100 - pct)
-        };
-      }),
-    syllabusCompletion: subjectProgress
-      .filter((row) => row._id != null)
-      .map((row) => {
-        const id = String(row._id);
-        const pct = Math.round(Number(row.completionPercent) || 0);
-        return {
-          subjectName: subjectNameMap.get(id) ?? "Subject",
-          percent: pct,
-          remainingPercent: Math.max(0, 100 - pct)
-        };
-      })
+    monthlyProgress: monthlyProgress
+      .filter((row) => String(row._id || "").trim())
+      .map((row) => ({
+        month: String(row._id),
+        planned: row.planned as number,
+        completed: row.completed as number
+      })),
+    teacherPerformance,
+    subjectProgress,
+    facultyProgress,
+    syllabusCompletion
   };
 };
 

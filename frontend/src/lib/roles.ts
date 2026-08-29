@@ -8,6 +8,7 @@ import {
   canAccessModule,
   canAccessStaffDirectory,
   canManageInstitution,
+  hasExtraAdminModuleGrants,
   hasInstitutionAccess,
   isAcademicStructurePath,
   isAttendanceAdminHubPath,
@@ -18,9 +19,11 @@ import {
   isSystemAdministrator,
   normalizeUserRole,
   resolveModuleFromRoutePath,
+  TEACHER_BASELINE_MODULE_KEYS,
   type ModuleAccessMap,
   type UserRole
 } from "@phit-erp/shared";
+import { isAdminWorkspacePath } from "./workspace";
 
 export {
   INSTITUTION_ACCESS_ROLES,
@@ -121,6 +124,19 @@ export const hasProtectedRouteAccess = (
     }
     const moduleKey = resolveModuleFromRoutePath(options.pathname);
     if (moduleKey && canAccessModule(options.moduleAccess, moduleKey)) {
+      const isTeacherUser =
+        normalizedRole === "TEACHER" ||
+        (secondaryRoles ?? []).some(
+          (role) => normalizeUserRole(role) === "TEACHER",
+        );
+      if (
+        isTeacherUser &&
+        isAdminWorkspacePath(options.pathname) &&
+        (TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(moduleKey) &&
+        !hasExtraAdminModuleGrants(options.moduleAccess)
+      ) {
+        return false;
+      }
       return true;
     }
   }

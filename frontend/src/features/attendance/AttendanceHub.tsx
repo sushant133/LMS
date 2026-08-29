@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { canManageInstitution, hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
+import { useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { api, unwrap } from "lib/api";
@@ -62,7 +63,12 @@ export const AttendanceHub = () => {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
-  const canWriteAdmin = canManageInstitution(user?.role ?? "");
+  const grantedAttendanceAdmin = useIsGrantedAdmin("attendance");
+  const grantedDailyAttendanceAdmin = useIsGrantedAdmin("daily-attendance");
+  const canWriteAdmin =
+    canManageInstitution(user?.role ?? "") ||
+    grantedAttendanceAdmin ||
+    grantedDailyAttendanceAdmin;
   const isTeacher = userIsTeacher(user);
   const isStaff = user?.role === "COLLEGE_STAFF";
   const isStudent = user?.role === "STUDENT";

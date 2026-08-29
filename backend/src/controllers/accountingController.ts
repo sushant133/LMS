@@ -218,6 +218,42 @@ const getOrCreateSettings = async (schoolId: ReturnType<typeof tenantObjectId>) 
   return settings;
 };
 
+const requireManualReceiptNumber = (raw: unknown): string => {
+  const receiptNumber = String(raw ?? "").trim();
+  if (!receiptNumber) {
+    throw new ApiError(400, "Enter receipt number");
+  }
+  return receiptNumber;
+};
+
+const assertReceiptNumberAvailable = async (
+  schoolId: ReturnType<typeof tenantObjectId>,
+  receiptNumber: string,
+  options?: { excludeFeeId?: string; excludeIncomeId?: string }
+): Promise<void> => {
+  const feeFilter: Record<string, unknown> = {
+    schoolId,
+    receiptNumber,
+    isDeleted: false
+  };
+  if (options?.excludeFeeId) feeFilter._id = { $ne: options.excludeFeeId };
+  const fee = await FeeCollection.findOne(feeFilter).select("_id").lean();
+  if (fee) {
+    throw new ApiError(400, `Receipt number ${receiptNumber} is already used on a fee receipt`);
+  }
+
+  const incomeFilter: Record<string, unknown> = {
+    schoolId,
+    receiptNumber,
+    isDeleted: false
+  };
+  if (options?.excludeIncomeId) incomeFilter._id = { $ne: options.excludeIncomeId };
+  const income = await AccountingIncome.findOne(incomeFilter).select("_id").lean();
+  if (income) {
+    throw new ApiError(400, `Receipt number ${receiptNumber} is already used on another receipt`);
+  }
+};
+
 /**
  * Display name of the signed-in user recording the entry.
  * Used for fee "Received by" / "Collected By" so Super Admin, College Admin,
@@ -1099,17 +1135,8 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       lateFeeNpr
     });
 
-    // Gap-free per-fiscal-year series from VoucherCounter. The old number came from
-    // countDocuments() plus a random suffix, which skipped numbers (voided receipts were
-    // still counted) and raced between concurrent cashiers.
-    const receiptNumber =
-      payload.receiptNumber?.trim() ||
-      (await nextVoucherNumber({
-        schoolId,
-        prefix: settings.receiptPrefix,
-        fiscalYearBs,
-        session
-      }));
+    const receiptNumber = requireManualReceiptNumber(payload.receiptNumber);
+    await assertReceiptNumberAvailable(schoolId, receiptNumber);
 
     const verificationCode = generateReceiptVerificationCode(
       schoolId.toString(),
@@ -1789,6 +1816,22 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
       existing.bankAccountId = payload.bankAccountId
         ? (payload.bankAccountId as unknown as typeof existing.bankAccountId)
         : undefined;
+    }
+    if (payload.receiptNumber !== undefined) {
+      const nextReceiptNumber = requireManualReceiptNumber(payload.receiptNumber);
+      if (nextReceiptNumber !== existing.receiptNumber) {
+        await assertReceiptNumberAvailable(schoolId, nextReceiptNumber, {
+          excludeFeeId: existing._id.toString()
+        });
+        existing.receiptNumber = nextReceiptNumber;
+        const cashReceived = nextAmountPaid + nextDepositPaid;
+        existing.verificationCode = generateReceiptVerificationCode(
+          schoolId.toString(),
+          nextReceiptNumber,
+          cashReceived,
+          nextPaidDateBs
+        );
+      }
     }
     if (payload.transactionNumber !== undefined) {
       existing.transactionNumber = emptyToUndef(payload.transactionNumber) ?? "";
@@ -2823,12 +2866,8 @@ export const createIncome = asyncHandler(async (req: Request, res: Response) => 
   const voucherNumber =
     payload.voucherNumber?.trim() ||
     (await nextRegisterVoucher(schoolId, "INC", payload.dateBs));
-  // Non-fee income shares the fee receipt series, so every rupee received across the
-  // institution is covered by one continuous, gap-free receipt book.
-  const settings = await getOrCreateSettings(schoolId);
-  const receiptNumber =
-    payload.receiptNumber?.trim() ||
-    (await nextRegisterVoucher(schoolId, settings.receiptPrefix, payload.dateBs));
+  const receiptNumber = requireManualReceiptNumber(payload.receiptNumber);
+  await assertReceiptNumberAvailable(schoolId, receiptNumber);
   const income = await AccountingIncome.create({
     ...payload,
     voucherNumber,
@@ -2880,6 +2919,16 @@ export const updateIncome = asyncHandler(async (req: Request, res: Response) => 
       400,
       "Cannot change amount, date, category, or payment method on posted income. Void it and create a new entry."
     );
+  }
+
+  if (payload.receiptNumber !== undefined) {
+    const nextReceiptNumber = requireManualReceiptNumber(payload.receiptNumber);
+    if (nextReceiptNumber !== (before.receiptNumber ?? "").trim()) {
+      await assertReceiptNumberAvailable(tenantObjectId(req), nextReceiptNumber, {
+        excludeIncomeId: before._id.toString()
+      });
+    }
+    payload.receiptNumber = nextReceiptNumber;
   }
 
   const record = await AccountingIncome.findOneAndUpdate(

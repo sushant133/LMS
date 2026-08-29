@@ -29,7 +29,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
-import { useCanManageGrantedModule } from "hooks/useModuleAccess";
+import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
 
 type ParentLinkRecord = {
   _id: string;
@@ -70,6 +70,7 @@ const relationshipLabels: Record<ParentFromStudentRelationship, string> = {
 
 export const ParentLinkManager = () => {
   const canManage = useCanManageGrantedModule("parents");
+  const canEditDelete = useCanEditOrDeleteRecords();
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [customLoginByRelationship, setCustomLoginByRelationship] = useState<
     Record<ParentFromStudentRelationship, string>
@@ -497,6 +498,8 @@ export const ParentLinkManager = () => {
                               >
                                 Modules
                               </Button>
+                              {canEditDelete ? (
+                              <>
                               <Button
                                 type="button"
                                 size="sm"
@@ -523,6 +526,8 @@ export const ParentLinkManager = () => {
                               >
                                 Delete
                               </Button>
+                              </>
+                              ) : null}
                             </div>
                           </Td>
                         </tr>

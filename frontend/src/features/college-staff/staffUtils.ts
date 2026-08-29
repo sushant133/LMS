@@ -4,6 +4,7 @@ import {
   COLLEGE_STAFF_CATEGORY_ROLES,
 } from "@phit-erp/shared";
 import { resolveMediaUrl } from "lib/api";
+import { neutralizeCsvFormula } from "lib/csvCell";
 
 export const emptyAddress = {
   province: "",
@@ -109,7 +110,11 @@ export function downloadCsv(filename: string, content: string) {
 export function rowsToCsv(rows: Record<string, unknown>[]): string {
   if (rows.length === 0) return "message\nNo data";
   const headers = Object.keys(rows[0]!);
-  const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  // Keep every cell quoted (unchanged output shape) but neutralize a leading
+  // =/@/+/- first, so exported free text cannot execute as a spreadsheet
+  // formula when the file is opened. CSV quoting alone does not prevent that.
+  const escape = (value: unknown) =>
+    `"${neutralizeCsvFormula(String(value ?? "")).replace(/"/g, '""')}"`;
   return [
     headers.join(","),
     ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),

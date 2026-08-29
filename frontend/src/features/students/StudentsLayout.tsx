@@ -2,7 +2,7 @@ import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import { UserPlus, Users } from "lucide-react";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { useAuth } from "features/auth/AuthProvider";
 import { isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
 import { userIsTeacher } from "lib/teacherRole";
@@ -22,13 +22,11 @@ export const StudentsLayout = () => {
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const workspace = useWorkspaceMode();
-  const isTenantAdmin = useIsTenantAdmin();
-  const canManage =
-    isTenantAdmin || (workspace === "admin" && isDualRoleTeacher(user));
+  const canManage = useIsGrantedAdmin("students");
   const location = useLocation();
 
   if (
-    !isTenantAdmin &&
+    !canManage &&
     userIsTeacher(user) &&
     !isDualRoleTeacher(user) &&
     (location.pathname === "/students" ||

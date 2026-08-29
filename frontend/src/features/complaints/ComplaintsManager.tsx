@@ -29,6 +29,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { useAuth } from "features/auth/AuthProvider";
+import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { ComplaintAttachmentUpload } from "features/complaints/ComplaintAttachmentUpload";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
@@ -62,8 +63,10 @@ const formatDate = (value?: string) => {
 export const ComplaintsManager = () => {
   const { user } = useAuth();
   const role = normalizeUserRole(user?.role ?? "");
-  const canWriteAdmin = canManageInstitution(role);
-  const canViewAll = hasInstitutionAccess(role);
+  const grantedComplaintsAdmin = useCanManageGrantedModule("complaints");
+  const canWriteAdmin = canManageInstitution(role) || grantedComplaintsAdmin;
+  const canEditDelete = useCanEditOrDeleteRecords();
+  const canViewAll = hasInstitutionAccess(role) || canWriteAdmin;
   const canSubmit = COMPLAINANT_ROLES.includes(role);
 
   const [form, setForm] = useState<CreateComplaintInput>(defaultForm);
@@ -321,6 +324,7 @@ export const ComplaintsManager = () => {
                             >
                               {isExpanded ? "Close" : "Manage"}
                             </Button>
+                            {canEditDelete ? (
                             <Button
                               size="sm"
                               variant="destructive"
@@ -337,6 +341,7 @@ export const ComplaintsManager = () => {
                               <Trash2 className="mr-1 h-3.5 w-3.5" />
                               Delete
                             </Button>
+                            ) : null}
                           </>
                         ) : (
                           <Button
