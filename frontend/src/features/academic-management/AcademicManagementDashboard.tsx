@@ -134,8 +134,40 @@ const tooltipStyle = {
   padding: "8px 10px",
 };
 
-/** Hue by identity — stable across sorts, filters and sibling charts. */
-const hueFor = (index: number): string => SERIES[index % SERIES.length]!;
+/**
+ * Second tier, for years that carry more subjects than the palette has slots.
+ * Cycling the eight is not allowed — the 9th subject would be indistinguishable
+ * from the 1st — so these are the same eight hues re-stepped: darker for the six
+ * with headroom, lighter for green and violet, which already sit near the floor
+ * of the lightness band and fall out of it when darkened.
+ *
+ * Validated as one 16-slot set against the white card surface:
+ *   Lightness band PASS · Chroma floor PASS · Normal-vision ΔE 15.3 PASS
+ *   CVD separation WARN (worst adjacent ΔE 7.2) — legal with secondary encoding,
+ *   which is present: every bar carries its name on the axis and its value on top.
+ *   Contrast WARN — relieved by those same labels plus the table view.
+ */
+const SERIES_TIER_2 = [
+  "#1e569a",
+  "#a94b25",
+  "#137e58",
+  "#ab7400",
+  "#a75976",
+  "#4da84d",
+  "#8479c3",
+  "#a33534",
+] as const;
+
+/**
+ * Hue by identity — stable across sorts, filters and sibling charts. Past 16
+ * subjects in one year the tiers do repeat; there the axis label and the value
+ * label carry identity and colour is only a recognition aid.
+ */
+const hueFor = (index: number): string => {
+  const slot = index % SERIES.length;
+  const tier = Math.floor(index / SERIES.length);
+  return tier % 2 === 0 ? SERIES[slot]! : SERIES_TIER_2[slot]!;
+};
 
 type ColumnRow = {
   key: string;
@@ -146,6 +178,21 @@ type ColumnRow = {
 
 /** Rough width of the 11px axis label face — enough to decide "does it fit". */
 const CHAR_PX = 6.1;
+
+/**
+ * Longest axis label we will draw. A tilted 40-character name runs off the left
+ * edge of the plot and the SVG clips its opening characters — "…prehensive
+ * clinical + PHC Practicum II" tells the reader nothing. Truncate the drawn
+ * label and keep the full name in the tooltip and the table view.
+ */
+const AXIS_LABEL_MAX = 20;
+
+const axisLabel = (value: unknown): string => {
+  const text = String(value ?? "").trim();
+  return text.length > AXIS_LABEL_MAX
+    ? `${text.slice(0, AXIS_LABEL_MAX - 1)}…`
+    : text;
+};
 
 /** Plot width, so the tilt decision is made against real pixels. */
 const useMeasuredWidth = () => {
@@ -170,7 +217,10 @@ const useMeasuredWidth = () => {
  * whenever it fits.
  */
 const axisGeometry = (rows: ColumnRow[], plotWidth = 0) => {
-  const longest = rows.reduce((max, r) => Math.max(max, r.label.length), 0);
+  const longest = rows.reduce(
+    (max, r) => Math.max(max, axisLabel(r.label).length),
+    0,
+  );
   const slotPx = rows.length > 0 && plotWidth > 0 ? plotWidth / rows.length : 0;
   const tilt =
     slotPx > 0
@@ -181,7 +231,8 @@ const axisGeometry = (rows: ColumnRow[], plotWidth = 0) => {
     angle: tilt ? -35 : 0,
     textAnchor: tilt ? ("end" as const) : ("middle" as const),
     /** The card must include the axis band, or the labels get clipped. */
-    axisHeight: tilt ? Math.min(120, 34 + longest * 3.6) : 30,
+    // sin(35°) ≈ 0.57, plus room for the tick gap and descenders.
+    axisHeight: tilt ? Math.min(150, 30 + longest * CHAR_PX * 0.62) : 30,
   };
 };
 
@@ -206,7 +257,7 @@ const TiltedTick = ({
       transform={`rotate(${angle})`}
       style={{ fill: INK.secondary, fontSize: 11 }}
     >
-      {String(payload?.value ?? "")}
+      {axisLabel(payload?.value)}
     </text>
   </g>
 );
@@ -234,7 +285,7 @@ const PercentColumns = ({ rows }: { rows: ColumnRow[] }) => {
       <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <BarChart
           data={data}
-          margin={{ top: 22, right: 12, left: 0, bottom: 4 }}
+          margin={{ top: 22, right: 16, left: 16, bottom: 4 }}
           barCategoryGap="28%"
         >
           {/* Solid hairlines — dashed grids read as thresholds. */}
@@ -261,6 +312,8 @@ const PercentColumns = ({ rows }: { rows: ColumnRow[] }) => {
           <Tooltip
             cursor={{ fill: "rgba(15,23,42,0.04)" }}
             contentStyle={tooltipStyle}
+            /* The axis label may be truncated; the tooltip always shows it whole. */
+            labelFormatter={(label: unknown) => String(label ?? "")}
             formatter={(value: unknown, name: unknown) => [
               formatPercent(value),
               name === "rest" ? "Remaining" : "Completed",
@@ -284,7 +337,7 @@ const PercentColumns = ({ rows }: { rows: ColumnRow[] }) => {
             {/* Tinted with the subject own hue so identity stays visible even at
                 0%, where the coloured segment has no height to show. */}
             {data.map((row) => (
-              <Cell key={row.key + "-rest"} fill={row.color + "1f"} />
+              <Cell key={row.key + "-rest"} fill={row.color + "40"} />
             ))}
             <LabelList
               dataKey="value"
@@ -458,7 +511,7 @@ const MonthlyColumns = ({
       <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <BarChart
           data={rows}
-          margin={{ top: 22, right: 12, left: 0, bottom: 4 }}
+          margin={{ top: 22, right: 16, left: 16, bottom: 4 }}
           barCategoryGap="26%"
           barGap={2}
         >

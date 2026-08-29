@@ -65,6 +65,58 @@ export const NEPALI_MONTH_NAMES = [
   "Chaitra"
 ] as const;
 
+/**
+ * Calendar position of a Nepali month, for ordering. Mongo can only sort the
+ * stored month *name*, which comes out alphabetical (Ashwin, Bhadra, Chaitra…)
+ * — meaningless for a progress-over-time chart. Unknown or blank names sort
+ * last rather than disappearing.
+ */
+export const nepaliMonthIndex = (name: unknown): number => {
+  const raw = String(name ?? "").trim().toLowerCase();
+  if (!raw) return NEPALI_MONTH_NAMES.length;
+  const found = NEPALI_MONTH_NAMES.findIndex(
+    (month) => month.toLowerCase() === raw
+  );
+  return found === -1 ? NEPALI_MONTH_NAMES.length : found;
+};
+
+/**
+ * The whole Nepali year, in calendar order, zero-filled.
+ *
+ * `$group` only emits months that have lesson plans, so a quiet Baisakh simply
+ * never appeared — the chart silently skipped from one busy month to the next
+ * and read as if the year had no start. A month with no plans is a real
+ * answer ("nothing planned"), so every month is emitted and the gaps show.
+ * Anything unrecognised (a misspelling in old data) is kept on the end rather
+ * than dropped.
+ */
+export const buildMonthlyProgress = (
+  rows: Array<{ _id?: unknown; planned?: unknown; completed?: unknown }>
+): Array<{ month: string; planned: number; completed: number }> => {
+  const byMonth = new Map<string, { planned: number; completed: number }>();
+  for (const row of rows) {
+    const month = String(row._id ?? "").trim();
+    if (!month) continue;
+    const current = byMonth.get(month.toLowerCase()) ?? { planned: 0, completed: 0 };
+    current.planned += Number(row.planned) || 0;
+    current.completed += Number(row.completed) || 0;
+    byMonth.set(month.toLowerCase(), current);
+  }
+
+  const calendar = NEPALI_MONTH_NAMES.map((month) => {
+    const hit = byMonth.get(month.toLowerCase());
+    byMonth.delete(month.toLowerCase());
+    return { month, planned: hit?.planned ?? 0, completed: hit?.completed ?? 0 };
+  });
+
+  // Whatever is left is off-calendar; keep it visible, after the real months.
+  const leftovers = [...byMonth.entries()]
+    .map(([month, totals]) => ({ month, ...totals }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  return [...calendar, ...leftovers];
+};
+
 const BS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const isBsDateString = (value?: string | null): value is string => Boolean(value && BS_DATE_RE.test(value.trim()));
@@ -2845,8 +2897,9 @@ const buildDashboardInner = async (
 
   const monthlyProgress = await AcademicLessonPlan.aggregate([
     { $match: monthlyMatch },
-    { $group: { _id: "$month", planned: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ["$status", "APPROVED"] }, 1, 0] } } } },
-    { $sort: { _id: 1 } }
+    { $group: { _id: "$month", planned: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ["$status", "APPROVED"] }, 1, 0] } } } }
+    // No $sort here: sorting the month name gives alphabetical order.
+    // Calendar order is applied below via nepaliMonthIndex.
   ]);
 
   const teacherScopeSubjectIds = teacherScope?.subjectIds?.map(String);
@@ -3096,13 +3149,7 @@ const buildDashboardInner = async (
     syllabusRemainingPercent: roundPct(100 - syllabusAvg),
     teachersPendingLogBook,
     teacherAlerts: teacherAlerts.slice(0, 30),
-    monthlyProgress: monthlyProgress
-      .filter((row) => String(row._id || "").trim())
-      .map((row) => ({
-        month: String(row._id),
-        planned: row.planned as number,
-        completed: row.completed as number
-      })),
+    monthlyProgress: buildMonthlyProgress(monthlyProgress),
     teacherPerformance,
     subjectProgress,
     facultyProgress,
