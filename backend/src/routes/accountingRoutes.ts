@@ -119,7 +119,7 @@ const router = Router();
 const managers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT");
 const cashiers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER");
 const readers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL");
-const approvers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "PRINCIPAL");
+const approvers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN");
 const admins = authorize("SUPER_ADMIN", "COLLEGE_ADMIN");
 router.use(protect, tenantGuard);
 
@@ -202,12 +202,9 @@ router.delete(
 );
 router.get(
   "/collections/:id/receipt",
-  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL", "STUDENT"),
-  // STUDENT path is enforced inside downloadFeeReceipt; staff need print_receipt
-  (req, res, next) => {
-    if (req.user?.role === "STUDENT") return next();
-    return requireAccountingPermission("print_receipt")(req, res, next);
-  },
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"),
+  // Official individual PDFs are Administrator-only (college issues receipts).
+  // Accountants / Accounts staff keep bulk table print on All receipts.
   downloadFeeReceipt
 );
 router.get("/receipts", readers, requireAccountingPermission("read"), listFeeReceipts);

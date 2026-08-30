@@ -7,6 +7,7 @@ import {
   canAccessExaminationManagement,
   canAccessModule,
   canAccessStaffDirectory,
+  canApproveRecords,
   canManageInstitution,
   hasExtraAdminModuleGrants,
   hasInstitutionAccess,
@@ -28,6 +29,7 @@ import { isAdminWorkspacePath } from "./workspace";
 export {
   INSTITUTION_ACCESS_ROLES,
   INSTITUTION_ADMIN_ROLES,
+  canApproveRecords,
   canManageInstitution,
   hasInstitutionAccess,
   isInstitutionAdmin,

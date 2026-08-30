@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  canApproveRecords,
   fieldDutyAssignCoordinatorsSchema,
   fieldDutyAssignStudentsSchema,
   fieldDutyAttendanceSubmitSchema,
@@ -10,6 +11,7 @@ import {
   fieldDutyScheduleUpdateSchema,
   fieldDutyUnlockSchema,
   hasInstitutionAccess,
+  normalizeUserRole,
   postingTypeToSection,
   postingTypesForSection
 } from "@phit-erp/shared";
@@ -42,6 +44,7 @@ import {
   serializeSchedule
 } from "../utils/fieldDutyService.js";
 import { buildHospitalRosterAttendanceContext } from "../utils/hospitalRosterAttendance.js";
+import { getUserSecondaryRoles } from "../utils/moduleAccessService.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { getLinkedStudentIds } from "../utils/parentScope.js";
 import { sendSuccess } from "../utils/response.js";
@@ -598,24 +601,39 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
   }).lean();
 
   if (existing?.entries?.length) {
-    suggestedStudentIds = existing.entries.map((e) => String(e.studentId));
-    // Keep students from existing register visible even if not on today's hospital roster
+    const existingIds = existing.entries
+      .map((e) => {
+        const raw = e.studentId as unknown;
+        if (!raw) return "";
+        if (typeof raw === "string") return raw;
+        if (typeof raw === "object" && raw && "_id" in raw) {
+          return String((raw as { _id: unknown })._id);
+        }
+        return String(raw);
+      })
+      .filter(Boolean);
+    // Partial draft / unlock must keep the full duty list editable.
+    // Never shrink the sheet to only students already submitted.
+    suggestedStudentIds = [...new Set([...suggestedStudentIds, ...existingIds])];
     if (fromHospitalRoster) {
-      const existingIds = new Set(suggestedStudentIds);
-      const missing = await getEligibleStudentsForDuty(
-        schedule.schoolId,
-        schedule.batchId.toString(),
-        schedule.yearId.toString(),
-        {
-          rosterMode: "MANUAL",
-          assignedStudentIds: suggestedStudentIds,
-          defaultShift: shift,
-        },
-      );
       const have = new Set(pool.map((s) => s._id));
-      for (const s of missing) {
-        if (!have.has(s._id) && existingIds.has(s._id)) {
-          pool = [...pool, s];
+      const missingIds = existingIds.filter((id) => !have.has(id));
+      if (missingIds.length > 0) {
+        const missing = await getEligibleStudentsForDuty(
+          schedule.schoolId,
+          schedule.batchId.toString(),
+          schedule.yearId.toString(),
+          {
+            rosterMode: "MANUAL",
+            assignedStudentIds: missingIds,
+            defaultShift: shift,
+          },
+        );
+        for (const s of missing) {
+          if (!have.has(s._id)) {
+            have.add(s._id);
+            pool = [...pool, s];
+          }
         }
       }
     }
@@ -1255,6 +1273,76 @@ export const updateFieldDutyAttendance = asyncHandler(async (req: Request, res: 
   );
 });
 
+/**
+ * Administrator-only: change one student on a field attendance sheet
+ * (works even when the day is locked — used from Attendance Register).
+ */
+export const updateFieldDutyAttendanceEntry = asyncHandler(
+  async (req: Request, res: Response) => {
+    const role = normalizeUserRole(req.user?.role ?? "");
+    if (!canApproveRecords(role)) {
+      const secondary = req.user?.userId
+        ? await getUserSecondaryRoles(req.user.userId)
+        : [];
+      if (!secondary.some((r) => canApproveRecords(normalizeUserRole(r)))) {
+        throw new ApiError(403, "Only the Administrator can edit the attendance register");
+      }
+    }
+
+    const studentId = String(req.body?.studentId ?? "").trim();
+    const status = String(req.body?.status ?? "").trim().toUpperCase();
+    const remarks = String(req.body?.remarks ?? "").trim();
+    if (!studentId) throw new ApiError(400, "studentId is required");
+    const allowed = new Set(["PRESENT", "ABSENT", "LATE", "LEAVE", "EMERGENCY_DUTY"]);
+    if (!allowed.has(status)) {
+      throw new ApiError(400, `Invalid field attendance status: ${status}`);
+    }
+
+    const existing = await FieldDutyAttendance.findOne({
+      _id: req.params.id,
+      schoolId: tenantObjectId(req),
+      isDeleted: false
+    });
+    if (!existing) throw new ApiError(404, "Field attendance not found");
+
+    const sid = (raw: unknown) => {
+      if (!raw) return "";
+      if (typeof raw === "string") return raw;
+      if (typeof raw === "object" && raw && "_id" in raw) {
+        return String((raw as { _id: unknown })._id);
+      }
+      return String(raw);
+    };
+
+    const idx = (existing.entries ?? []).findIndex((e) => sid(e.studentId) === studentId);
+    if (idx >= 0) {
+      existing.entries[idx]!.status = status as (typeof existing.entries)[number]["status"];
+      existing.entries[idx]!.remarks = remarks;
+    } else {
+      existing.entries.push({
+        studentId: studentId as never,
+        status: status as (typeof existing.entries)[number]["status"],
+        remarks
+      });
+    }
+    existing.markModified("entries");
+    await existing.save();
+
+    await recordAudit(req, {
+      action: "field_duty.attendance.entry.update",
+      entity: "FIELD_DUTY_ATTENDANCE",
+      entityId: existing._id.toString(),
+      after: { studentId, status }
+    });
+
+    return sendSuccess(
+      res,
+      "Register updated",
+      await serializeAttendance(existing.toObject() as never)
+    );
+  }
+);
+
 export const unlockFieldDutyAttendance = asyncHandler(async (req: Request, res: Response) => {
   await assertCanManageFieldDuty(req);
   const { reason } = fieldDutyUnlockSchema.parse(req.body);
@@ -1269,6 +1357,7 @@ export const unlockFieldDutyAttendance = asyncHandler(async (req: Request, res: 
   existing.unlockedBy = actorId(req) as never;
   existing.unlockedAt = new Date();
   existing.unlockReason = reason;
+  existing.editRequest = undefined;
   await existing.save();
 
   await recordAudit(req, {

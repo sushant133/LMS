@@ -33,6 +33,10 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import {
   buildPrintInstitutionHeaderHtml,
@@ -123,6 +127,7 @@ export const FieldPostingSectionPanel = ({
   canWrite,
   isCoordinatorView,
 }: Props) => {
+  const canPerformApprove = useCanApproveRecords();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<PanelTab>(
     canWrite && isCoordinatorView ? "mark" : "postings",
@@ -177,6 +182,14 @@ export const FieldPostingSectionPanel = ({
   >("");
   /** Daily attendance register preview (print / view). */
   const [dailyView, setDailyView] = useState<FieldDailySheet | null>(null);
+  const [registerEdit, setRegisterEdit] = useState<{
+    studentId: string;
+    fullName: string;
+    dateBs: string;
+    attendanceId: string;
+    status: string;
+    remarks: string;
+  } | null>(null);
 
   useEffect(() => {
     setForm((f) => ({
@@ -645,6 +658,28 @@ export const FieldPostingSectionPanel = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const saveRegisterCell = useMutation({
+    mutationFn: () => {
+      if (!registerEdit?.attendanceId) {
+        throw new Error("No saved sheet for this date");
+      }
+      if (!registerEdit.status) throw new Error("Select a status");
+      return unwrap(
+        api.put(`/field-duty/attendance/${registerEdit.attendanceId}/entry`, {
+          studentId: registerEdit.studentId,
+          status: registerEdit.status,
+          remarks: registerEdit.remarks,
+        }),
+      );
+    },
+    onSuccess: async () => {
+      toast.success("Register updated");
+      setRegisterEdit(null);
+      await invalidate();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   /**
    * Load daily mark context: candidate pool + suggested roster for date+shift.
    * For hospital postings with a monthly Hospital Roster, students are taken from that grid.
@@ -728,10 +763,10 @@ export const FieldPostingSectionPanel = ({
         pool.map((s) => {
           const prev = attendance?.entries.find((e) => e.studentId === s._id);
           const m = meta[s._id];
-          // Hospital roster: every assigned student stays on the sheet even after
-          // a partial draft. Never drop unmarked students or default them Present.
+          // Hospital roster pool is already the day's duty list — every row stays
+          // editable after a partial draft or unlock. Never freeze unmarked students.
           let onRoster = false;
-          if (rosterDriven) onRoster = suggested.has(s._id) || suggested.size === 0;
+          if (rosterDriven) onRoster = true;
           else if (prev) onRoster = true;
           else if (mode === "DAILY") onRoster = suggested.has(s._id) || !attendance?.entries?.length;
           else if (suggested.size > 0) onRoster = suggested.has(s._id);
@@ -1147,7 +1182,14 @@ export const FieldPostingSectionPanel = ({
       yearName?: string;
       cells: Record<
         number,
-        { code: string; status: string; shift: string; siteName: string }
+        {
+          code: string;
+          status: string;
+          shift: string;
+          siteName: string;
+          attendanceId?: string;
+          remarks?: string;
+        }
       >;
       present: number;
       absent: number;
@@ -1252,6 +1294,8 @@ export const FieldPostingSectionPanel = ({
         status: r.status,
         shift: r.shift,
         siteName: r.siteName,
+        attendanceId: r.attendanceId,
+        remarks: r.remarks,
       };
     }
 
@@ -1287,6 +1331,42 @@ export const FieldPostingSectionPanel = ({
     schedules,
     registerRosterQuery.data,
   ]);
+
+  const openRegisterCell = (
+    st: (typeof monthlyRegister.students)[number],
+    day: number,
+  ) => {
+    if (!canPerformApprove) return;
+    const month = monthlyRegister.month;
+    if (!month) return;
+    const dateBs = `${month}-${String(day).padStart(2, "0")}`;
+    const cell = st.cells[day];
+    let attendanceId = cell?.attendanceId ?? "";
+    if (!attendanceId) {
+      const dayBlock = (registerQuery.data?.byDate ?? []).find(
+        (d) => d.dateBs === dateBs,
+      );
+      const shiftBlock =
+        dayBlock?.shifts.find(
+          (s) => !registerShiftFilter || s.shift === registerShiftFilter,
+        ) ?? dayBlock?.shifts[0];
+      attendanceId = shiftBlock?.attendanceId ?? "";
+    }
+    if (!attendanceId) {
+      toast.error(
+        "No saved sheet for this date. Take daily attendance first, then edit it here.",
+      );
+      return;
+    }
+    setRegisterEdit({
+      studentId: st.studentId,
+      fullName: st.fullName,
+      dateBs,
+      attendanceId,
+      status: cell?.status ?? "",
+      remarks: cell?.remarks ?? "",
+    });
+  };
 
   const canLoadSheet =
     Boolean(selectedScheduleId) &&
@@ -2898,7 +2978,7 @@ export const FieldPostingSectionPanel = ({
                 <p className="mt-1 text-sm text-slate-500">
                   {tab === "reports"
                     ? "Date-wise saved attendance sheets from roster marking. Open a day to review or re-mark when unlocked."
-                    : "Traditional monthly register (students × full BS month days), plus each day's saved sheet to view and print like the attendance register."}
+                    : "Traditional monthly register (students × full BS month days). Administrator can click a day cell to edit that mark."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -3064,6 +3144,11 @@ export const FieldPostingSectionPanel = ({
                           <MobileDayChipGrid
                             days={monthlyRegister.days}
                             getLabel={(d) => st.cells[d]?.code || ""}
+                            onSelectDay={
+                              canPerformApprove
+                                ? (d) => openRegisterCell(st, d)
+                                : undefined
+                            }
                           />
                         </div>
                       </div>
@@ -3132,12 +3217,24 @@ export const FieldPostingSectionPanel = ({
                                   key={d}
                                   className={`border border-slate-200 px-0.5 py-1 text-center ${fieldCodeClass(code)}`}
                                   title={
-                                    cell
-                                      ? `${cell.status} · ${shiftLabel(cell.shift)} · ${cell.siteName}`
-                                      : undefined
+                                    canPerformApprove
+                                      ? `${monthlyRegister.month}-${String(d).padStart(2, "0")} · click to edit`
+                                      : cell
+                                        ? `${cell.status} · ${shiftLabel(cell.shift)} · ${cell.siteName}`
+                                        : undefined
                                   }
                                 >
-                                  {code || "·"}
+                                  {canPerformApprove ? (
+                                    <button
+                                      type="button"
+                                      className="inline-flex min-h-[1.5rem] min-w-[1.5rem] items-center justify-center rounded px-0.5 font-semibold"
+                                      onClick={() => openRegisterCell(st, d)}
+                                    >
+                                      {code || "·"}
+                                    </button>
+                                  ) : (
+                                    code || "·"
+                                  )}
                                 </td>
                               );
                             })}
@@ -3388,6 +3485,12 @@ export const FieldPostingSectionPanel = ({
                         <div className="flex gap-1">
                           <Button
                             size="sm"
+                            disabled={!canPerformApprove}
+                            title={
+                              canPerformApprove
+                                ? undefined
+                                : APPROVE_ADMIN_ONLY_MESSAGE
+                            }
                             onClick={() =>
                               reviewEdit.mutate({
                                 id: rec._id,
@@ -3400,6 +3503,12 @@ export const FieldPostingSectionPanel = ({
                           <Button
                             size="sm"
                             variant="outline"
+                            disabled={!canPerformApprove}
+                            title={
+                              canPerformApprove
+                                ? undefined
+                                : APPROVE_ADMIN_ONLY_MESSAGE
+                            }
                             onClick={() =>
                               reviewEdit.mutate({
                                 id: rec._id,
@@ -3418,6 +3527,82 @@ export const FieldPostingSectionPanel = ({
               </CardContent>
             </Card>
           ) : null}
+        </div>
+      ) : null}
+
+      {registerEdit ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={() => setRegisterEdit(null)}
+          role="presentation"
+        >
+          <form
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveRegisterCell.mutate();
+            }}
+          >
+            <h3 className="text-lg font-semibold text-slate-900">
+              Edit attendance
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {registerEdit.fullName} · {registerEdit.dateBs}
+            </p>
+            <div className="mt-4 space-y-3">
+              <FormField label="Status">
+                <Select
+                  value={registerEdit.status}
+                  onChange={(e) =>
+                    setRegisterEdit((cur) =>
+                      cur ? { ...cur, status: e.target.value } : cur,
+                    )
+                  }
+                  required
+                >
+                  <option value="">Select status…</option>
+                  {FIELD_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s === "EMERGENCY_DUTY"
+                        ? "Emergency duty"
+                        : s.charAt(0) + s.slice(1).toLowerCase()}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Remarks (optional)">
+                <Input
+                  value={registerEdit.remarks}
+                  onChange={(e) =>
+                    setRegisterEdit((cur) =>
+                      cur ? { ...cur, remarks: e.target.value } : cur,
+                    )
+                  }
+                  placeholder="Note"
+                />
+              </FormField>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setRegisterEdit(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={
+                  saveRegisterCell.isPending || !registerEdit.status
+                }
+              >
+                {saveRegisterCell.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </form>
         </div>
       ) : null}
 

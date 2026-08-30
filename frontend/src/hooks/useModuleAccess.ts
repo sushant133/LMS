@@ -1,7 +1,9 @@
 import {
   applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
+  APPROVE_ADMIN_ONLY_MESSAGE,
   canAccessModule,
+  canApproveRecords,
   canEditOrDeleteRecords,
   hasModuleAction,
   isInstitutionAdmin,
@@ -186,3 +188,18 @@ export const useCanEditOrDeleteRecords = (): boolean => {
   const { user } = useAuth();
   return canEditOrDeleteRecords(user?.role ?? "");
 };
+
+/**
+ * Approve / reject / publish — Administrator and System Administrator only
+ * (primary or secondary role). Staff with module access still see Approve
+ * buttons; this flag enables the action.
+ */
+export const useCanApproveRecords = (): boolean => {
+  const { user } = useAuth();
+  if (!user) return false;
+  return [user.role, ...(user.secondaryRoles ?? [])].some((role) =>
+    canApproveRecords(String(role)),
+  );
+};
+
+export { APPROVE_ADMIN_ONLY_MESSAGE };

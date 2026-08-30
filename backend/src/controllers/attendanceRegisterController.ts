@@ -1,12 +1,14 @@
 /**
- * Traditional Attendance Register — READ ONLY.
- * Aggregates existing DailyAttendance / EmployeeAttendance records into a
- * person × day matrix for a BS month. Does not create or mutate attendance.
+ * Traditional Attendance Register — person × day matrix for a BS month.
+ * Read for granted staff; cell edits are Administrator-only.
  */
 import type { Request, Response } from "express";
 import {
   ATTENDANCE_REGISTER_STATUS_LABELS,
   canAccessModule,
+  canApproveRecords,
+  DAILY_ATTENDANCE_STATUSES,
+  EMPLOYEE_ATTENDANCE_STATUSES,
   hasInstitutionAccess,
   isSystemAdministrator,
   normalizeUserRole,
@@ -18,6 +20,7 @@ import {
   type AttendanceRegisterRowSummary,
   type AttendanceRegisterStats,
   type AttendanceRegisterTab,
+  type EmployeeAttendanceStatus,
   type ModuleAccessMap
 } from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
@@ -30,15 +33,19 @@ import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { Year } from "../models/Year.js";
+import { Setting } from "../models/Setting.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { recordAudit } from "../utils/audit.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
+import { syncDailyAttendanceToSubject } from "../utils/dailyAttendanceUtils.js";
 import {
+  ensureValidBsDate,
   getDayOfWeekFromBs,
   getDaysInBsMonth,
   getTodayBs
 } from "../utils/nepaliDate.js";
-import { getUserModuleAccessMap } from "../utils/moduleAccessService.js";
+import { getUserModuleAccessMap, getUserSecondaryRoles } from "../utils/moduleAccessService.js";
 import { sendSuccess } from "../utils/response.js";
 import { getTeacherScope } from "../utils/teacherScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
@@ -277,6 +284,28 @@ const computeStats = (
 
 const q = (req: Request, key: string): string =>
   String(req.query[key] ?? "").trim();
+
+const assertRegisterAdmin = async (req: Request): Promise<void> => {
+  const role = normalizeUserRole(req.user?.role ?? "");
+  if (canApproveRecords(role)) return;
+  const secondary = req.user?.userId ? await getUserSecondaryRoles(req.user.userId) : [];
+  if (secondary.some((r) => canApproveRecords(normalizeUserRole(r)))) return;
+  throw new ApiError(403, "Only the Administrator can edit the attendance register");
+};
+
+const FIELD_ENTRY_STATUSES = ["PRESENT", "ABSENT", "LATE", "LEAVE", "EMERGENCY_DUTY"] as const;
+const DAILY_STATUS_SET = new Set<string>(DAILY_ATTENDANCE_STATUSES);
+const EMPLOYEE_STATUS_SET = new Set<string>(EMPLOYEE_ATTENDANCE_STATUSES);
+const FIELD_STATUS_SET = new Set<string>(FIELD_ENTRY_STATUSES);
+
+const entryStudentId = (raw: unknown): string => {
+  if (!raw) return "";
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object" && raw && "_id" in raw) {
+    return String((raw as { _id: unknown })._id);
+  }
+  return String(raw);
+};
 
 /** GET /api/attendance-register/students */
 export const getStudentAttendanceRegister = asyncHandler(
@@ -700,7 +729,9 @@ const loadEmployeeRegister = async (
     category,
     isDeleted: { $ne: true },
     dateBs: { $gte: `${monthBs}-01`, $lt: `${monthBs}-32` },
-    status: { $in: ["SUBMITTED", "LOCKED"] }
+    status: {
+      $in: ["DRAFT", "CHECK_IN_SUBMITTED", "CHECK_OUT_SUBMITTED", "SUBMITTED", "LOCKED"]
+    }
   })
     .select("dateBs entries")
     .lean();
@@ -838,11 +869,13 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
           personName,
           dateBs,
           status: entry.status ?? null,
+          editStatus: entry.status ?? null,
           code: toAttendanceRegisterCode(entry.status),
           remarks: entry.remarks,
           markedByName: (sheet?.createdBy as { fullName?: string } | null)
             ?.fullName,
           source: "DAILY_ATTENDANCE",
+          attendanceDocId: sheet?._id?.toString(),
           batchName: undefined,
           yearName: undefined
         });
@@ -875,11 +908,13 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
           personName,
           dateBs,
           status: mapped || null,
+          editStatus: fieldEntry.status || null,
           code: toAttendanceRegisterCode(mapped),
           remarks: fieldEntry.remarks,
           markedByName: (fieldSheet?.createdBy as { fullName?: string } | null)
             ?.fullName,
           source: "FIELD_DUTY",
+          attendanceDocId: fieldSheet?._id?.toString(),
           locationLabel: `${site} · ${shift}`,
           batchName: undefined,
           yearName: undefined
@@ -919,11 +954,13 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
       personName: entry?.fullName ?? "Employee",
       dateBs,
       status: entry?.status ?? null,
+      editStatus: entry?.status ?? null,
       code: toAttendanceRegisterCode(entry?.status),
       checkInTime: entry?.checkInTime,
       checkOutTime: entry?.checkOutTime,
       remarks: entry?.remarks,
       source: entry?.source,
+      attendanceDocId: sheet?._id?.toString(),
       locationLabel:
         entry?.geo?.lat != null && entry?.geo?.lng != null
           ? `${entry.geo.lat.toFixed(5)}, ${entry.geo.lng.toFixed(5)}`
@@ -983,6 +1020,265 @@ export const getAttendanceRegisterMeta = asyncHandler(
         "MORNING_DUTY"
       ]),
       monthNames: BS_MONTH_NAMES
+    });
+  }
+);
+
+/**
+ * PUT /api/attendance-register/cell
+ * Administrator-only: change one person × day mark on the register.
+ */
+export const updateAttendanceRegisterCell = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertRegisterAdmin(req);
+    const schoolId = tenantObjectId(req);
+    const tab = String(req.body?.tab ?? "STUDENT").toUpperCase() as AttendanceRegisterTab;
+    const personId = String(req.body?.personId ?? "").trim();
+    const dateBs = ensureValidBsDate(String(req.body?.dateBs ?? "").trim());
+    const status = String(req.body?.status ?? "").trim().toUpperCase();
+    const remarks = String(req.body?.remarks ?? "").trim();
+    if (!personId) throw new ApiError(400, "personId is required");
+    if (!status) throw new ApiError(400, "status is required");
+
+    const actorId = req.user!.userId;
+
+    if (tab === "STUDENT") {
+      const student = await Student.findOne({ _id: personId, schoolId }).lean();
+      if (!student) throw new ApiError(404, "Student not found");
+
+      const dailySheet = await DailyAttendance.findOne({
+        schoolId,
+        dateBs,
+        "entries.studentId": personId
+      });
+      if (dailySheet) {
+        if (!DAILY_STATUS_SET.has(status)) {
+          throw new ApiError(400, `Invalid student attendance status: ${status}`);
+        }
+        for (const e of dailySheet.entries ?? []) {
+          if (entryStudentId(e.studentId) === personId) {
+            e.status = status as typeof e.status;
+            e.remarks = remarks;
+          }
+        }
+        dailySheet.lastEditedBy = actorId as never;
+        dailySheet.markModified("entries");
+        await dailySheet.save();
+        const institutionType = await getInstitutionType(req);
+        await syncDailyAttendanceToSubject(
+          {
+            _id: dailySheet._id.toString(),
+            schoolId: schoolId.toString(),
+            classId: dailySheet.classId?.toString(),
+            sectionId: dailySheet.sectionId?.toString(),
+            batchId: dailySheet.batchId?.toString(),
+            yearId: dailySheet.yearId?.toString(),
+            subjectId: dailySheet.subjectId.toString(),
+            teacherId: dailySheet.teacherId.toString(),
+            dateBs: dailySheet.dateBs,
+            entries: (dailySheet.entries ?? []).map((e) => ({
+              studentId: entryStudentId(e.studentId),
+              status: String(e.status)
+            })),
+            createdBy: String(dailySheet.createdBy),
+            syncedAttendanceId: dailySheet.syncedAttendanceId?.toString()
+          },
+          isCollege(institutionType)
+        );
+        await recordAudit(req, {
+          action: "attendance_register.cell.update",
+          entity: "DAILY_ATTENDANCE",
+          entityId: dailySheet._id.toString(),
+          after: { personId, dateBs, status }
+        });
+        return sendSuccess(res, "Register updated", {
+          tab,
+          personId,
+          dateBs,
+          status,
+          code: toAttendanceRegisterCode(status),
+          source: "DAILY_ATTENDANCE"
+        });
+      }
+
+      const fieldSheet = await FieldDutyAttendance.findOne({
+        schoolId,
+        dateBs,
+        isDeleted: { $ne: true },
+        "entries.studentId": personId
+      }).sort({ updatedAt: -1 });
+
+      const fieldStatus =
+        status === "FIELD_DUTY" ? "PRESENT" : status;
+      if (fieldSheet) {
+        if (!FIELD_STATUS_SET.has(fieldStatus)) {
+          throw new ApiError(400, `Invalid field attendance status: ${status}`);
+        }
+        for (const e of fieldSheet.entries ?? []) {
+          if (entryStudentId(e.studentId) === personId) {
+            e.status = fieldStatus as typeof e.status;
+            e.remarks = remarks;
+          }
+        }
+        fieldSheet.markModified("entries");
+        await fieldSheet.save();
+        await recordAudit(req, {
+          action: "attendance_register.cell.update",
+          entity: "FIELD_DUTY_ATTENDANCE",
+          entityId: fieldSheet._id.toString(),
+          after: { personId, dateBs, status: fieldStatus }
+        });
+        return sendSuccess(res, "Register updated", {
+          tab,
+          personId,
+          dateBs,
+          status: fieldStatus,
+          code: toAttendanceRegisterCode(
+            fieldStatus === "PRESENT" || fieldStatus === "EMERGENCY_DUTY"
+              ? "FIELD_DUTY"
+              : fieldStatus
+          ),
+          source: "FIELD_DUTY"
+        });
+      }
+
+      // Sheet exists for the student's group but this student was missing — add them.
+      const groupFilter: Record<string, unknown> = { schoolId, dateBs };
+      if (student.batchId && student.yearId) {
+        groupFilter.batchId = student.batchId;
+        groupFilter.yearId = student.yearId;
+      } else if (student.classId && student.sectionId) {
+        groupFilter.classId = student.classId;
+        groupFilter.sectionId = student.sectionId;
+      }
+      const groupSheet = await DailyAttendance.findOne(groupFilter);
+      if (groupSheet) {
+        if (!DAILY_STATUS_SET.has(status)) {
+          throw new ApiError(400, `Invalid student attendance status: ${status}`);
+        }
+        groupSheet.entries = [
+          ...(groupSheet.entries ?? []),
+          { studentId: personId as never, status, remarks }
+        ] as never;
+        groupSheet.lastEditedBy = actorId as never;
+        await groupSheet.save();
+        await recordAudit(req, {
+          action: "attendance_register.cell.update",
+          entity: "DAILY_ATTENDANCE",
+          entityId: groupSheet._id.toString(),
+          after: { personId, dateBs, status, added: true }
+        });
+        return sendSuccess(res, "Register updated", {
+          tab,
+          personId,
+          dateBs,
+          status,
+          code: toAttendanceRegisterCode(status),
+          source: "DAILY_ATTENDANCE"
+        });
+      }
+
+      throw new ApiError(
+        400,
+        "No attendance has been taken for this date. Mark it from Daily Attendance or Field Management first, then you can edit it here."
+      );
+    }
+
+    if (tab !== "TEACHER" && tab !== "STAFF") {
+      throw new ApiError(400, "Invalid register tab");
+    }
+    if (!EMPLOYEE_STATUS_SET.has(status)) {
+      throw new ApiError(400, `Invalid ${tab.toLowerCase()} attendance status: ${status}`);
+    }
+
+    const category = tab === "TEACHER" ? "TEACHER" : "STAFF";
+    let fullName = "";
+    let employeeCode = "";
+    let department = "";
+    let designation = "";
+    let userId: string | undefined;
+    if (category === "TEACHER") {
+      const teacher = await Teacher.findOne({ _id: personId, schoolId })
+        .populate("user", "fullName designation")
+        .lean();
+      if (!teacher) throw new ApiError(404, "Teacher not found");
+      const user = teacher.user as { _id?: { toString(): string }; fullName?: string; designation?: string } | null;
+      fullName = user?.fullName ?? teacher.teacherCode;
+      employeeCode = teacher.teacherCode;
+      department = user?.designation || "Teaching";
+      designation = user?.designation || "Teacher";
+      userId = user?._id?.toString();
+    } else {
+      const staff = await CollegeStaff.findOne({
+        _id: personId,
+        schoolId,
+        isDeleted: false
+      }).lean();
+      if (!staff) throw new ApiError(404, "Staff not found");
+      fullName = staff.fullName;
+      employeeCode = staff.staffId;
+      department = staff.department || "";
+      designation = staff.designation || staff.category || "";
+      userId = staff.user ? String(staff.user) : undefined;
+    }
+
+    const settings = await Setting.findOne({ schoolId }).select("academicYearBs").lean();
+    let sheet = await EmployeeAttendance.findOne({
+      schoolId,
+      category,
+      dateBs,
+      isDeleted: false
+    });
+    if (!sheet) {
+      sheet = await EmployeeAttendance.create({
+        schoolId,
+        category,
+        dateBs,
+        academicYearBs: settings?.academicYearBs ?? "",
+        entries: [],
+        notes: "",
+        status: "DRAFT",
+        sourceDefault: "MANUAL",
+        createdBy: actorId
+      });
+    }
+
+    const matchId = (entry: { teacherId?: unknown; staffId?: unknown }) =>
+      String(category === "TEACHER" ? entry.teacherId : entry.staffId) === personId;
+    const existingEntry = (sheet.entries ?? []).find(matchId);
+    const nextEntry = {
+      teacherId: category === "TEACHER" ? personId : undefined,
+      staffId: category === "STAFF" ? personId : undefined,
+      employeeUserId: userId,
+      employeeCode,
+      fullName,
+      department,
+      designation,
+      status: status as EmployeeAttendanceStatus,
+      checkInTime: existingEntry?.checkInTime ?? "",
+      checkOutTime: existingEntry?.checkOutTime ?? "",
+      periodsTaught: existingEntry?.periodsTaught,
+      remarks,
+      source: "MANUAL" as const
+    };
+    sheet.entries = [
+      ...(sheet.entries ?? []).filter((e) => !matchId(e)),
+      nextEntry
+    ] as never;
+    await sheet.save();
+    await recordAudit(req, {
+      action: "attendance_register.cell.update",
+      entity: "EMPLOYEE_ATTENDANCE",
+      entityId: sheet._id.toString(),
+      after: { personId, dateBs, status, category }
+    });
+    return sendSuccess(res, "Register updated", {
+      tab,
+      personId,
+      dateBs,
+      status,
+      code: toAttendanceRegisterCode(status),
+      source: "EMPLOYEE_ATTENDANCE"
     });
   }
 );

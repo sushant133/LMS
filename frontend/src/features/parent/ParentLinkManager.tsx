@@ -29,7 +29,12 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
-import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+  useCanEditOrDeleteRecords,
+  useCanManageGrantedModule,
+} from "hooks/useModuleAccess";
 
 type ParentLinkRecord = {
   _id: string;
@@ -70,6 +75,7 @@ const relationshipLabels: Record<ParentFromStudentRelationship, string> = {
 
 export const ParentLinkManager = () => {
   const canManage = useCanManageGrantedModule("parents");
+  const canPerformApprove = useCanApproveRecords();
   const canEditDelete = useCanEditOrDeleteRecords();
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [customLoginByRelationship, setCustomLoginByRelationship] = useState<
@@ -949,7 +955,15 @@ export const ParentLinkManager = () => {
                           <Button
                             size="sm"
                             className="bg-brand-600 hover:bg-brand-700"
-                            disabled={approveRegistration.isPending}
+                            disabled={
+                              !canPerformApprove ||
+                              approveRegistration.isPending
+                            }
+                            title={
+                              canPerformApprove
+                                ? undefined
+                                : APPROVE_ADMIN_ONLY_MESSAGE
+                            }
                             onClick={() => approveRegistration.mutate(row._id)}
                           >
                             Approve
@@ -957,7 +971,15 @@ export const ParentLinkManager = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={rejectRegistration.isPending}
+                            disabled={
+                              !canPerformApprove ||
+                              rejectRegistration.isPending
+                            }
+                            title={
+                              canPerformApprove
+                                ? undefined
+                                : APPROVE_ADMIN_ONLY_MESSAGE
+                            }
                             onClick={() => {
                               const reason = window.prompt(
                                 "Rejection reason (optional):",

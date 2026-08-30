@@ -33,6 +33,10 @@ import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
@@ -489,6 +493,7 @@ export const LessonPlanPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
+  const canPerformApprove = useCanApproveRecords();
   const canMutate = writeAccess;
   const canEditDelete =
     writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
@@ -2426,7 +2431,15 @@ export const LessonPlanPanel = ({
                                     onClick={() =>
                                       approveMutation.mutate(plan._id)
                                     }
-                                    disabled={approveMutation.isPending}
+                                    disabled={
+                                      !canPerformApprove ||
+                                      approveMutation.isPending
+                                    }
+                                    title={
+                                      canPerformApprove
+                                        ? undefined
+                                        : APPROVE_ADMIN_ONLY_MESSAGE
+                                    }
                                   >
                                     Approve
                                   </Button>
@@ -2442,7 +2455,15 @@ export const LessonPlanPanel = ({
                                           remarks,
                                         });
                                     }}
-                                    disabled={rejectMutation.isPending}
+                                    disabled={
+                                      !canPerformApprove ||
+                                      rejectMutation.isPending
+                                    }
+                                    title={
+                                      canPerformApprove
+                                        ? undefined
+                                        : APPROVE_ADMIN_ONLY_MESSAGE
+                                    }
                                   >
                                     Reject
                                   </Button>
@@ -2584,6 +2605,15 @@ export const LessonPlanPanel = ({
                                             <>
                                               <Button
                                                 size="sm"
+                                                disabled={
+                                                  !canPerformApprove ||
+                                                  approveMutation.isPending
+                                                }
+                                                title={
+                                                  canPerformApprove
+                                                    ? undefined
+                                                    : APPROVE_ADMIN_ONLY_MESSAGE
+                                                }
                                                 onClick={() =>
                                                   approveMutation.mutate(plan._id)
                                                 }
@@ -2593,6 +2623,15 @@ export const LessonPlanPanel = ({
                                               <Button
                                                 size="sm"
                                                 variant="outline"
+                                                disabled={
+                                                  !canPerformApprove ||
+                                                  rejectMutation.isPending
+                                                }
+                                                title={
+                                                  canPerformApprove
+                                                    ? undefined
+                                                    : APPROVE_ADMIN_ONLY_MESSAGE
+                                                }
                                                 onClick={() => {
                                                   const remarks =
                                                     window.prompt(
@@ -2614,6 +2653,15 @@ export const LessonPlanPanel = ({
                                             <Button
                                               size="sm"
                                               variant="outline"
+                                              disabled={
+                                                !canPerformApprove ||
+                                                unlockMutation.isPending
+                                              }
+                                              title={
+                                                canPerformApprove
+                                                  ? undefined
+                                                  : APPROVE_ADMIN_ONLY_MESSAGE
+                                              }
                                               onClick={() =>
                                                 unlockMutation.mutate(plan._id)
                                               }

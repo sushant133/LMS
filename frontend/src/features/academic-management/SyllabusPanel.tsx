@@ -32,6 +32,10 @@ import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import {
   formatChapterLabel,
@@ -124,6 +128,7 @@ export const SyllabusPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
+  const canPerformApprove = useCanApproveRecords();
   const isTeacher =
     !isAdmin &&
     (user?.role === "TEACHER" ||
@@ -1458,6 +1463,10 @@ export const SyllabusPanel = ({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={!canPerformApprove || unlockMutation.isPending}
+                  title={
+                    canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                  }
                   onClick={() => {
                     unlockMutation.mutate(plan._id, {
                       onSuccess: () => {
@@ -1488,6 +1497,10 @@ export const SyllabusPanel = ({
                 <>
                   <Button
                     size="sm"
+                    disabled={!canPerformApprove || approveMutation.isPending}
+                    title={
+                      canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                    }
                     onClick={() => approveMutation.mutate({ id: plan._id })}
                   >
                     Approve
@@ -1495,6 +1508,10 @@ export const SyllabusPanel = ({
                   <Button
                     size="sm"
                     variant="outline"
+                    disabled={!canPerformApprove || rejectMutation.isPending}
+                    title={
+                      canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                    }
                     onClick={() => {
                       const remarks = window.prompt("Rejection remarks");
                       if (remarks)
@@ -1509,6 +1526,10 @@ export const SyllabusPanel = ({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={!canPerformApprove || unlockMutation.isPending}
+                  title={
+                    canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                  }
                   onClick={() => unlockMutation.mutate(plan._id)}
                 >
                   Unlock only

@@ -67,6 +67,11 @@ export const FeeDuesPanel = ({
   const { user } = useAuth();
   const canAccessAccounting = hasAccountingPermission(user?.role ?? "", "read");
   const canSendReminder = user ? canManageInstitution(user.role) : false;
+  const canPrintIndividualReceipt = user
+    ? [user.role, ...(user.secondaryRoles ?? [])].some((role) =>
+        canManageInstitution(String(role)),
+      )
+    : false;
 
   const feeDuesQuery = useQuery({
     queryKey: ["dashboard-fee-dues"],
@@ -235,7 +240,7 @@ export const FeeDuesPanel = ({
                             View Payment History
                           </Link>
                         </Button>
-                        {student.lastReceiptId ? (
+                        {canPrintIndividualReceipt && student.lastReceiptId ? (
                           <Button
                             size="sm"
                             variant="outline"

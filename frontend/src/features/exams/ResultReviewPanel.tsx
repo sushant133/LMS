@@ -23,6 +23,10 @@ import {
   RESULT_SUBMISSION_STATUS_COLORS,
   RESULT_SUBMISSION_STATUS_LABELS,
 } from "features/exams/examDefaults";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -71,6 +75,7 @@ export const ResultReviewPanel = ({
   isCollege,
   compact = false,
 }: ResultReviewPanelProps) => {
+  const canPerformApprove = useCanApproveRecords();
   const [statusFilter, setStatusFilter] = useState("PENDING_ADMIN_REVIEW");
   const [selectedSubmissionId, setSelectedSubmissionId] = useState("");
   const [reviewComments, setReviewComments] = useState("");
@@ -684,8 +689,14 @@ export const ResultReviewPanel = ({
                   <>
                     <Button
                       disabled={
+                        !canPerformApprove ||
                         approveMutation.isPending ||
                         selectedSubmission.missingStudents.length > 0
+                      }
+                      title={
+                        canPerformApprove
+                          ? undefined
+                          : APPROVE_ADMIN_ONLY_MESSAGE
                       }
                       onClick={() =>
                         void approveMutation.mutateAsync({
@@ -699,7 +710,14 @@ export const ResultReviewPanel = ({
                     <Button
                       variant="outline"
                       disabled={
-                        returnMutation.isPending || !reviewComments.trim()
+                        !canPerformApprove ||
+                        returnMutation.isPending ||
+                        !reviewComments.trim()
+                      }
+                      title={
+                        canPerformApprove
+                          ? undefined
+                          : APPROVE_ADMIN_ONLY_MESSAGE
                       }
                       onClick={() =>
                         void returnMutation.mutateAsync({
@@ -713,7 +731,14 @@ export const ResultReviewPanel = ({
                     <Button
                       variant="destructive"
                       disabled={
-                        returnMutation.isPending || !reviewComments.trim()
+                        !canPerformApprove ||
+                        returnMutation.isPending ||
+                        !reviewComments.trim()
+                      }
+                      title={
+                        canPerformApprove
+                          ? undefined
+                          : APPROVE_ADMIN_ONLY_MESSAGE
                       }
                       onClick={() =>
                         void returnMutation.mutateAsync({
@@ -731,7 +756,14 @@ export const ResultReviewPanel = ({
                   selectedSubmission.status === "PUBLISHED") && (
                   <Button
                     variant="outline"
-                    disabled={returnMutation.isPending || !reviewComments.trim()}
+                    disabled={
+                      !canPerformApprove ||
+                      returnMutation.isPending ||
+                      !reviewComments.trim()
+                    }
+                    title={
+                      canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                    }
                     onClick={() => {
                       if (
                         !window.confirm(

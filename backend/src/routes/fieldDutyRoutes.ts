@@ -22,6 +22,7 @@ import {
   submitFieldDutyAttendance,
   unlockFieldDutyAttendance,
   updateFieldDutyAttendance,
+  updateFieldDutyAttendanceEntry,
   updateFieldDutySchedule
 } from "../controllers/fieldDutyController.js";
 import { authorize, protect } from "../middleware/auth.js";
@@ -99,6 +100,11 @@ router.get("/attendance", authorize(...FIELD_READ), listFieldDutyAttendance);
 router.get("/attendance/:id", authorize(...FIELD_READ), getFieldDutyAttendanceById);
 router.post("/attendance", authorize(...FIELD_WRITE_ATTENDANCE), submitFieldDutyAttendance);
 router.put("/attendance/:id", authorize(...FIELD_ADMIN), updateFieldDutyAttendance);
+router.put(
+  "/attendance/:id/entry",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
+  updateFieldDutyAttendanceEntry
+);
 router.post("/attendance/:id/unlock", authorize(...FIELD_ADMIN), unlockFieldDutyAttendance);
 router.post(
   "/attendance/:id/edit-request",

@@ -54,6 +54,7 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { useAuth } from "features/auth/AuthProvider";
+import { useCanAccessModule } from "hooks/useModuleAccess";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import {
   buildPrintInstitutionHeaderHtml,
@@ -251,12 +252,20 @@ const useCanEditFeePayments = (): boolean => {
   return roles.some((role) => canManageInstitution(normalizeUserRole(String(role))));
 };
 
-/** Staff with print_receipt (admin, accountant, cashier, …) may print receipts. */
+/**
+ * Bulk table print of All receipts.
+ * Admin, accountant, cashier, and any staff with the Accounts section allotted.
+ * Individual official PDFs stay Administrator-only.
+ */
 const useCanPrintReceipts = (): boolean => {
   const { user } = useAuth();
+  const canAccessAccounts = useCanAccessModule("accounts");
   if (!user) return false;
   const roles = [user.role, ...(user.secondaryRoles ?? [])].filter(Boolean);
-  return roles.some((role) => hasAccountingPermission(String(role), "print_receipt"));
+  if (roles.some((role) => hasAccountingPermission(String(role), "print_receipt"))) {
+    return true;
+  }
+  return canAccessAccounts;
 };
 
 /**
@@ -409,8 +418,10 @@ export const StudentFeeRecordsPanel = () => {
   const currentUserName = user?.fullName?.trim() || "";
   /** Super Admin / College Admin only — edit amount paid / delete mistaken receipts */
   const canAdminEdit = useCanEditFeePayments();
-  /** Admin, accountant, and other roles with print_receipt — All receipts print */
+  /** Bulk table print of All receipts (accountants and other Accounts staff keep this). */
   const canPrintReceipts = useCanPrintReceipts();
+  /** Official single-receipt PDF — Administrator only; accountants/staff use bulk Print PDF. */
+  const canPrintIndividualReceipt = canAdminEdit;
   const [tab, setTab] = useState<PanelTab>("ledger");
   const [search, setSearch] = useState("");
   /** Ledger filters */
@@ -1020,14 +1031,14 @@ export const StudentFeeRecordsPanel = () => {
     [scholarshipAwards],
   );
 
-  /** Open a single official receipt PDF (admin, accountant, and other print_receipt roles). */
+  /** Open a single official receipt PDF (Administrator only). */
   const downloadReceiptPdf = async (
     id: string,
     receiptNumber?: string,
     options?: { silent?: boolean },
   ): Promise<void> => {
-    if (!canPrintReceipts) {
-      toast.error("You do not have permission to print receipts");
+    if (!canPrintIndividualReceipt) {
+      toast.error("Only administrators can print individual receipts");
       return;
     }
     setPrintingReceiptId(id);
@@ -1123,7 +1134,7 @@ export const StudentFeeRecordsPanel = () => {
 
   /**
    * Bulk print of All receipts as one landscape table (not individual PDFs).
-   * Use each row’s Print button for a single official receipt PDF.
+   * Administrators can still open a single official receipt PDF from each row.
    */
   const printAllFilteredReceipts = () => {
     if (!canPrintReceipts) {
@@ -2834,7 +2845,9 @@ export const StudentFeeRecordsPanel = () => {
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
                 {canPrintReceipts
-                  ? " Print PDF prints the filtered list as one table; each row’s Print opens a single receipt."
+                  ? canPrintIndividualReceipt
+                    ? " Print PDF prints the filtered list as one table; each row’s Print opens a single receipt."
+                    : " Print PDF prints the filtered list as one table."
                   : ""}
               </p>
             </div>
@@ -3029,9 +3042,11 @@ export const StudentFeeRecordsPanel = () => {
                       <Th className="whitespace-nowrap">Paid by</Th>
                       <Th className="whitespace-nowrap">Date (BS / AD)</Th>
                       <Th className="whitespace-nowrap">Proof</Th>
-                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:right-0 md:z-20 md:shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.12)]">
-                        Actions
-                      </Th>
+                      {canAdminEdit ? (
+                        <Th className="whitespace-nowrap bg-slate-50 md:sticky md:right-0 md:z-20 md:shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.12)]">
+                          Actions
+                        </Th>
+                      ) : null}
                     </tr>
                   </TableHead>
                   <TableBody>
@@ -3102,52 +3117,50 @@ export const StudentFeeRecordsPanel = () => {
                               "—"
                             )}
                           </Td>
-                          <Td className="whitespace-nowrap bg-white group-hover:bg-slate-50 md:sticky md:right-0 md:z-20 md:min-w-[14rem] md:shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.15)]">
-                            <div className="flex min-w-[14rem] flex-wrap items-center justify-end gap-1.5">
-                              {canPrintReceipts ? (
+                          {canAdminEdit ? (
+                            <Td className="whitespace-nowrap bg-white group-hover:bg-slate-50 md:sticky md:right-0 md:z-20 md:min-w-[14rem] md:shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.15)]">
+                              <div className="flex min-w-[14rem] flex-wrap items-center justify-end gap-1.5">
+                                {canPrintIndividualReceipt ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    title="Print / download receipt PDF"
+                                    disabled={printingReceiptId === row._id}
+                                    onClick={() =>
+                                      void downloadReceiptPdf(
+                                        row._id,
+                                        row.receiptNumber,
+                                      )
+                                    }
+                                  >
+                                    <Printer className="mr-1 h-3.5 w-3.5" />
+                                    {printingReceiptId === row._id ? "…" : "Print"}
+                                  </Button>
+                                ) : null}
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  title="Print / download receipt PDF"
-                                  disabled={printingReceiptId === row._id}
-                                  onClick={() =>
-                                    void downloadReceiptPdf(
-                                      row._id,
-                                      row.receiptNumber,
-                                    )
-                                  }
+                                  variant="default"
+                                  title="Edit amount paid, deposit, charges, date…"
+                                  onClick={() => startEditReceipt(row)}
                                 >
-                                  <Printer className="mr-1 h-3.5 w-3.5" />
-                                  {printingReceiptId === row._id ? "…" : "Print"}
+                                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                                  Edit
                                 </Button>
-                              ) : null}
-                              {canAdminEdit ? (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="default"
-                                    title="Edit amount paid, deposit, charges, date…"
-                                    onClick={() => startEditReceipt(row)}
-                                  >
-                                    <Pencil className="mr-1 h-3.5 w-3.5" />
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    title="Delete this payment and reverse accounts"
-                                    disabled={
-                                      deleteCollectionMutation.isPending
-                                    }
-                                    onClick={() => confirmDeleteReceipt(row)}
-                                  >
-                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                    Delete
-                                  </Button>
-                                </>
-                              ) : null}
-                            </div>
-                          </Td>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  title="Delete this payment and reverse accounts"
+                                  disabled={
+                                    deleteCollectionMutation.isPending
+                                  }
+                                  onClick={() => confirmDeleteReceipt(row)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </Td>
+                          ) : null}
                         </tr>
                       );
                     })}

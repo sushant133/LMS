@@ -29,7 +29,7 @@ const ALL_PERMISSIONS: AccountingPermission[] = [...ACCOUNTING_PERMISSIONS];
  * - COLLEGE_ADMIN (Finance Administrator): full access
  * - ACCOUNTANT: operational write (no settings/staff/COA admin)
  * - CASHIER: fee collection + receipts only
- * - PRINCIPAL: read + approvals + audit
+ * - PRINCIPAL: read + audit (approvals are Administrator-only)
  * - AUDITOR: read-only + audit
  *
  * manage_salaries: ACCOUNTANT may prepare/submit; approve/pay/delete stay admin.
@@ -51,7 +51,7 @@ export const ACCOUNTING_ROLE_PERMISSIONS: Partial<Record<UserRole, AccountingPer
     "view_audit"
   ],
   CASHIER: ["read", "collect_fees", "print_receipt"],
-  PRINCIPAL: ["read", "view_audit", "approve_transactions"],
+  PRINCIPAL: ["read", "view_audit"],
   AUDITOR: ["read", "view_audit"]
 };
 

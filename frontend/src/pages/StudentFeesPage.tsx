@@ -181,6 +181,11 @@ export const StudentFeesPage = () => {
             <Receipt className="h-5 w-5" />
             Payment history
           </CardTitle>
+          <p className="text-sm text-slate-500">
+            Official receipts are issued by the college accounts office. You can
+            view your payment record here; printed receipts are not downloaded
+            from this portal.
+          </p>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {history.collections.length === 0 ? (

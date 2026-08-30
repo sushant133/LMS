@@ -89,13 +89,24 @@ export const isPortalRole = (role: string): boolean =>
 /**
  * Changing or removing an existing record is reserved for Administrator and
  * System Administrator. Granted Vice Principal / Principal / staff may still
- * create, view, approve, and operate the module.
+ * create, view, and operate the module — they cannot approve or publish.
  */
 export const canEditOrDeleteRecords = (role: string): boolean =>
   isInstitutionAdmin(role);
 
+/**
+ * Approve / reject / publish / unlock-as-approver is Administrator and
+ * System Administrator only. Module Access WRITE (Principal, VP, other staff)
+ * never grants this — they may still see the Approve button, but the action
+ * is performed by the college Administrator.
+ */
+export const canApproveRecords = (role: string): boolean => isInstitutionAdmin(role);
+
 export const EDIT_DELETE_ADMIN_ONLY_MESSAGE =
   "Only the Administrator or System Administrator can edit or delete records.";
+
+export const APPROVE_ADMIN_ONLY_MESSAGE =
+  "Only the Administrator or System Administrator can approve or publish. Staff with module access can prepare and review, but cannot approve.";
 
 /**
  * @deprecated Global College Administrator ban was removed.
@@ -328,8 +339,8 @@ export const ACCOUNTING_ACCESS_ROLES: UserRole[] = [
   "PRINCIPAL"
 ];
 
-/** Roles that can approve high-value financial reversals and voids */
-export const ACCOUNTING_APPROVER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "PRINCIPAL"];
+/** Roles that can approve high-value financial reversals and voids (Administrator only). */
+export const ACCOUNTING_APPROVER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN"];
 
 /** Roles that can mutate financial records (not auditor) */
 export const ACCOUNTING_WRITE_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER"];

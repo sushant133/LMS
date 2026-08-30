@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,6 +16,11 @@ import type {
   ClassRecord,
   SectionRecord,
   YearRecord,
+} from "@phit-erp/shared";
+import {
+  ATTENDANCE_REGISTER_STATUS_LABELS,
+  DAILY_ATTENDANCE_STATUSES,
+  EMPLOYEE_ATTENDANCE_STATUSES,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { PageHeader } from "components/shared/PageHeader";
@@ -34,6 +39,7 @@ import {
 } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
 import { useAuth } from "features/auth/AuthProvider";
+import { useCanApproveRecords } from "hooks/useModuleAccess";
 import { appConfig } from "lib/config";
 import { cn, parseErrorMessage } from "lib/utils";
 import {
@@ -71,10 +77,20 @@ type AttendanceRegisterManagerProps = {
   embedded?: boolean;
 };
 
+const FIELD_EDIT_STATUSES = [
+  "PRESENT",
+  "ABSENT",
+  "LATE",
+  "LEAVE",
+  "EMERGENCY_DUTY",
+] as const;
+
 export const AttendanceRegisterManager = ({
   embedded = false,
 }: AttendanceRegisterManagerProps) => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const canEditRegister = useCanApproveRecords();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
 
@@ -96,6 +112,8 @@ export const AttendanceRegisterManager = ({
   const [detail, setDetail] = useState<AttendanceRegisterCellDetail | null>(
     null,
   );
+  const [editStatus, setEditStatus] = useState("");
+  const [editRemarks, setEditRemarks] = useState("");
   const [exportingPdf, setExportingPdf] = useState(false);
   /** Signature names printed in the footer — asked for before every print / PDF. */
   const [signatures, setSignatures] = useState({
@@ -177,10 +195,56 @@ export const AttendanceRegisterManager = ({
         }),
       );
       setDetail(cell);
+      setEditStatus((cell.editStatus || cell.status || "").toUpperCase());
+      setEditRemarks(cell.remarks ?? "");
     } catch (e) {
       toast.error(parseErrorMessage(e));
     }
   };
+
+  const saveCell = useMutation({
+    mutationFn: () => {
+      if (!detail) throw new Error("No cell selected");
+      if (!editStatus) throw new Error("Select a status");
+      return unwrap(
+        api.put("/attendance-register/cell", {
+          tab,
+          personId: detail.personId,
+          dateBs: detail.dateBs,
+          status: editStatus,
+          remarks: editRemarks,
+        }),
+      );
+    },
+    onSuccess: async () => {
+      toast.success("Register updated");
+      setDetail(null);
+      await queryClient.invalidateQueries({ queryKey: ["attendance-register"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const editStatusOptions = useMemo(() => {
+    if (tab === "TEACHER" || tab === "STAFF") {
+      return EMPLOYEE_ATTENDANCE_STATUSES.map((s) => ({
+        value: s,
+        label: ATTENDANCE_REGISTER_STATUS_LABELS[s] ?? s.replace(/_/g, " "),
+      }));
+    }
+    if (detail?.source === "FIELD_DUTY") {
+      return FIELD_EDIT_STATUSES.map((s) => ({
+        value: s,
+        label:
+          s === "PRESENT"
+            ? "Present (field duty)"
+            : ATTENDANCE_REGISTER_STATUS_LABELS[s] ?? s.replace(/_/g, " "),
+      }));
+    }
+    return DAILY_ATTENDANCE_STATUSES.map((s) => ({
+      value: s,
+      label: ATTENDANCE_REGISTER_STATUS_LABELS[s] ?? s.replace(/_/g, " "),
+    }));
+  }, [tab, detail?.source]);
 
   const exportCsv = () => {
     if (!data) return;
@@ -367,9 +431,9 @@ export const AttendanceRegisterManager = ({
               Attendance Register
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              Traditional monthly register — read-only view of classroom daily
-              attendance and field/hospital duty marks (date-wise). Does not change
-              marking.
+              Traditional monthly register of classroom daily attendance and
+              field/hospital duty marks. Administrator can click a cell to edit
+              that day&apos;s mark.
             </p>
           </div>
           {exportActions}
@@ -377,7 +441,7 @@ export const AttendanceRegisterManager = ({
       ) : (
         <PageHeader
           title="Attendance Register"
-          description="Traditional monthly attendance register. Read-only view of student daily + field/hospital duty, teacher, and staff attendance — does not change marking."
+          description="Traditional monthly attendance register for students, teachers, and staff. Administrator can click a cell to edit that day's mark."
           action={exportActions}
         />
       )}
@@ -695,6 +759,7 @@ export const AttendanceRegisterManager = ({
                         {data.days.map((d) => {
                           const cell = row.cells[d.dateBs];
                           const code = cell?.code;
+                          const clickable = Boolean(code) || canEditRegister;
                           return (
                             <td
                               key={d.dateBs}
@@ -703,20 +768,26 @@ export const AttendanceRegisterManager = ({
                                 d.isSaturday && "bg-slate-100",
                               )}
                             >
-                              {code ? (
+                              {clickable ? (
                                 <button
                                   type="button"
                                   className={cn(
                                     "inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded px-1 text-[10px] font-bold",
-                                    cellClass(cell),
+                                    code
+                                      ? cellClass(cell)
+                                      : "text-slate-300 hover:bg-slate-100",
                                     d.isSaturday && code === "H" && "opacity-80",
                                   )}
                                   onClick={() =>
                                     void openCell(row.personId, d.dateBs)
                                   }
-                                  title={`${d.dateBs} · ${cell?.status ?? ""}`}
+                                  title={
+                                    canEditRegister
+                                      ? `${d.dateBs} · click to edit`
+                                      : `${d.dateBs} · ${cell?.status ?? ""}`
+                                  }
                                 >
-                                  {d.isSaturday && !code ? "H" : code}
+                                  {d.isSaturday && !code ? "H" : code || "·"}
                                 </button>
                               ) : (
                                 <span
@@ -854,33 +925,97 @@ export const AttendanceRegisterManager = ({
             aria-label="Attendance detail"
           >
             <h3 className="text-lg font-semibold text-slate-900">
-              Attendance detail
+              {canEditRegister ? "Edit attendance" : "Attendance detail"}
             </h3>
             <p className="mt-1 text-sm text-slate-500">{detail.personName}</p>
-            <dl className="mt-4 space-y-2 text-sm">
-              <DetailRow label="Date (BS)" value={detail.dateBs} />
-              <DetailRow
-                label="Status"
-                value={
-                  detail.code
-                    ? `${detail.code} (${detail.status ?? "—"})`
-                    : "Not marked"
-                }
-              />
-              <DetailRow label="Check in" value={detail.checkInTime || "—"} />
-              <DetailRow label="Check out" value={detail.checkOutTime || "—"} />
-              <DetailRow label="Marked by" value={detail.markedByName || "—"} />
-              <DetailRow label="Source" value={detail.source || "—"} />
-              <DetailRow label="Location" value={detail.locationLabel || "—"} />
-              <DetailRow label="Remarks" value={detail.remarks || "—"} />
-            </dl>
-            <Button
-              type="button"
-              className="mt-5 w-full"
-              onClick={() => setDetail(null)}
-            >
-              Close
-            </Button>
+            {canEditRegister ? (
+              <form
+                className="mt-4 space-y-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  saveCell.mutate();
+                }}
+              >
+                <DetailRow label="Date (BS)" value={detail.dateBs} />
+                {detail.source ? (
+                  <DetailRow label="Source" value={detail.source} />
+                ) : null}
+                <FormField label="Status">
+                  <Select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    required
+                  >
+                    <option value="">Select status…</option>
+                    {editStatusOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Remarks (optional)">
+                  <Input
+                    value={editRemarks}
+                    onChange={(e) => setEditRemarks(e.target.value)}
+                    placeholder="Note"
+                  />
+                </FormField>
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setDetail(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="flex-1"
+                    disabled={saveCell.isPending || !editStatus}
+                  >
+                    {saveCell.isPending ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <dl className="mt-4 space-y-2 text-sm">
+                  <DetailRow label="Date (BS)" value={detail.dateBs} />
+                  <DetailRow
+                    label="Status"
+                    value={
+                      detail.code
+                        ? `${detail.code} (${detail.status ?? "—"})`
+                        : "Not marked"
+                    }
+                  />
+                  <DetailRow label="Check in" value={detail.checkInTime || "—"} />
+                  <DetailRow
+                    label="Check out"
+                    value={detail.checkOutTime || "—"}
+                  />
+                  <DetailRow
+                    label="Marked by"
+                    value={detail.markedByName || "—"}
+                  />
+                  <DetailRow label="Source" value={detail.source || "—"} />
+                  <DetailRow
+                    label="Location"
+                    value={detail.locationLabel || "—"}
+                  />
+                  <DetailRow label="Remarks" value={detail.remarks || "—"} />
+                </dl>
+                <Button
+                  type="button"
+                  className="mt-5 w-full"
+                  onClick={() => setDetail(null)}
+                >
+                  Close
+                </Button>
+              </>
+            )}
           </div>
         </div>
       ) : null}

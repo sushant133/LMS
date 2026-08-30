@@ -121,6 +121,8 @@ export interface AttendanceRegisterCellDetail {
   personName: string;
   dateBs: string;
   status: string | null;
+  /** Underlying status used when editing (field duty keeps PRESENT, not FIELD_DUTY). */
+  editStatus?: string | null;
   code: string | null;
   checkInTime?: string;
   checkOutTime?: string;
@@ -132,6 +134,7 @@ export interface AttendanceRegisterCellDetail {
   designation?: string;
   batchName?: string;
   yearName?: string;
+  attendanceDocId?: string;
 }
 
 /** Map raw status → register code (unknown statuses pass through shortened). */

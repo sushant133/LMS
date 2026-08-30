@@ -37,6 +37,10 @@ import {
   type RoutineColumn,
 } from "features/exams/ExamRoutineGrid";
 import { defaultRoutineValue } from "features/exams/examDefaults";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { printBulkResultsElement } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
@@ -124,6 +128,7 @@ export const ExamRoutinePanel = ({
   isAdmin,
   readOnly = false,
 }: ExamRoutinePanelProps) => {
+  const canPerformApprove = useCanApproveRecords();
   const [routineForm, setRoutineForm] =
     useState<ExamRoutineInput>(defaultRoutineValue);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
@@ -677,7 +682,14 @@ export const ExamRoutinePanel = ({
                   size="sm"
                   variant="outline"
                   onClick={() => void unpublishMutation.mutateAsync()}
-                  disabled={unpublishMutation.isPending}
+                  disabled={
+                    !canPerformApprove || unpublishMutation.isPending
+                  }
+                  title={
+                    canPerformApprove
+                      ? undefined
+                      : APPROVE_ADMIN_ONLY_MESSAGE
+                  }
                 >
                   Unpublish
                 </Button>
@@ -685,7 +697,16 @@ export const ExamRoutinePanel = ({
                 <Button
                   size="sm"
                   onClick={() => void publishMutation.mutateAsync()}
-                  disabled={publishMutation.isPending || routines.length === 0}
+                  disabled={
+                    !canPerformApprove ||
+                    publishMutation.isPending ||
+                    routines.length === 0
+                  }
+                  title={
+                    canPerformApprove
+                      ? undefined
+                      : APPROVE_ADMIN_ONLY_MESSAGE
+                  }
                 >
                   Publish Routine
                 </Button>

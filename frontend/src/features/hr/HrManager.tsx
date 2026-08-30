@@ -21,10 +21,15 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
-import { useCanManageGrantedModule } from "hooks/useModuleAccess";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+  useCanManageGrantedModule,
+} from "hooks/useModuleAccess";
 
 export const HrManager = () => {
   const canManage = useCanManageGrantedModule("hr");
+  const canPerformApprove = useCanApproveRecords();
   const [leaveForm, setLeaveForm] = useState<LeaveRequestInput>({
     teacherId: "",
     type: "CASUAL",
@@ -320,6 +325,12 @@ export const HrManager = () => {
                         <div className="flex gap-2">
                           <Button
                             size="sm"
+                            disabled={!canPerformApprove}
+                            title={
+                              canPerformApprove
+                                ? undefined
+                                : APPROVE_ADMIN_ONLY_MESSAGE
+                            }
                             onClick={() =>
                               updateLeave.mutate({
                                 id: l._id,
@@ -332,6 +343,12 @@ export const HrManager = () => {
                           <Button
                             size="sm"
                             variant="secondary"
+                            disabled={!canPerformApprove}
+                            title={
+                              canPerformApprove
+                                ? undefined
+                                : APPROVE_ADMIN_ONLY_MESSAGE
+                            }
                             onClick={() =>
                               updateLeave.mutate({
                                 id: l._id,

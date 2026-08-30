@@ -97,7 +97,11 @@ import {
   useHasInstitutionAccess,
   useNormalizedRole,
 } from "hooks/useNormalizedRole";
-import { useCanManageGrantedModule } from "hooks/useModuleAccess";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+  useCanManageGrantedModule,
+} from "hooks/useModuleAccess";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
@@ -197,6 +201,7 @@ const PublishByBatchYearPanel = ({
   onPublish: (batchId: string, yearId: string, label: string) => void;
   onUnpublish: (batchId: string, yearId: string, label: string) => void;
 }) => {
+  const canPerformApprove = useCanApproveRecords();
   const [expandedYearIds, setExpandedYearIds] = useState<Set<string>>(
     new Set(),
   );
@@ -316,11 +321,13 @@ const PublishByBatchYearPanel = ({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!hasNewApproved || isMutating}
+                      disabled={!canPerformApprove || !hasNewApproved || isMutating}
                       title={
-                        hasNewApproved
-                          ? undefined
-                          : "No new approved subjects to publish."
+                        !canPerformApprove
+                          ? APPROVE_ADMIN_ONLY_MESSAGE
+                          : hasNewApproved
+                            ? undefined
+                            : "No new approved subjects to publish."
                       }
                       onClick={() => {
                         if (
@@ -338,7 +345,12 @@ const PublishByBatchYearPanel = ({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!hasNewApproved || isMutating}
+                      disabled={!canPerformApprove || !hasNewApproved || isMutating}
+                      title={
+                        canPerformApprove
+                          ? undefined
+                          : APPROVE_ADMIN_ONLY_MESSAGE
+                      }
                       onClick={() => {
                         if (
                           window.confirm(
@@ -355,7 +367,12 @@ const PublishByBatchYearPanel = ({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={!canUnpublish || isMutating}
+                    disabled={!canPerformApprove || !canUnpublish || isMutating}
+                    title={
+                      canPerformApprove
+                        ? undefined
+                        : APPROVE_ADMIN_ONLY_MESSAGE
+                    }
                     onClick={() => {
                       if (
                         window.confirm(
@@ -424,6 +441,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const isStudentOrParent = role === "STUDENT" || role === "PARENT";
   /** Portal roles only ever see StudentExamPortal — never admin surfaces. */
   const canManage = grantedManage && !isStudentOrParent;
+  const canPerformApprove = useCanApproveRecords();
   /** Write admins + college viewers (read-only admin surfaces). */
   const isAdmin = !isStudentOrParent && (canManage || hasInstitutionRead);
   const isCollege = useIsCollege();
@@ -1952,6 +1970,12 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                             <Button
                               size="sm"
                               variant="outline"
+                              disabled={!canPerformApprove}
+                              title={
+                                canPerformApprove
+                                  ? undefined
+                                  : APPROVE_ADMIN_ONLY_MESSAGE
+                              }
                               onClick={() => {
                                 if (
                                   window.confirm(
@@ -1976,6 +2000,12 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                disabled={!canPerformApprove}
+                                title={
+                                  canPerformApprove
+                                    ? undefined
+                                    : APPROVE_ADMIN_ONLY_MESSAGE
+                                }
                                 onClick={() =>
                                   void examActionMutation.mutateAsync({
                                     examId: exam._id,
@@ -1991,6 +2021,12 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                disabled={!canPerformApprove}
+                                title={
+                                  canPerformApprove
+                                    ? undefined
+                                    : APPROVE_ADMIN_ONLY_MESSAGE
+                                }
                                 onClick={() =>
                                   void examActionMutation.mutateAsync({
                                     examId: exam._id,
@@ -2004,6 +2040,12 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                disabled={!canPerformApprove}
+                                title={
+                                  canPerformApprove
+                                    ? undefined
+                                    : APPROVE_ADMIN_ONLY_MESSAGE
+                                }
                                 onClick={() =>
                                   void examActionMutation.mutateAsync({
                                     examId: exam._id,

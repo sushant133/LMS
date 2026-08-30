@@ -11,6 +11,7 @@ import { Textarea } from "components/ui/textarea";
 import { formatCurrencyNpr } from "lib/utils";
 import { api, unwrap } from "lib/api";
 import { invalidateDashboardQueries } from "lib/dashboardQueries";
+import { APPROVE_ADMIN_ONLY_MESSAGE } from "hooks/useModuleAccess";
 
 interface FinancialApprovalRecord {
   _id: string;
@@ -119,29 +120,30 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
                   <Td className="max-w-[200px] truncate">{row.reason}</Td>
                   <Td>{row.requestedBy?.fullName ?? "—"}</Td>
                   <Td>
-                    {canApprove ? (
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          className="bg-brand-600 hover:bg-brand-700"
-                          disabled={approveMutation.isPending}
-                          onClick={() => approveMutation.mutate(row._id)}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setRejectId(row._id)}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-amber-600">
-                        Awaiting approval
-                      </span>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-brand-600 hover:bg-brand-700"
+                        disabled={!canApprove || approveMutation.isPending}
+                        title={
+                          canApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                        }
+                        onClick={() => approveMutation.mutate(row._id)}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canApprove}
+                        title={
+                          canApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                        }
+                        onClick={() => setRejectId(row._id)}
+                      >
+                        Reject
+                      </Button>
+                    </div>
                   </Td>
                 </tr>
               ))}

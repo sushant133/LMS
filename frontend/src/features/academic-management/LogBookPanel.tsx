@@ -23,6 +23,10 @@ import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -302,6 +306,7 @@ export const LogBookPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
+  const canPerformApprove = useCanApproveRecords();
   const canMutate = writeAccess;
   const canEditDelete =
     writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
@@ -995,7 +1000,12 @@ export const LogBookPanel = ({
             size="sm"
             variant="outline"
             className="text-emerald-700"
-            title="Approve this log book entry"
+            title={
+              canPerformApprove
+                ? "Approve this log book entry"
+                : APPROVE_ADMIN_ONLY_MESSAGE
+            }
+            disabled={!canPerformApprove || reviewMutation.isPending}
             onClick={() =>
               reviewMutation.mutate({
                 id: entry._id,
@@ -1010,7 +1020,12 @@ export const LogBookPanel = ({
             size="sm"
             variant="outline"
             className="text-amber-700"
-            title="Mark as needs improvement"
+            title={
+              canPerformApprove
+                ? "Mark as needs improvement"
+                : APPROVE_ADMIN_ONLY_MESSAGE
+            }
+            disabled={!canPerformApprove || reviewMutation.isPending}
             onClick={() =>
               reviewMutation.mutate({
                 id: entry._id,

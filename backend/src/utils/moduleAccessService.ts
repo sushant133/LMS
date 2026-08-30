@@ -449,6 +449,12 @@ export const isModuleAccessBypassPath = (method: string, originalUrl: string): b
    */
   if (upper === "GET" || upper === "HEAD" || upper === "OPTIONS") {
     if (isSharedAcademicsReadPath(path)) return true;
+    // Institution profile (name, academic year, holidays, branding) is used by
+    // AppLayout and many modules. PUT /settings stays admin-gated in the route.
+    // Match GET /api/settings only — not /api/accounting/settings.
+    if (/(?:^|\/)api\/settings\/?$/i.test(path)) {
+      return true;
+    }
   }
   return false;
 };

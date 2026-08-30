@@ -94,8 +94,8 @@ import { withFinancialTransaction } from "../utils/financialTransaction.js";
 import { voidFeeCollection, voidWithJournalReversal } from "../utils/accountingVoid.js";
 import {
   formatNrsAmountInWords,
-  hasAccountingPermission,
   isInstitutionAdmin,
+  isPortalRole,
   normalizeTeacherPaymentType,
   normalizeUserRole,
   sumTeacherTenderAmountNpr
@@ -2258,13 +2258,23 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
   const collection = await FeeCollection.findOne({ _id: req.params.id, schoolId, isDeleted: false });
   if (!collection) throw new ApiError(404, "Receipt not found");
 
-  if (req.user?.role === "STUDENT") {
-    const ownStudent = await Student.findOne({ schoolId, user: req.user.userId }).lean();
-    if (!ownStudent || ownStudent._id.toString() !== collection.studentId.toString()) {
-      throw new ApiError(403, "You can only download your own receipts");
+  const role = normalizeUserRole(req.user?.role ?? "");
+  if (isPortalRole(role) || role === "STUDENT" || role === "PARENT") {
+    throw new ApiError(
+      403,
+      "Official receipts are issued by the college. Students cannot download receipts."
+    );
+  }
+
+  // Individual official receipt PDFs are Administrator-only.
+  // Accountants / staff with Accounts allotted use bulk table print on All receipts.
+  if (!isInstitutionAdmin(role)) {
+    const secondary = req.user?.userId
+      ? await getUserSecondaryRoles(req.user.userId)
+      : [];
+    if (!secondary.some((r) => isInstitutionAdmin(normalizeUserRole(r)))) {
+      throw new ApiError(403, "Only administrators can print individual receipts");
     }
-  } else if (!hasAccountingPermission(req.user!.role, "print_receipt")) {
-    throw new ApiError(403, "You do not have permission to print receipts");
   }
 
   const institutionType = await getInstitutionType(req);

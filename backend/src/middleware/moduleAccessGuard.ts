@@ -1,8 +1,10 @@
 import type { NextFunction, Request, Response } from "express";
 import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
   canAccessExaminationCollege,
   canAccessExaminationCtevt,
   canAccessModule,
+  canApproveRecords,
   canEditOrDeleteRecords,
   canWriteExaminationCollege,
   canWriteExaminationCtevt,
@@ -25,6 +27,7 @@ import { wantsAdminWorkspaceScope } from "../utils/workspaceScope.js";
 import {
   getUserModuleAccessMap,
   getUserModuleActionsMap,
+  getUserSecondaryRoles,
   isModuleAccessBypassPath,
   isSharedAcademicsReadPath,
   resolveModuleForRequest,
@@ -54,7 +57,38 @@ const operationalDepartmentEditRole = (
   return false;
 };
 
-/** Granted VP / Principal / staff may create and approve, not edit or delete. */
+/**
+ * Approve / publish / unlock-as-approver paths. Staff with Module Access WRITE
+ * may still see the buttons; only Administrator may complete these actions.
+ */
+const isRecordApprovalRequest = (method: string, path: string): boolean => {
+  if (READ_METHODS.has(method.toUpperCase())) return false;
+  const p = (path.split("?")[0] ?? path).toLowerCase();
+  return (
+    /\/(?:approve|unapprove|reject|unlock|lock|review|publish|unpublish)(?:\/|$)/.test(p) ||
+    /\/leaves\/[^/]+\/status(?:\/|$)/.test(p) ||
+    /\/stock-requests\/[^/]+\/status(?:\/|$)/.test(p) ||
+    /\/edit-review(?:\/|$)/.test(p)
+  );
+};
+
+const actorCanApproveRecords = (role: string, secondary: readonly string[]): boolean =>
+  [role, ...secondary].some((entry) => canApproveRecords(entry));
+
+const denyGrantedApproval = async (
+  req: Request,
+  role: string,
+  path: string,
+  secondary?: readonly string[]
+): Promise<ApiError | null> => {
+  if (!isRecordApprovalRequest(req.method, path)) return null;
+  if (canApproveRecords(role)) return null;
+  const extra = secondary ?? (await getUserSecondaryRoles(req.user!.userId));
+  if (actorCanApproveRecords(role, extra)) return null;
+  return new ApiError(403, APPROVE_ADMIN_ONLY_MESSAGE);
+};
+
+/** Granted VP / Principal / staff may create and operate, not edit or delete. */
 const shouldBlockGrantedEditDelete = (
   req: Request,
   role: string,
@@ -149,6 +183,8 @@ export const enforceModuleAccess = async (
           )
         ) {
           const moduleKey = resolveModuleForRequest(req);
+          const approvalDenied = await denyGrantedApproval(req, role, originalPath);
+          if (approvalDenied) return next(approvalDenied);
           if (shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
             return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
           }
@@ -229,6 +265,8 @@ export const enforceModuleAccess = async (
       ) {
         return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
       }
+      const approvalDenied = await denyGrantedApproval(req, role, originalPath);
+      if (approvalDenied) return next(approvalDenied);
       return next();
     }
 
@@ -291,6 +329,13 @@ export const enforceModuleAccess = async (
       ) {
         return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
       }
+      const approvalDenied = await denyGrantedApproval(
+        req,
+        req.user.role,
+        originalPath,
+        secondaryRoles
+      );
+      if (approvalDenied) return next(approvalDenied);
       return next();
     }
 
@@ -322,6 +367,8 @@ export const enforceModuleAccess = async (
         if (shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
           return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
         }
+        const approvalDenied = await denyGrantedApproval(req, role, originalPath);
+        if (approvalDenied) return next(approvalDenied);
         return next();
       }
       const isCoord = await isAssignedFieldCoordinator(req);
@@ -329,6 +376,8 @@ export const enforceModuleAccess = async (
         if (shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
           return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
         }
+        const approvalDenied = await denyGrantedApproval(req, role, originalPath);
+        if (approvalDenied) return next(approvalDenied);
         return next();
       }
       return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
@@ -423,9 +472,9 @@ export const enforceModuleAccess = async (
     ) {
       mode = "WRITE";
     }
-    // Teachers need academic year (and school name) from settings for Academic Management filters.
-    // Bypass granular action checks — settings is often NONE in the matrix for pure teachers.
-    if (isTeacherRole && moduleKey === "settings" && READ_METHODS.has(req.method)) {
+    // Institution settings GET (academic year, name, holidays) is shared reference data.
+    // Settings module is often Hidden for staff — PUT remains admin-only on the route.
+    if (moduleKey === "settings" && READ_METHODS.has(req.method)) {
       return next();
     }
 
@@ -474,6 +523,13 @@ export const enforceModuleAccess = async (
 
     // Teacher My Work WRITE — allow create (and own-record edit when not Administration)
     if (isTeacherRole && TEACHER_MY_WORK_MODULE_KEYS.has(moduleKey) && mode === "WRITE") {
+      const approvalDenied = await denyGrantedApproval(
+        req,
+        role,
+        originalPath,
+        secondaryRoles
+      );
+      if (approvalDenied) return next(approvalDenied);
       if (shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
         return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
       }
@@ -508,6 +564,14 @@ export const enforceModuleAccess = async (
     if (shouldBlockGrantedEditDelete(req, role, isTeacherRole, moduleKey)) {
       return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
     }
+
+    const approvalDenied = await denyGrantedApproval(
+      req,
+      role,
+      originalPath,
+      secondaryRoles
+    );
+    if (approvalDenied) return next(approvalDenied);
 
     return next();
   } catch (error) {

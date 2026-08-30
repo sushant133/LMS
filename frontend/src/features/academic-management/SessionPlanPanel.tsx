@@ -23,6 +23,10 @@ import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+} from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
 import { openAuthenticatedAttachment } from "lib/attachments";
@@ -132,6 +136,7 @@ export const SessionPlanPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
+  const canPerformApprove = useCanApproveRecords();
   const canMutate = writeAccess;
   const canEditDelete =
     writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
@@ -872,6 +877,10 @@ export const SessionPlanPanel = ({
               <>
                 <Button
                   size="sm"
+                  disabled={!canPerformApprove || approveMutation.isPending}
+                  title={
+                    canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                  }
                   onClick={() => approveMutation.mutate({ id: plan._id })}
                 >
                   Approve
@@ -879,6 +888,10 @@ export const SessionPlanPanel = ({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={!canPerformApprove || rejectMutation.isPending}
+                  title={
+                    canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                  }
                   onClick={() => {
                     const remarks = window.prompt("Rejection remarks");
                     if (remarks)
@@ -893,6 +906,10 @@ export const SessionPlanPanel = ({
               <Button
                 size="sm"
                 variant="outline"
+                disabled={!canPerformApprove || unlockMutation.isPending}
+                title={
+                  canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                }
                 onClick={() => unlockMutation.mutate(plan._id)}
               >
                 Unlock

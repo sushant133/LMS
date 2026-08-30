@@ -46,7 +46,13 @@ import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
-import { useCanEditOrDeleteRecords, useIsGrantedAdmin, useModuleAccess } from "hooks/useModuleAccess";
+import {
+  APPROVE_ADMIN_ONLY_MESSAGE,
+  useCanApproveRecords,
+  useCanEditOrDeleteRecords,
+  useIsGrantedAdmin,
+  useModuleAccess,
+} from "hooks/useModuleAccess";
 
 import { LaboratoryAllotPanel } from "features/laboratory/LaboratoryAllotPanel";
 import { LaboratoryPrintInventoryPanel } from "features/laboratory/LaboratoryPrintInventoryPanel";
@@ -110,6 +116,7 @@ type TeacherOption = { _id: string; user: { fullName: string } };
 export const LaboratoryManager = () => {
   const { user } = useAuth();
   const isAdmin = useIsGrantedAdmin("laboratory");
+  const canPerformApprove = useCanApproveRecords();
   const canEditDelete =
     useCanEditOrDeleteRecords() || user?.role === "LABORATORY_STAFF";
   const isTeacher = user?.role === "TEACHER" && !isAdmin;
@@ -2873,6 +2880,12 @@ export const LaboratoryManager = () => {
                                         <Button
                                           size="sm"
                                           variant="secondary"
+                                          disabled={!canPerformApprove}
+                                          title={
+                                            canPerformApprove
+                                              ? undefined
+                                              : APPROVE_ADMIN_ONLY_MESSAGE
+                                          }
                                           onClick={() =>
                                             updateRequestStatus.mutate({
                                               id: req._id,
@@ -2885,6 +2898,12 @@ export const LaboratoryManager = () => {
                                         <Button
                                           size="sm"
                                           variant="secondary"
+                                          disabled={!canPerformApprove}
+                                          title={
+                                            canPerformApprove
+                                              ? undefined
+                                              : APPROVE_ADMIN_ONLY_MESSAGE
+                                          }
                                           onClick={() =>
                                             updateRequestStatus.mutate({
                                               id: req._id,
