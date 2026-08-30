@@ -1083,7 +1083,10 @@ export const updateAttendanceRegisterCell = asyncHandler(
             createdBy: String(dailySheet.createdBy),
             syncedAttendanceId: dailySheet.syncedAttendanceId?.toString()
           },
-          isCollege(institutionType)
+          isCollege(institutionType),
+          req.user!.userId,
+          req.user!.role,
+          null
         );
         await recordAudit(req, {
           action: "attendance_register.cell.update",
