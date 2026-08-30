@@ -4,10 +4,18 @@ import type {
   ExamRecord,
   ExamRoutineInput,
   ExamRoutineRecord,
+  SchoolSettingsRecord,
   SubjectRecord,
 } from "@phit-erp/shared";
 import { DAYS_OF_WEEK, examRoutineSchema } from "@phit-erp/shared";
-import { Plus } from "lucide-react";
+import {
+  CalendarRange,
+  LayoutGrid,
+  Plus,
+  Printer,
+  Rows3,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -21,8 +29,16 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import {
+  ExamRoutineGrid,
+  ExamRoutinePrintSheet,
+  shortYearTitle,
+  weekdayFromBsDate,
+  type RoutineColumn,
+} from "features/exams/ExamRoutineGrid";
 import { defaultRoutineValue } from "features/exams/examDefaults";
 import { api, unwrap } from "lib/api";
+import { printBulkResultsElement } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 
@@ -64,6 +80,18 @@ const isProgramYear = (year: YearOption) => {
   return true;
 };
 
+/** Single-line college address for the printed routine header. */
+const formatAddressLine = (address?: SchoolSettingsRecord["address"]): string =>
+  [
+    address?.streetAddress,
+    address?.ward ? `Ward ${address.ward}` : "",
+    address?.municipality,
+    address?.district,
+    address?.province,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
 const idStr = (value: unknown): string => {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -72,6 +100,20 @@ const idStr = (value: unknown): string => {
   }
   return String(value);
 };
+
+/** One row of the "same slot across every year" quick-add form. */
+type BulkRow = { yearId: string; subjectId: string };
+
+const emptyBulkSlot = () => ({
+  examDateBs: "",
+  day: "",
+  startTime: "",
+  endTime: "",
+  durationMinutes: 180,
+  examHall: "",
+  invigilator: "",
+  remarks: "",
+});
 
 export const ExamRoutinePanel = ({
   exam,
@@ -87,6 +129,14 @@ export const ExamRoutinePanel = ({
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formYearId, setFormYearId] = useState("");
+  /** Combined Date × Year grid (the printed sheet) vs. one table per year. */
+  const [viewMode, setViewMode] = useState<"grid" | "tables">("grid");
+  const [showBulkForm, setShowBulkForm] = useState(false);
+  const [bulkSlot, setBulkSlot] = useState(emptyBulkSlot);
+  const [bulkSubjectByYear, setBulkSubjectByYear] = useState<
+    Record<string, string>
+  >({});
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const batchNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -115,8 +165,16 @@ export const ExamRoutinePanel = ({
     return batchName ? `${name} · ${batchName}` : name;
   };
 
+  /** College name/address for the printed routine header. */
+  const settingsQuery = useQuery({
+    queryKey: ["settings", "print-branding"],
+    queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
   /**
-   * One table per exam year cohort (1st / 2nd / 3rd).
+   * One column per exam year cohort (1st / 2nd / 3rd).
    * Built from exam.yearIds first so tables still appear even if the years
    * catalogue is slow/empty, then enriched with year/batch names when available.
    */
@@ -131,7 +189,7 @@ export const ExamRoutinePanel = ({
         .map((yearId, index) => {
           const known = yearById.get(yearId);
           if (known) return known;
-          // Fallback so a table still renders for every linked yearId
+          // Fallback so a column still renders for every linked yearId
           return {
             _id: yearId,
             name: `Year cohort ${index + 1}`,
@@ -183,6 +241,12 @@ export const ExamRoutinePanel = ({
       ),
   });
 
+  const invalidateRoutines = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["exam-routines"] }),
+      queryClient.invalidateQueries({ queryKey: ["exams"] }),
+    ]);
+
   const createMutation = useMutation({
     mutationFn: (payload: ExamRoutineInput) =>
       unwrap(api.post(`/exams/${exam._id}/routines`, payload)),
@@ -191,9 +255,7 @@ export const ExamRoutinePanel = ({
       setRoutineForm(defaultRoutineValue);
       setEditingRoutineId(null);
       setShowForm(false);
-      await queryClient.invalidateQueries({
-        queryKey: ["exam-routines", exam._id],
-      });
+      await invalidateRoutines();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -211,9 +273,7 @@ export const ExamRoutinePanel = ({
       setRoutineForm(defaultRoutineValue);
       setEditingRoutineId(null);
       setShowForm(false);
-      await queryClient.invalidateQueries({
-        queryKey: ["exam-routines", exam._id],
-      });
+      await invalidateRoutines();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -223,9 +283,52 @@ export const ExamRoutinePanel = ({
       unwrap(api.delete(`/exams/${exam._id}/routines/${routineId}`)),
     onSuccess: async () => {
       toast.success("Routine removed");
-      await queryClient.invalidateQueries({
-        queryKey: ["exam-routines", exam._id],
-      });
+      await invalidateRoutines();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  /**
+   * Delete the whole routine — every year, or one year cohort — leaving the exam,
+   * its marks, and its results untouched.
+   */
+  const deleteRoutineScopeMutation = useMutation({
+    mutationFn: (yearId?: string) =>
+      unwrap<{ deletedCount: number; remaining: number }>(
+        api.delete(
+          `/exams/${exam._id}/routines`,
+          yearId ? { params: { yearId } } : undefined,
+        ),
+      ),
+    onSuccess: async (data) => {
+      toast.success(
+        `Deleted ${data?.deletedCount ?? 0} routine entr${(data?.deletedCount ?? 0) === 1 ? "y" : "ies"}`,
+      );
+      setShowForm(false);
+      setEditingRoutineId(null);
+      await invalidateRoutines();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const bulkCreateMutation = useMutation({
+    mutationFn: (entries: ExamRoutineInput[]) =>
+      unwrap<{ created: unknown[]; skipped: Array<{ reason: string }> }>(
+        api.post(`/exams/${exam._id}/routines/bulk`, { entries }),
+      ),
+    onSuccess: async (data) => {
+      const skipped = data?.skipped ?? [];
+      if (skipped.length > 0) {
+        toast.warning(
+          `${data?.created?.length ?? 0} added · ${skipped.length} skipped — ${skipped[0]?.reason ?? ""}`,
+        );
+      } else {
+        toast.success(`Added ${data?.created?.length ?? 0} routine entries`);
+      }
+      setBulkSlot(emptyBulkSlot());
+      setBulkSubjectByYear({});
+      setShowBulkForm(false);
+      await invalidateRoutines();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -234,12 +337,7 @@ export const ExamRoutinePanel = ({
     mutationFn: () => unwrap(api.post(`/exams/${exam._id}/routines/publish`)),
     onSuccess: async () => {
       toast.success("Exam routine published");
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["exam-routines", exam._id],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["exams"] }),
-      ]);
+      await invalidateRoutines();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -248,7 +346,7 @@ export const ExamRoutinePanel = ({
     mutationFn: () => unwrap(api.post(`/exams/${exam._id}/routines/unpublish`)),
     onSuccess: async () => {
       toast.success("Exam routine unpublished");
-      await queryClient.invalidateQueries({ queryKey: ["exams"] });
+      await invalidateRoutines();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -361,8 +459,31 @@ export const ExamRoutinePanel = ({
       .sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
   }, [batchNameById, isCollege, programYears, routines, yearById]);
 
+  /** Columns of the combined Date × Year grid — mirrors the year tables. */
+  const gridColumns = useMemo<RoutineColumn[]>(() => {
+    if (tables.length === 0) {
+      return isCollege
+        ? programYears.map((year) => ({
+            key: idStr(year._id),
+            title: yearLabel(year),
+            shortTitle: shortYearTitle(year.name, year.level),
+            level: year.level,
+          }))
+        : [{ key: "", title: "Exam schedule" }];
+    }
+    return tables.map((table) => ({
+      key: table.yearId || "",
+      title: table.title,
+      shortTitle: isCollege
+        ? shortYearTitle(table.title, table.level)
+        : table.title,
+      level: table.level,
+    }));
+  }, [isCollege, programYears, tables]);
+
   const openAddForYear = (yearId: string) => {
     setEditingRoutineId(null);
+    setShowBulkForm(false);
     setFormYearId(yearId);
     setRoutineForm({ ...defaultRoutineValue, yearId });
     setShowForm(true);
@@ -370,6 +491,7 @@ export const ExamRoutinePanel = ({
 
   const openEdit = (routine: EnrichedRoutine) => {
     setEditingRoutineId(routine._id);
+    setShowBulkForm(false);
     setFormYearId(routine.yearId ?? "");
     setRoutineForm({
       yearId: routine.yearId ?? "",
@@ -384,6 +506,51 @@ export const ExamRoutinePanel = ({
       remarks: routine.remarks ?? "",
     });
     setShowForm(true);
+  };
+
+  const printSheetId = `exam-routine-print-${exam._id}`;
+  const handlePrint = async () => {
+    if (routines.length === 0) {
+      toast.error("Add routine entries before printing");
+      return;
+    }
+    setIsPrinting(true);
+    try {
+      await printBulkResultsElement(document.getElementById(printSheetId));
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const submitBulk = () => {
+    const rows: BulkRow[] = Object.entries(bulkSubjectByYear)
+      .filter(([, subjectId]) => Boolean(subjectId))
+      .map(([yearId, subjectId]) => ({ yearId, subjectId }));
+
+    if (rows.length === 0) {
+      toast.error("Pick a subject for at least one year");
+      return;
+    }
+
+    const day = bulkSlot.day || weekdayFromBsDate(bulkSlot.examDateBs);
+    const entries: ExamRoutineInput[] = [];
+    for (const row of rows) {
+      const parsed = examRoutineSchema.safeParse({
+        ...bulkSlot,
+        day,
+        yearId: row.yearId,
+        subjectId: row.subjectId,
+      });
+      if (!parsed.success) {
+        toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+        return;
+      }
+      entries.push(parsed.data);
+    }
+
+    void bulkCreateMutation.mutateAsync(entries);
   };
 
   if (routinesQuery.isLoading) {
@@ -406,65 +573,322 @@ export const ExamRoutinePanel = ({
     (s) => !scheduledInFormYear.has(s._id) || editingRoutineId,
   );
 
+  const canWrite = isAdmin && !readOnly;
+  const settings = settingsQuery.data;
+  const collegeAddress = settings?.address
+    ? formatAddressLine(settings.address)
+    : undefined;
+  const examDates = new Set(routines.map((r) => r.examDateBs));
+
   return (
     <div id="exam-routine-panel" className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Toolbar — status, view switch, publish / print / delete */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5">
         <Badge
           className={
             exam.routinePublished
               ? "bg-brand-100 text-brand-700"
-              : "bg-slate-100 text-slate-700"
+              : "bg-slate-200 text-slate-700"
           }
         >
           {exam.routinePublished ? "Routine Published" : "Routine Draft"}
         </Badge>
         {isCollege ? (
           <Badge className="bg-indigo-100 text-indigo-800">
-            {programYears.length} year table
-            {programYears.length === 1 ? "" : "s"}
+            {gridColumns.length} year
+            {gridColumns.length === 1 ? "" : "s"}
           </Badge>
         ) : null}
-        <p className="text-xs text-slate-500">
-          {isCollege
-            ? "Each year cohort has its own routine table below (1st / 2nd / 3rd). Add subjects per year, then publish."
-            : "Add subject-wise exam schedules below."}
-        </p>
-        {isAdmin && !readOnly ? (
-          <div className="ml-auto flex flex-wrap gap-2">
-            {isCollege && programYears.length > 0 && !showForm ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => openAddForYear(programYears[0]!._id)}
-              >
-                <Plus className="mr-1.5 h-4 w-4" />
-                Add entry
-              </Button>
-            ) : null}
-            {exam.routinePublished ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void unpublishMutation.mutateAsync()}
-                disabled={unpublishMutation.isPending}
-              >
-                Unpublish Routine
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                onClick={() => void publishMutation.mutateAsync()}
-                disabled={publishMutation.isPending || routines.length === 0}
-              >
-                Publish Routine
-              </Button>
-            )}
+        <Badge className="bg-slate-200 text-slate-700">
+          {routines.length} subject{routines.length === 1 ? "" : "s"} ·{" "}
+          {examDates.size} date{examDates.size === 1 ? "" : "s"}
+        </Badge>
+
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* View switch */}
+          <div className="flex overflow-hidden rounded-lg border border-slate-300 bg-white">
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                viewMode === "grid"
+                  ? "bg-brand-600 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              All years
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("tables")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                viewMode === "tables"
+                  ? "bg-brand-600 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+              Year-wise
+            </button>
           </div>
-        ) : null}
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void handlePrint()}
+            disabled={isPrinting || routines.length === 0}
+          >
+            <Printer className="mr-1.5 h-4 w-4" />
+            {isPrinting ? "Preparing…" : "Print routine"}
+          </Button>
+
+          {canWrite ? (
+            <>
+              {isCollege && programYears.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setShowForm(false);
+                    setShowBulkForm((current) => !current);
+                  }}
+                >
+                  <CalendarRange className="mr-1.5 h-4 w-4" />
+                  Add date for all years
+                </Button>
+              ) : null}
+              {!showForm ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    openAddForYear(
+                      isCollege ? (programYears[0]?._id ?? "") : "",
+                    )
+                  }
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add entry
+                </Button>
+              ) : null}
+              {exam.routinePublished ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void unpublishMutation.mutateAsync()}
+                  disabled={unpublishMutation.isPending}
+                >
+                  Unpublish
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={() => void publishMutation.mutateAsync()}
+                  disabled={publishMutation.isPending || routines.length === 0}
+                >
+                  Publish Routine
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={
+                  deleteRoutineScopeMutation.isPending || routines.length === 0
+                }
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Delete the ENTIRE routine for "${exam.name}"?\n\nAll ${routines.length} scheduled subject(s) across every year will be removed. The exam, its marks, and its results are NOT deleted — you can build a fresh routine right after.`,
+                    )
+                  ) {
+                    void deleteRoutineScopeMutation.mutateAsync(undefined);
+                  }
+                }}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                Delete whole routine
+              </Button>
+            </>
+          ) : null}
+        </div>
       </div>
 
-      {/* Add / Edit form */}
-      {isAdmin && !readOnly && showForm ? (
+      <p className="text-xs text-slate-500">
+        {isCollege
+          ? "One combined routine covers all three years — each year's students only ever see their own row entries in the portal. Switch to Year-wise to edit a single cohort."
+          : "Add subject-wise exam schedules below."}
+      </p>
+
+      {/* Quick add: same date/time, one subject per year */}
+      {canWrite && showBulkForm && isCollege ? (
+        <Card className="border-brand-200">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+            <div>
+              <CardTitle className="text-base">
+                Add one exam date across all years
+              </CardTitle>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Set the date and time once, then choose the subject each year
+                sits that day. Leave a year blank to skip it.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setShowBulkForm(false)}
+            >
+              Close
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <FormField label="Exam Date (BS)">
+                <NepaliDateField
+                  value={bulkSlot.examDateBs}
+                  onChange={(value) =>
+                    setBulkSlot((current) => ({
+                      ...current,
+                      examDateBs: value,
+                      day: weekdayFromBsDate(value) || current.day,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Day">
+                <Select
+                  value={bulkSlot.day}
+                  onChange={(event) =>
+                    setBulkSlot((current) => ({
+                      ...current,
+                      day: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Select day</option>
+                  {DAYS_OF_WEEK.map((day) => (
+                    <option key={day} value={day}>
+                      {day}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Duration (minutes)">
+                <NumberInput
+                  min={1}
+                  value={bulkSlot.durationMinutes}
+                  onChange={(event) =>
+                    setBulkSlot((current) => ({
+                      ...current,
+                      durationMinutes: event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Start Time">
+                <Input
+                  type="time"
+                  value={bulkSlot.startTime}
+                  onChange={(event) =>
+                    setBulkSlot((current) => ({
+                      ...current,
+                      startTime: event.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="End Time">
+                <Input
+                  type="time"
+                  value={bulkSlot.endTime}
+                  onChange={(event) =>
+                    setBulkSlot((current) => ({
+                      ...current,
+                      endTime: event.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Exam Hall (optional)">
+                <Input
+                  value={bulkSlot.examHall}
+                  onChange={(event) =>
+                    setBulkSlot((current) => ({
+                      ...current,
+                      examHall: event.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              {programYears.map((year) => {
+                const yearId = idStr(year._id);
+                const alreadyScheduled = new Set(
+                  routines
+                    .filter((r) => idStr(r.yearId) === yearId)
+                    .map((r) => r.subjectId),
+                );
+                const options = subjectsForYear(yearId).filter(
+                  (subject) => !alreadyScheduled.has(subject._id),
+                );
+                return (
+                  <FormField
+                    key={yearId}
+                    label={`${shortYearTitle(year.name, year.level)} year subject`}
+                  >
+                    <Select
+                      value={bulkSubjectByYear[yearId] ?? ""}
+                      onChange={(event) =>
+                        setBulkSubjectByYear((current) => ({
+                          ...current,
+                          [yearId]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">— No exam this day —</option>
+                      {options.map((subject) => (
+                        <option key={subject._id} value={subject._id}>
+                          {subject.name}
+                          {subject.code ? ` (${subject.code})` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setBulkSlot(emptyBulkSlot());
+                  setBulkSubjectByYear({});
+                  setShowBulkForm(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={submitBulk}
+                disabled={bulkCreateMutation.isPending}
+              >
+                {bulkCreateMutation.isPending
+                  ? "Saving…"
+                  : "Add to selected years"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Add / Edit single entry */}
+      {canWrite && showForm ? (
         <Card className="border-brand-200">
           <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
             <CardTitle className="text-base">
@@ -576,6 +1000,7 @@ export const ExamRoutinePanel = ({
                     setRoutineForm((current) => ({
                       ...current,
                       examDateBs: value,
+                      day: weekdayFromBsDate(value) || current.day,
                     }))
                   }
                 />
@@ -695,7 +1120,6 @@ export const ExamRoutinePanel = ({
         </Card>
       ) : null}
 
-      {/* Per-year schedule tables */}
       {isCollege && programYears.length === 0 && tables.length === 0 ? (
         <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
           <p className="text-sm font-medium text-amber-900">
@@ -703,8 +1127,8 @@ export const ExamRoutinePanel = ({
           </p>
           <p className="text-sm text-amber-800">
             Edit the exam and add year cohorts (e.g. 1st Year · Batch 2083, 2nd
-            Year · Batch 2082, 3rd Year · Batch 2081). Each cohort gets its own
-            routine table.
+            Year · Batch 2082, 3rd Year · Batch 2081). Each cohort becomes a
+            column of the combined routine.
           </p>
           {routines.length > 0 ? (
             <p className="text-xs text-amber-700">
@@ -718,18 +1142,34 @@ export const ExamRoutinePanel = ({
         <EmptyState
           title="No routine entries"
           description={
-            isAdmin
-              ? "Add subject-wise exam schedules below."
+            canWrite
+              ? "Use “Add date for all years” to build the 1st / 2nd / 3rd year routine in one pass."
               : "The exam routine will appear here once published."
           }
         />
+      ) : viewMode === "grid" ? (
+        /* Combined Date × Year grid — the sheet the college prints */
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 pb-3">
+            <div>
+              <CardTitle className="text-base text-slate-900">
+                {exam.name} — combined exam routine
+              </CardTitle>
+              <p className="text-xs text-slate-500">
+                {routines.length} subject{routines.length === 1 ? "" : "s"}{" "}
+                across {gridColumns.length} year
+                {gridColumns.length === 1 ? "" : "s"} ·{" "}
+                {exam.startDateBs} to {exam.endDateBs}
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <ExamRoutineGrid columns={gridColumns} slots={routines} />
+          </CardContent>
+        </Card>
       ) : (
+        /* Year-wise tables — editing surface for a single cohort */
         <div className="space-y-6">
-          {isCollege && tables.length > 1 ? (
-            <p className="text-sm font-medium text-slate-700">
-              Year-wise exam routines ({tables.length} tables)
-            </p>
-          ) : null}
           {tables.map((table) => (
             <Card
               key={table.key}
@@ -750,34 +1190,57 @@ export const ExamRoutinePanel = ({
                       : ""}
                   </p>
                 </div>
-                {isAdmin && !readOnly && isCollege && table.yearId ? (
-                  <Button
-                    size="sm"
-                    onClick={() => openAddForYear(table.yearId)}
-                  >
-                    <Plus className="mr-1.5 h-4 w-4" />
-                    Add for {table.title}
-                  </Button>
-                ) : null}
-                {isAdmin && !readOnly && !isCollege ? (
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditingRoutineId(null);
-                      setRoutineForm(defaultRoutineValue);
-                      setShowForm(true);
-                    }}
-                  >
-                    <Plus className="mr-1.5 h-4 w-4" />
-                    Add entry
-                  </Button>
-                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {canWrite && isCollege && table.yearId ? (
+                    <Button
+                      size="sm"
+                      onClick={() => openAddForYear(table.yearId)}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Add for {shortYearTitle(table.title, table.level)}
+                    </Button>
+                  ) : null}
+                  {canWrite && !isCollege ? (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setEditingRoutineId(null);
+                        setRoutineForm(defaultRoutineValue);
+                        setShowForm(true);
+                      }}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Add entry
+                    </Button>
+                  ) : null}
+                  {canWrite && table.yearId && table.slots.length > 0 ? (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={deleteRoutineScopeMutation.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete this year's whole routine (${table.title})?\n\nAll ${table.slots.length} scheduled subject(s) for this cohort will be removed. Other years, the exam, and its results stay untouched.`,
+                          )
+                        ) {
+                          void deleteRoutineScopeMutation.mutateAsync(
+                            table.yearId,
+                          );
+                        }
+                      }}
+                    >
+                      <Trash2 className="mr-1.5 h-4 w-4" />
+                      Delete this year&apos;s routine
+                    </Button>
+                  ) : null}
+                </div>
               </CardHeader>
               <CardContent className="pt-4">
                 {table.slots.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-500">
                     No subjects scheduled for this year yet.
-                    {isAdmin && !readOnly
+                    {canWrite
                       ? " Use “Add for …” to build this year’s exam routine."
                       : ""}
                   </p>
@@ -793,7 +1256,7 @@ export const ExamRoutinePanel = ({
                           <Th>Duration</Th>
                           <Th>Hall</Th>
                           <Th>Invigilator</Th>
-                          {isAdmin && !readOnly ? <Th /> : null}
+                          {canWrite ? <Th /> : null}
                         </tr>
                       </TableHead>
                       <TableBody>
@@ -817,7 +1280,7 @@ export const ExamRoutinePanel = ({
                             <Td>{routine.durationMinutes} min</Td>
                             <Td>{routine.examHall || "—"}</Td>
                             <Td>{routine.invigilator || "—"}</Td>
-                            {isAdmin && !readOnly ? (
+                            {canWrite ? (
                               <Td>
                                 <div className="flex justify-end gap-2">
                                   <Button
@@ -861,6 +1324,20 @@ export const ExamRoutinePanel = ({
           ))}
         </div>
       )}
+
+      {/* Hidden A4 landscape sheet cloned by the Print button */}
+      <ExamRoutinePrintSheet
+        id={printSheetId}
+        collegeName={settings?.schoolName}
+        collegeAddress={collegeAddress}
+        examName={exam.name}
+        academicYearBs={exam.academicYearBs}
+        startDateBs={exam.startDateBs}
+        endDateBs={exam.endDateBs}
+        columns={gridColumns}
+        slots={routines}
+        note="Students must be seated in the examination hall 15 minutes before the scheduled start time. Bring your college identity card."
+      />
     </div>
   );
 };
@@ -895,19 +1372,15 @@ export const TeacherRoutineList = ({
 
   const routines = routinesQuery.data ?? [];
 
-  /** Group: exam → year tables so multi-exam view stays clear */
+  /** Group: exam → year columns so the multi-exam view stays clear */
   const examGroups = useMemo(() => {
     const byExam = new Map<
       string,
       {
         examId: string;
         examName: string;
-        tables: Array<{
-          key: string;
-          title: string;
-          level?: number;
-          slots: EnrichedRoutine[];
-        }>;
+        columns: RoutineColumn[];
+        slots: EnrichedRoutine[];
       }
     >();
 
@@ -917,30 +1390,29 @@ export const TeacherRoutineList = ({
         byExam.set(eid, {
           examId: eid,
           examName: examNameById.get(eid) ?? "Exam",
-          tables: [],
+          columns: [],
+          slots: [],
         });
       }
       const group = byExam.get(eid)!;
-      const yearKey = r.yearId || "__legacy__";
+      const yearKey = r.yearId || "";
       const title = r.yearName || (r.yearId ? "Year" : "Exam schedule");
       // yearName may be "Ended · Batch 2081" (combined with batch name) — match the year part only.
       if ((title || "").toLowerCase().startsWith("ended")) continue;
-      let table = group.tables.find((t) => t.key === yearKey);
-      if (!table) {
-        table = {
+      if (!group.columns.some((column) => column.key === yearKey)) {
+        group.columns.push({
           key: yearKey,
           title,
+          shortTitle: shortYearTitle(title, r.yearLevel),
           level: r.yearLevel,
-          slots: [],
-        };
-        group.tables.push(table);
+        });
       }
-      table.slots.push(r);
+      group.slots.push(r);
     }
 
     return Array.from(byExam.values()).map((group) => ({
       ...group,
-      tables: group.tables.sort((a, b) => (a.level ?? 99) - (b.level ?? 99)),
+      columns: group.columns.sort((a, b) => (a.level ?? 99) - (b.level ?? 99)),
     }));
   }, [examNameById, routines]);
 
@@ -966,58 +1438,13 @@ export const TeacherRoutineList = ({
         enrolled year after the admin publishes the routine.
       </p>
       {examGroups.map((group) => (
-        <div key={group.examId} className="space-y-3">
+        <div key={group.examId} className="space-y-2">
           {examGroups.length > 1 || !examId ? (
             <h3 className="text-base font-semibold text-slate-900">
               {group.examName}
             </h3>
           ) : null}
-          {group.tables.map((table) => (
-            <div key={`${group.examId}-${table.key}`} className="space-y-2">
-              <h4 className="text-sm font-semibold text-slate-800">
-                {table.title} — exam routine
-              </h4>
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Subject</Th>
-                      <Th>Date</Th>
-                      <Th>Day</Th>
-                      <Th>Time</Th>
-                      <Th>Duration</Th>
-                      <Th>Hall</Th>
-                      <Th>Invigilator</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {table.slots.map((routine) => (
-                      <tr key={routine._id}>
-                        <Td>
-                          <div className="font-medium">
-                            {routine.subjectName ?? "Subject"}
-                          </div>
-                          {routine.subjectCode ? (
-                            <div className="text-xs text-slate-500">
-                              {routine.subjectCode}
-                            </div>
-                          ) : null}
-                        </Td>
-                        <Td>{routine.examDateBs}</Td>
-                        <Td>{routine.day}</Td>
-                        <Td>
-                          {routine.startTime} – {routine.endTime}
-                        </Td>
-                        <Td>{routine.durationMinutes} min</Td>
-                        <Td>{routine.examHall || "—"}</Td>
-                        <Td>{routine.invigilator || "—"}</Td>
-                      </tr>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          ))}
+          <ExamRoutineGrid columns={group.columns} slots={group.slots} />
         </div>
       ))}
     </div>

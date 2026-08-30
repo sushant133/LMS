@@ -185,3 +185,77 @@ export interface EmployeeAttendanceRegisterRow {
   recordStatus: EmployeeAttendanceRecordStatus;
   attendanceId: string;
 }
+
+/**
+ * Period Log — how many periods a teacher actually took, recorded beside their
+ * PRESENT/ABSENT mark. Attendance alone cannot pay a per-period contract, so these
+ * totals are what the salary sheet and the payroll Period section multiply by the
+ * teacher's period rate.
+ */
+export interface EmployeeAttendancePeriodDay {
+  dateBs: string;
+  status: string;
+  /** Undefined when nobody has entered a count for that day yet. */
+  periodsTaught?: number;
+  recordStatus: EmployeeAttendanceRecordStatus;
+  /** Sheet is LOCKED — periods can no longer be edited. */
+  locked: boolean;
+}
+
+export interface EmployeeAttendancePeriodRow {
+  teacherId: string;
+  employeeCode: string;
+  fullName: string;
+  designation: string;
+  /** MONTHLY | TENDER | PERIOD — only PERIOD teachers are paid from this total. */
+  paymentType: string;
+  periodRateNpr: number;
+  totalPeriods: number;
+  daysRecorded: number;
+  daysWithPeriods: number;
+  attendedDays: number;
+  /** Days marked present where no period count was entered. */
+  attendedDaysMissingPeriods: number;
+  estimatedAmountNpr: number;
+  days: EmployeeAttendancePeriodDay[];
+}
+
+export interface EmployeeAttendancePeriodLog {
+  monthBs: string;
+  /** Dates in the month that have a teacher attendance sheet. */
+  sheetDates: string[];
+  rows: EmployeeAttendancePeriodRow[];
+  totals: {
+    teachers: number;
+    periodPaidTeachers: number;
+    totalPeriods: number;
+    estimatedAmountNpr: number;
+    daysMissingPeriods: number;
+  };
+}
+
+/** One teacher's row when recording periods for a single date. */
+export interface EmployeeAttendancePeriodDayRow {
+  teacherId: string;
+  employeeCode: string;
+  fullName: string;
+  designation: string;
+  /** MONTHLY | TENDER | PERIOD */
+  paymentType: string;
+  periodRateNpr: number;
+  /** Empty when this teacher has no attendance mark on that date. */
+  status: string;
+  marked: boolean;
+  /** Undefined when no period count has been entered for that date. */
+  periodsTaught?: number;
+}
+
+/** The teacher roster for one date, used by the daily period entry screen. */
+export interface EmployeeAttendancePeriodDaySheet {
+  dateBs: string;
+  /** False when no attendance sheet has been opened for that date yet. */
+  sheetExists: boolean;
+  sheetStatus: string;
+  locked: boolean;
+  rows: EmployeeAttendancePeriodDayRow[];
+}

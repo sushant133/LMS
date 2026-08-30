@@ -70,6 +70,11 @@ const BackStudentsPanel = lazy(() =>
     default: module.BackStudentsPanel,
   })),
 );
+const ExamRecordsPanel = lazy(() =>
+  import("features/exams/ExamRecordsPanel").then((module) => ({
+    default: module.ExamRecordsPanel,
+  })),
+);
 const ResultReviewPanel = lazy(() =>
   import("features/exams/ResultReviewPanel").then((module) => ({
     default: module.ResultReviewPanel,
@@ -442,7 +447,12 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
   const [adminSection, setAdminSection] = useState<
-    "manage" | "print-results" | "enter-marks" | "passed-out" | "back-students"
+    | "manage"
+    | "print-results"
+    | "exam-records"
+    | "enter-marks"
+    | "passed-out"
+    | "back-students"
   >("manage");
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
@@ -1244,6 +1254,14 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
             >
               Print Results
             </Button>
+            {/* Read-only history — open any past exam of any batch/year on its own. */}
+            <Button
+              size="sm"
+              variant={adminSection === "exam-records" ? "default" : "outline"}
+              onClick={() => setAdminSection("exam-records")}
+            >
+              Exam Records
+            </Button>
             {canManage ? (
               <Button
                 size="sm"
@@ -1352,6 +1370,33 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 </Suspense>
               </CardContent>
             </Card>
+          ) : null}
+
+          {adminSection === "exam-records" ? (
+            <Suspense fallback={<LoadingState />}>
+              <ExamRecordsPanel
+                batches={(batchesQuery.data ?? []).map((batch) => ({
+                  _id: String(batch._id),
+                  name: String(batch.name ?? ""),
+                }))}
+                years={(yearsQuery.data ?? []).map((year) => ({
+                  _id: String(year._id),
+                  name: String(year.name ?? ""),
+                  batchId: year.batchId ? String(year.batchId) : undefined,
+                }))}
+                classes={(classesQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                }))}
+                sections={(sectionsQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                  classId: row.classId ? String(row.classId) : undefined,
+                }))}
+                students={studentsQuery.data ?? []}
+                isCollege={isCollege}
+              />
+            </Suspense>
           ) : null}
 
           {adminSection === "print-results" ? (

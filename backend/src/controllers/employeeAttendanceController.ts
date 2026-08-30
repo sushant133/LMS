@@ -1063,3 +1063,445 @@ export const getEmployeeAttendancePermissions = asyncHandler(
     });
   }
 );
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Period Log — teachers paid per period
+ *
+ * Attendance alone only says PRESENT or ABSENT, which is not enough to pay a
+ * teacher whose contract is per period. These endpoints record the number of
+ * periods each teacher actually took on a given day, and total them per month so
+ * the salary sheet and the payroll Period section can multiply periods × rate.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** "2082-05" — the BS month a period log is summarised over. */
+const parseMonthBs = (value: unknown): string => {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!/^\d{4}-\d{2}$/.test(text)) {
+    throw new ApiError(400, "Provide a month as YYYY-MM (BS), e.g. 2082-05");
+  }
+  return text;
+};
+
+/** Periods only make sense on a day the teacher actually attended. */
+const countsAsAttended = (status: string): boolean =>
+  status === "PRESENT" ||
+  status === "LATE" ||
+  status === "HALF_DAY" ||
+  status === "OFFICIAL_DUTY";
+
+/**
+ * GET /employee-attendance/periods
+ *
+ * Monthly period totals per teacher, with the day-by-day breakdown behind each total
+ * and the pay estimate (periods × the teacher's period rate) for per-period contracts.
+ */
+export const getEmployeeAttendancePeriodLog = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertEmployeeAttendanceAccess(req, "TEACHER", "view");
+    const schoolId = tenantObjectId(req);
+    const monthBs = parseMonthBs(req.query.monthBs);
+    const search = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+
+    const [sheets, teachers] = await Promise.all([
+      EmployeeAttendance.find({
+        schoolId,
+        category: "TEACHER",
+        isDeleted: false,
+        dateBs: { $regex: `^${monthBs}` }
+      })
+        .select("dateBs status entries")
+        .sort({ dateBs: 1 })
+        .lean(),
+      Teacher.find({ schoolId })
+        .populate("user", "fullName designation")
+        .select("teacherCode user paymentType periodRateNpr basicSalaryNpr status")
+        .sort({ teacherCode: 1 })
+        .lean()
+    ]);
+
+    type DayEntry = {
+      dateBs: string;
+      status: string;
+      periodsTaught?: number;
+      recordStatus: string;
+      /** Sheet is LOCKED — periods can no longer be edited from this screen. */
+      locked: boolean;
+    };
+
+    const daysByTeacher = new Map<string, DayEntry[]>();
+    for (const sheet of sheets) {
+      for (const entry of sheet.entries ?? []) {
+        if (!entry.teacherId) continue;
+        const key = String(entry.teacherId);
+        const list = daysByTeacher.get(key) ?? [];
+        list.push({
+          dateBs: String(sheet.dateBs),
+          status: String(entry.status ?? ""),
+          periodsTaught:
+            typeof entry.periodsTaught === "number" && Number.isFinite(entry.periodsTaught)
+              ? entry.periodsTaught
+              : undefined,
+          recordStatus: String(sheet.status ?? "DRAFT"),
+          locked: String(sheet.status ?? "") === "LOCKED"
+        });
+        daysByTeacher.set(key, list);
+      }
+    }
+
+    const rows = teachers
+      .map((teacher) => {
+        const teacherId = teacher._id.toString();
+        const user = teacher.user as unknown as {
+          fullName?: string;
+          designation?: string;
+        } | null;
+        const fullName = user?.fullName ?? teacher.teacherCode;
+
+        if (
+          search &&
+          !fullName.toLowerCase().includes(search) &&
+          !String(teacher.teacherCode ?? "").toLowerCase().includes(search)
+        ) {
+          return null;
+        }
+
+        const days = (daysByTeacher.get(teacherId) ?? []).sort((left, right) =>
+          left.dateBs.localeCompare(right.dateBs)
+        );
+
+        let totalPeriods = 0;
+        let daysWithPeriods = 0;
+        let attendedDays = 0;
+        let attendedDaysMissingPeriods = 0;
+
+        for (const day of days) {
+          const attended = countsAsAttended(day.status);
+          if (attended) attendedDays += 1;
+          if (typeof day.periodsTaught === "number") {
+            totalPeriods += day.periodsTaught;
+            daysWithPeriods += 1;
+          } else if (attended) {
+            attendedDaysMissingPeriods += 1;
+          }
+        }
+
+        const paymentType = String(teacher.paymentType ?? "MONTHLY").toUpperCase();
+        const periodRateNpr = Math.max(
+          0,
+          Number(
+            teacher.periodRateNpr || (paymentType === "PERIOD" ? teacher.basicSalaryNpr : 0)
+          ) || 0
+        );
+
+        return {
+          teacherId,
+          employeeCode: teacher.teacherCode,
+          fullName,
+          designation: user?.designation || "Teacher",
+          paymentType,
+          periodRateNpr,
+          totalPeriods,
+          daysRecorded: days.length,
+          daysWithPeriods,
+          attendedDays,
+          /** Days marked present where nobody entered a period count yet. */
+          attendedDaysMissingPeriods,
+          estimatedAmountNpr:
+            paymentType === "PERIOD"
+              ? Math.round(totalPeriods * periodRateNpr * 100) / 100
+              : 0,
+          days
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    // Per-period teachers first — they are the reason this log exists.
+    rows.sort((left, right) => {
+      if (left.paymentType !== right.paymentType) {
+        if (left.paymentType === "PERIOD") return -1;
+        if (right.paymentType === "PERIOD") return 1;
+      }
+      return left.fullName.localeCompare(right.fullName);
+    });
+
+    const periodTeachers = rows.filter((row) => row.paymentType === "PERIOD");
+
+    return sendSuccess(res, "Period log fetched", {
+      monthBs,
+      sheetDates: sheets.map((sheet) => String(sheet.dateBs)),
+      rows,
+      totals: {
+        teachers: rows.length,
+        periodPaidTeachers: periodTeachers.length,
+        totalPeriods: rows.reduce((sum, row) => sum + row.totalPeriods, 0),
+        estimatedAmountNpr:
+          Math.round(
+            periodTeachers.reduce((sum, row) => sum + row.estimatedAmountNpr, 0) * 100
+          ) / 100,
+        daysMissingPeriods: rows.reduce(
+          (sum, row) => sum + row.attendedDaysMissingPeriods,
+          0
+        )
+      }
+    });
+  }
+);
+
+/**
+ * POST /employee-attendance/periods
+ *
+ * Record the periods teachers took on one date. Body:
+ *   { dateBs, entries: [{ teacherId, periodsTaught }], markPresent? }
+ *
+ * Periods are a detail of an attendance record, so a teacher needs a mark on that day.
+ * When the day has no sheet yet — or a teacher has no row on it — `markPresent` (the
+ * default) opens a DRAFT sheet and marks exactly those teachers PRESENT, because
+ * recording that someone taught two periods asserts they were there. Send
+ * `markPresent: false` to record only against teachers already marked and report the
+ * rest as skipped, leaving the register untouched.
+ *
+ * A LOCKED sheet is refused so payroll cannot shift under an approved month, and the
+ * existing PRESENT/ABSENT marks of already-marked teachers are never changed.
+ */
+export const recordEmployeeAttendancePeriods = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertEmployeeAttendanceAccess(req, "TEACHER", "edit");
+    const schoolId = tenantObjectId(req);
+
+    const body = (req.body ?? {}) as {
+      dateBs?: unknown;
+      entries?: unknown;
+      markPresent?: unknown;
+    };
+    const dateBs = ensureValidBsDate(typeof body.dateBs === "string" ? body.dateBs : "");
+    const markPresent = body.markPresent !== false;
+
+    if (!Array.isArray(body.entries) || body.entries.length === 0) {
+      throw new ApiError(400, "Send at least one teacher's period count");
+    }
+
+    let record = await EmployeeAttendance.findOne({
+      schoolId,
+      category: "TEACHER",
+      dateBs,
+      isDeleted: false
+    });
+
+    if (record?.status === "LOCKED") {
+      throw new ApiError(
+        400,
+        `The attendance sheet for ${dateBs} is locked. Unlock it before changing period counts.`
+      );
+    }
+
+    // Only needed when a teacher has to be added to the sheet.
+    const roster = await listTeachers(schoolId);
+    const rosterById = new Map(roster.map((row) => [row._id, row]));
+
+    if (!record) {
+      if (!markPresent) {
+        throw new ApiError(
+          404,
+          `No teacher attendance sheet exists for ${dateBs}. Take attendance for that day first, or allow marking teachers present while recording periods.`
+        );
+      }
+      await assertEmployeeAttendanceAccess(req, "TEACHER", "create");
+      const settings = await Setting.findOne({ schoolId })
+        .select("academicYearBs")
+        .lean();
+      record = new EmployeeAttendance({
+        schoolId,
+        category: "TEACHER",
+        dateBs,
+        academicYearBs: settings?.academicYearBs ?? "",
+        entries: [],
+        status: "DRAFT",
+        sourceDefault: "MANUAL",
+        createdBy: actorId(req)
+      });
+    }
+
+    const before = record.isNew ? null : record.toObject();
+    const updated: string[] = [];
+    const marked: string[] = [];
+    const skipped: Array<{ teacherId: string; reason: string }> = [];
+
+    for (const raw of body.entries as Array<Record<string, unknown>>) {
+      const teacherId = typeof raw.teacherId === "string" ? raw.teacherId : "";
+      if (!teacherId) {
+        skipped.push({ teacherId: "", reason: "Missing teacher" });
+        continue;
+      }
+
+      // An explicit null / "" clears the count back to "not recorded".
+      const clearing = raw.periodsTaught === null || raw.periodsTaught === "";
+      const periods = clearing ? null : Number(raw.periodsTaught);
+      if (!clearing && (!Number.isFinite(periods) || periods! < 0 || periods! > 24)) {
+        skipped.push({ teacherId, reason: "Periods must be between 0 and 24" });
+        continue;
+      }
+
+      let entry = record.entries.find((row) => String(row.teacherId ?? "") === teacherId);
+
+      if (!entry) {
+        // Nothing to clear on a teacher who was never on the sheet.
+        if (clearing) continue;
+        if (!markPresent) {
+          skipped.push({
+            teacherId,
+            reason: "This teacher has no attendance mark on that day"
+          });
+          continue;
+        }
+        const person = rosterById.get(teacherId);
+        if (!person) {
+          skipped.push({ teacherId, reason: "Teacher not found on the roster" });
+          continue;
+        }
+        record.entries.push({
+          teacherId,
+          employeeUserId: person.userId,
+          employeeCode: person.employeeCode,
+          fullName: person.fullName,
+          department: person.department ?? "",
+          designation: person.designation ?? "",
+          // Recording periods asserts the teacher was present that day.
+          status: "PRESENT",
+          checkInTime: "",
+          checkOutTime: "",
+          remarks: "",
+          source: "MANUAL",
+          deviceId: "",
+          externalRef: ""
+        } as unknown as (typeof record.entries)[number]);
+        entry = record.entries[record.entries.length - 1];
+        marked.push(teacherId);
+      }
+
+      if (!entry) {
+        skipped.push({ teacherId, reason: "Could not add this teacher to the sheet" });
+        continue;
+      }
+
+      entry.periodsTaught = clearing ? undefined : (periods as number);
+      updated.push(teacherId);
+    }
+
+    if (updated.length === 0) {
+      throw new ApiError(400, skipped[0]?.reason ?? "No period counts could be saved");
+    }
+
+    await record.save();
+
+    await recordAudit(req, {
+      action: "employee-attendance.periods.record",
+      entity: "EmployeeAttendance",
+      entityId: record._id.toString(),
+      before,
+      after: record.toObject()
+    });
+
+    const parts = [`Saved periods for ${updated.length} teacher(s)`];
+    if (marked.length > 0) {
+      parts.push(`${marked.length} marked present on ${dateBs}`);
+    }
+    if (skipped.length > 0) {
+      parts.push(`${skipped.length} skipped`);
+    }
+
+    return sendSuccess(res, parts.join(" · "), {
+      dateBs,
+      updated: updated.length,
+      markedPresent: marked.length,
+      skipped
+    });
+  }
+);
+
+/**
+ * GET /employee-attendance/periods/day?dateBs=YYYY-MM-DD
+ *
+ * The full teacher roster for one date with that day's attendance mark and period
+ * count, so periods can be entered for any day — including a day whose attendance
+ * sheet has not been opened yet.
+ */
+export const getEmployeeAttendancePeriodDay = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertEmployeeAttendanceAccess(req, "TEACHER", "view");
+    const schoolId = tenantObjectId(req);
+    const dateBs = ensureValidBsDate(
+      typeof req.query.dateBs === "string" && req.query.dateBs
+        ? req.query.dateBs
+        : getTodayBs()
+    );
+
+    const [record, teachers] = await Promise.all([
+      EmployeeAttendance.findOne({
+        schoolId,
+        category: "TEACHER",
+        dateBs,
+        isDeleted: false
+      })
+        .select("status entries")
+        .lean(),
+      Teacher.find({ schoolId })
+        .populate("user", "fullName designation")
+        .select("teacherCode user paymentType periodRateNpr basicSalaryNpr")
+        .sort({ teacherCode: 1 })
+        .lean()
+    ]);
+
+    const entryByTeacher = new Map<string, Record<string, unknown>>();
+    for (const entry of (record?.entries ?? []) as unknown as Array<Record<string, unknown>>) {
+      if (entry.teacherId) entryByTeacher.set(String(entry.teacherId), entry);
+    }
+
+    const rows = teachers.map((teacher) => {
+      const teacherId = teacher._id.toString();
+      const user = teacher.user as unknown as {
+        fullName?: string;
+        designation?: string;
+      } | null;
+      const entry = entryByTeacher.get(teacherId);
+      const paymentType = String(teacher.paymentType ?? "MONTHLY").toUpperCase();
+
+      return {
+        teacherId,
+        employeeCode: teacher.teacherCode,
+        fullName: user?.fullName ?? teacher.teacherCode,
+        designation: user?.designation || "Teacher",
+        paymentType,
+        periodRateNpr: Math.max(
+          0,
+          Number(
+            teacher.periodRateNpr || (paymentType === "PERIOD" ? teacher.basicSalaryNpr : 0)
+          ) || 0
+        ),
+        /** Empty when this teacher has no mark on that day. */
+        status: entry ? String(entry.status ?? "") : "",
+        marked: Boolean(entry),
+        periodsTaught:
+          entry && typeof entry.periodsTaught === "number" && Number.isFinite(entry.periodsTaught)
+            ? (entry.periodsTaught as number)
+            : undefined
+      };
+    });
+
+    // Per-period teachers first — they are the reason this screen exists.
+    rows.sort((left, right) => {
+      if (left.paymentType !== right.paymentType) {
+        if (left.paymentType === "PERIOD") return -1;
+        if (right.paymentType === "PERIOD") return 1;
+      }
+      return left.fullName.localeCompare(right.fullName);
+    });
+
+    return sendSuccess(res, "Period day fetched", {
+      dateBs,
+      sheetExists: Boolean(record),
+      sheetStatus: String(record?.status ?? ""),
+      locked: String(record?.status ?? "") === "LOCKED",
+      rows
+    });
+  }
+);

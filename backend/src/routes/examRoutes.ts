@@ -34,12 +34,20 @@ import {
 } from "../controllers/printResultsController.js";
 import {
   createExamRoutine,
+  createExamRoutinesBulk,
   deleteExamRoutine,
+  deleteExamRoutineBulk,
   listExamRoutines,
   publishExamRoutine,
   unpublishExamRoutine,
   updateExamRoutine
 } from "../controllers/examRoutineController.js";
+import {
+  exportCohortExamSheetCsv,
+  getCohortExamSheet,
+  getStudentExamHistory,
+  listCohortExamRecords
+} from "../controllers/examRecordsController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
@@ -72,10 +80,23 @@ router.delete("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteExam);
 
 router.get("/routines", examReaders, listExamRoutines);
 router.post("/:examId/routines", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createExamRoutine);
+router.post("/:examId/routines/bulk", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createExamRoutinesBulk);
+/** Delete a whole routine (optionally one ?yearId=) without deleting the exam. */
+router.delete("/:examId/routines", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteExamRoutineBulk);
 router.put("/:examId/routines/:routineId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateExamRoutine);
 router.delete("/:examId/routines/:routineId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteExamRoutine);
 router.post("/:examId/routines/publish", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), publishExamRoutine);
 router.post("/:examId/routines/unpublish", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), unpublishExamRoutine);
+
+/**
+ * Exam Records — read-only history of completed exams for one cohort (batch + year, or
+ * class + section), so the office can open First Term on its own while Third Term is
+ * still being scheduled.
+ */
+router.get("/records/exams", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listCohortExamRecords);
+router.get("/records/sheet", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getCohortExamSheet);
+router.get("/records/sheet/export", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), exportCohortExamSheetCsv);
+router.get("/records/student", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getStudentExamHistory);
 
 router.get("/results/published/exams", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listPublishedExams);
 router.get("/results/published/grid", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getPrintResultsGrid);

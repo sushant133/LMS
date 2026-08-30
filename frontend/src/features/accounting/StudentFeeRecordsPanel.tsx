@@ -19,6 +19,7 @@ import type {
   YearRecord,
 } from "@phit-erp/shared";
 import {
+  hasAccountingPermission,
   PAYMENT_METHOD_LABELS,
   PAYMENT_METHODS,
   PAYMENT_METHODS_WITH_HANDOVER,
@@ -250,6 +251,14 @@ const useCanEditFeePayments = (): boolean => {
   return roles.some((role) => canManageInstitution(normalizeUserRole(String(role))));
 };
 
+/** Staff with print_receipt (admin, accountant, cashier, …) may print receipts. */
+const useCanPrintReceipts = (): boolean => {
+  const { user } = useAuth();
+  if (!user) return false;
+  const roles = [user.role, ...(user.secondaryRoles ?? [])].filter(Boolean);
+  return roles.some((role) => hasAccountingPermission(String(role), "print_receipt"));
+};
+
 /**
  * Desktop-contained horizontal scroll for All receipts.
  * Fits inside main content only (no page-wide overflow). Student + Actions
@@ -400,6 +409,8 @@ export const StudentFeeRecordsPanel = () => {
   const currentUserName = user?.fullName?.trim() || "";
   /** Super Admin / College Admin only — edit amount paid / delete mistaken receipts */
   const canAdminEdit = useCanEditFeePayments();
+  /** Admin, accountant, and other roles with print_receipt — All receipts print */
+  const canPrintReceipts = useCanPrintReceipts();
   const [tab, setTab] = useState<PanelTab>("ledger");
   const [search, setSearch] = useState("");
   /** Ledger filters */
@@ -1009,14 +1020,14 @@ export const StudentFeeRecordsPanel = () => {
     [scholarshipAwards],
   );
 
-  /** Super Admin / College Admin only — open single receipt PDF. */
+  /** Open a single official receipt PDF (admin, accountant, and other print_receipt roles). */
   const downloadReceiptPdf = async (
     id: string,
     receiptNumber?: string,
     options?: { silent?: boolean },
   ): Promise<void> => {
-    if (!canAdminEdit) {
-      toast.error("Only college admin or super admin can print receipts");
+    if (!canPrintReceipts) {
+      toast.error("You do not have permission to print receipts");
       return;
     }
     setPrintingReceiptId(id);
@@ -1115,8 +1126,8 @@ export const StudentFeeRecordsPanel = () => {
    * Use each row’s Print button for a single official receipt PDF.
    */
   const printAllFilteredReceipts = () => {
-    if (!canAdminEdit) {
-      toast.error("Only college admin or super admin can print receipts");
+    if (!canPrintReceipts) {
+      toast.error("You do not have permission to print receipts");
       return;
     }
     if (filteredReceipts.length === 0) {
@@ -2822,13 +2833,13 @@ export const StudentFeeRecordsPanel = () => {
               <CardTitle className="text-base">All fee receipts</CardTitle>
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
-                {canAdminEdit
-                  ? " Print PDF prints the filtered list as one table; each row’s Print opens a single receipt. Super Admin / College Admin can also edit or delete."
+                {canPrintReceipts
+                  ? " Print PDF prints the filtered list as one table; each row’s Print opens a single receipt."
                   : ""}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {canAdminEdit ? (
+              {canPrintReceipts ? (
                 <Button
                   type="button"
                   variant="outline"
@@ -3093,21 +3104,23 @@ export const StudentFeeRecordsPanel = () => {
                           </Td>
                           <Td className="whitespace-nowrap bg-white group-hover:bg-slate-50 md:sticky md:right-0 md:z-20 md:min-w-[14rem] md:shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.15)]">
                             <div className="flex min-w-[14rem] flex-wrap items-center justify-end gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                title="Print / download receipt PDF"
-                                disabled={printingReceiptId === row._id}
-                                onClick={() =>
-                                  void downloadReceiptPdf(
-                                    row._id,
-                                    row.receiptNumber,
-                                  )
-                                }
-                              >
-                                <Printer className="mr-1 h-3.5 w-3.5" />
-                                {printingReceiptId === row._id ? "…" : "Print"}
-                              </Button>
+                              {canPrintReceipts ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Print / download receipt PDF"
+                                  disabled={printingReceiptId === row._id}
+                                  onClick={() =>
+                                    void downloadReceiptPdf(
+                                      row._id,
+                                      row.receiptNumber,
+                                    )
+                                  }
+                                >
+                                  <Printer className="mr-1 h-3.5 w-3.5" />
+                                  {printingReceiptId === row._id ? "…" : "Print"}
+                                </Button>
+                              ) : null}
                               {canAdminEdit ? (
                                 <>
                                   <Button

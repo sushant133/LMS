@@ -1,20 +1,30 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   ExamRecord,
   ExamRoutineRecord,
   MarksheetViewResponse,
   ResultRecord,
-  SubjectRecord,
+  SchoolSettingsRecord,
 } from "@phit-erp/shared";
+import { Printer } from "lucide-react";
+import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
+import { Badge } from "components/ui/badge";
+import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
-import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { PageContent } from "components/layout/PageContent";
+import {
+  ExamRoutineGrid,
+  ExamRoutinePrintSheet,
+  shortYearTitle,
+  type RoutineColumn,
+} from "features/exams/ExamRoutineGrid";
 import { ResultMarksheetView } from "features/exams/ResultMarksheetView";
-import { useNormalizedRole } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
+import { printBulkResultsElement } from "lib/printUtils";
+import { parseErrorMessage } from "lib/utils";
 
 interface EnrichedRoutine extends ExamRoutineRecord {
   subjectName?: string;
@@ -65,7 +75,6 @@ export const StudentExamPortal = ({
   results,
   isLoading,
 }: StudentExamPortalProps) => {
-  const role = useNormalizedRole();
   /**
    * Load published routines in one call (backend filters to published + student's year).
    * Do not depend on the exams list first — that previously returned empty when
@@ -76,21 +85,15 @@ export const StudentExamPortal = ({
     queryFn: () => unwrap<EnrichedRoutine[]>(api.get("/exams/routines")),
   });
 
-  const subjectsQuery = useQuery({
-    queryKey: ["student-subjects"],
-    queryFn: () => unwrap<SubjectRecord[]>(api.get("/student/subjects")),
-    // Parents must not call student-only portal APIs (403)
-    enabled: role === "STUDENT",
-    staleTime: 60_000,
+  /** College name for the printed routine header. */
+  const settingsQuery = useQuery({
+    queryKey: ["settings", "print-branding"],
+    queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
+    staleTime: 5 * 60_000,
+    retry: 1,
   });
 
-  const subjectMap = useMemo(
-    () =>
-      new Map(
-        (subjectsQuery.data ?? []).map((subject) => [subject._id, subject]),
-      ),
-    [subjectsQuery.data],
-  );
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const examById = useMemo(
     () => new Map(exams.map((exam) => [exam._id, exam])),
@@ -111,6 +114,57 @@ export const StudentExamPortal = ({
     });
   }, [routinesQuery.data]);
 
+  /**
+   * The backend already restricts these rows to the student's own enrolled year, so the
+   * grid below never has to filter — it just renders whichever year came back, one
+   * section per exam.
+   */
+  const routineGroups = useMemo(() => {
+    const byExam = new Map<
+      string,
+      {
+        examId: string;
+        examName: string;
+        columns: RoutineColumn[];
+        slots: EnrichedRoutine[];
+      }
+    >();
+
+    for (const routine of upcomingRoutines) {
+      const group = byExam.get(routine.examId) ?? {
+        examId: routine.examId,
+        examName: examById.get(routine.examId)?.name ?? "Exam",
+        columns: [] as RoutineColumn[],
+        slots: [] as EnrichedRoutine[],
+      };
+      const key = routine.yearId ?? "";
+      if (!group.columns.some((column) => column.key === key)) {
+        const title = routine.yearName || "My year";
+        group.columns.push({
+          key,
+          title,
+          shortTitle: routine.yearName
+            ? shortYearTitle(title, routine.yearLevel)
+            : title,
+          level: routine.yearLevel,
+        });
+      }
+      group.slots.push(routine);
+      byExam.set(routine.examId, group);
+    }
+
+    return [...byExam.values()].map((group) => ({
+      ...group,
+      columns: group.columns.sort((a, b) => (a.level ?? 99) - (b.level ?? 99)),
+    }));
+  }, [examById, upcomingRoutines]);
+
+  /** Year label shown next to the card title, e.g. "1st Year · Batch 2083". */
+  const myYearName = useMemo(
+    () => upcomingRoutines.find((routine) => routine.yearName)?.yearName ?? "",
+    [upcomingRoutines],
+  );
+
   const sortedResults = useMemo(
     () =>
       [...results].sort((left, right) => {
@@ -121,6 +175,18 @@ export const StudentExamPortal = ({
     [results, examById],
   );
 
+  const printSheetId = "student-exam-routine-print";
+  const handlePrint = async () => {
+    setIsPrinting(true);
+    try {
+      await printBulkResultsElement(document.getElementById(printSheetId));
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
   if (isLoading || routinesQuery.isLoading) {
     return <LoadingState />;
   }
@@ -129,59 +195,76 @@ export const StudentExamPortal = ({
     <PageContent className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>My year — exam schedule</CardTitle>
-          <p className="text-sm text-slate-600">
-            Only routines for your enrolled year are shown (1st year students
-            see 1st year only, etc.).
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                My exam routine
+                {myYearName ? (
+                  <Badge className="bg-brand-100 text-brand-700">
+                    {myYearName}
+                  </Badge>
+                ) : null}
+              </CardTitle>
+              <p className="mt-1 text-sm text-slate-600">
+                The college publishes one routine for all years; you only ever
+                see the dates and subjects for your own enrolled year.
+              </p>
+            </div>
+            {upcomingRoutines.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handlePrint()}
+                disabled={isPrinting}
+              >
+                <Printer className="mr-1.5 h-4 w-4" />
+                {isPrinting ? "Preparing…" : "Print my routine"}
+              </Button>
+            ) : null}
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
           {upcomingRoutines.length === 0 ? (
             <EmptyState
               title="No published routines"
               description="Your exam schedule will appear here once the college admin publishes the routine for your year."
             />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Exam</Th>
-                    <Th>Subject</Th>
-                    <Th>Date</Th>
-                    <Th>Day</Th>
-                    <Th>Time</Th>
-                    <Th>Duration</Th>
-                    <Th>Hall</Th>
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {upcomingRoutines.map((routine) => {
-                    const exam = examById.get(routine.examId);
-                    return (
-                      <tr key={routine._id}>
-                        <Td>{exam?.name ?? "Exam"}</Td>
-                        <Td>
-                          {routine.subjectName ??
-                            subjectMap.get(routine.subjectId)?.name ??
-                            "Subject"}
-                        </Td>
-                        <Td>{routine.examDateBs}</Td>
-                        <Td>{routine.day}</Td>
-                        <Td>
-                          {routine.startTime} - {routine.endTime}
-                        </Td>
-                        <Td>{routine.durationMinutes} min</Td>
-                        <Td>{routine.examHall || "—"}</Td>
-                      </tr>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+            routineGroups.map((group) => (
+              <div key={group.examId} className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {group.examName}
+                  </h3>
+                  <span className="text-xs text-slate-500">
+                    {group.slots.length} subject
+                    {group.slots.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <ExamRoutineGrid
+                  columns={group.columns}
+                  slots={group.slots}
+                  showDetails
+                />
+              </div>
+            ))
           )}
         </CardContent>
       </Card>
+
+      {/* Hidden A4 landscape sheet cloned by "Print my routine" — the student's
+          own year only, since that is all the API returns to them. */}
+      <ExamRoutinePrintSheet
+        id={printSheetId}
+        collegeName={settingsQuery.data?.schoolName}
+        heading="MY EXAMINATION ROUTINE"
+        examName={routineGroups.map((group) => group.examName).join(", ")}
+        academicYearBs={settingsQuery.data?.academicYearBs}
+        columns={routineGroups[0]?.columns ?? []}
+        slots={upcomingRoutines}
+        note="Be seated in the examination hall 15 minutes before the scheduled start time and carry your college identity card."
+        signatories={["Exam Coordinator"]}
+      />
 
       {publishedExams.length > 0 ? (
         <Card>

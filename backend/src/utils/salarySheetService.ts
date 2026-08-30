@@ -60,6 +60,8 @@ const monthInAcademicYear = (monthBs: string, academicYearBs: string): boolean =
 
 type TeacherPayFacts = {
   periodsByTeacher: Map<string, number>;
+  /** Where each teacher's period count came from — the register beats the log book. */
+  periodSourceByTeacher: Map<string, "ATTENDANCE" | "LOGBOOK" | "NONE">;
   progressByTeacherSubject: Map<string, number>;
   progressDetailByTeacherSubject: Map<string, string>;
   assignedSubjectsByTeacher: Map<string, string[]>;
@@ -74,10 +76,13 @@ const loadTeacherPayFacts = async (
   schoolId: Types.ObjectId,
   monthBs: string,
   teacherIds: Types.ObjectId[],
-  tenderSubjectIdsByTeacher: Map<string, string[]>
+  tenderSubjectIdsByTeacher: Map<string, string[]>,
+  /** Periods recorded on the teacher attendance register, keyed by teacher id. */
+  registerPeriodsByTeacher: Map<string, { periodsTaught: number; periodDaysRecorded: number }>
 ): Promise<TeacherPayFacts> => {
   const empty: TeacherPayFacts = {
     periodsByTeacher: new Map(),
+    periodSourceByTeacher: new Map(),
     progressByTeacherSubject: new Map(),
     progressDetailByTeacherSubject: new Map(),
     assignedSubjectsByTeacher: new Map(),
@@ -127,9 +132,31 @@ const loadTeacherPayFacts = async (
     })
   ]);
 
+  /**
+   * Periods a per-period teacher is paid for.
+   *
+   * The Teacher Attendance register is authoritative: the office records the periods
+   * each teacher actually took beside their PRESENT/ABSENT mark, so that number is what
+   * payroll must pay against. The academic log book is only a fallback for months where
+   * no period was ever entered on the register, so older months keep working.
+   */
   const periodsByTeacher = new Map<string, number>();
+  const periodSourceByTeacher = new Map<string, "ATTENDANCE" | "LOGBOOK" | "NONE">();
+  const logPeriodsByTeacher = new Map<string, number>();
   for (const row of logCounts) {
-    periodsByTeacher.set(String(row._id), Number(row.periods) || 0);
+    logPeriodsByTeacher.set(String(row._id), Number(row.periods) || 0);
+  }
+  for (const teacherId of teacherIds) {
+    const key = String(teacherId);
+    const register = registerPeriodsByTeacher.get(key);
+    if (register && register.periodDaysRecorded > 0) {
+      periodsByTeacher.set(key, register.periodsTaught);
+      periodSourceByTeacher.set(key, "ATTENDANCE");
+      continue;
+    }
+    const logged = logPeriodsByTeacher.get(key) ?? 0;
+    periodsByTeacher.set(key, logged);
+    periodSourceByTeacher.set(key, logged > 0 ? "LOGBOOK" : "NONE");
   }
 
   const pushProgress = (rows: typeof progressRows, requireAy: boolean) => {
@@ -262,7 +289,8 @@ const loadTeacherPayFacts = async (
     tenderPaidPercentByTeacher,
     subjectNameById,
     subjectFamilyById: syllabusProgress.subjectFamilyById,
-    academicYearBs
+    academicYearBs,
+    periodSourceByTeacher
   };
 };
 
@@ -271,19 +299,33 @@ type AttendanceBucket = {
   absentDays: number;
   leaveDays: number;
   daysRecorded: number;
+  /** Sum of periods recorded on the teacher attendance register for the month. */
+  periodsTaught: number;
+  /** Days a period count was actually entered — 0 means periods were never recorded. */
+  periodDaysRecorded: number;
 };
 
 const emptyBucket = (): AttendanceBucket => ({
   presentDays: 0,
   absentDays: 0,
   leaveDays: 0,
-  daysRecorded: 0
+  daysRecorded: 0,
+  periodsTaught: 0,
+  periodDaysRecorded: 0
 });
 
 /**
  * Map one register mark. Holiday-dated sheets are skipped by the caller, so a
  * HOLIDAY status on a remaining (working) day is paid as present.
  */
+/** Add a day's recorded period count (teachers paid per period). */
+const applyPeriods = (bucket: AttendanceBucket, periods: unknown): void => {
+  const value = Number(periods);
+  if (!Number.isFinite(value) || value < 0) return;
+  bucket.periodsTaught += value;
+  bucket.periodDaysRecorded += 1;
+};
+
 const applyStatus = (bucket: AttendanceBucket, status: string): void => {
   bucket.daysRecorded += 1;
   switch (status) {
@@ -364,6 +406,7 @@ export const aggregateEmployeeAttendanceForMonth = async (
         const key = String(entry.teacherId);
         const bucket = byTeacherId.get(key) ?? emptyBucket();
         applyStatus(bucket, status);
+        applyPeriods(bucket, entry.periodsTaught);
         byTeacherId.set(key, bucket);
       }
       if (entry.staffId) {
@@ -452,7 +495,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     schoolId,
     monthBs,
     teachers.map((t) => t._id as Types.ObjectId),
-    tenderSubjectIdsByTeacher
+    tenderSubjectIdsByTeacher,
+    attendance.byTeacherId
   );
 
   type DraftRow = {
@@ -755,8 +799,16 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         );
       }
     } else if (paymentType === "PERIOD") {
+      // Name the source so a disputed payslip can be traced back to the register.
+      const source = manualUnits
+        ? "entered manually"
+        : payFacts.periodSourceByTeacher.get(teacherId) === "ATTENDANCE"
+          ? "from attendance register"
+          : payFacts.periodSourceByTeacher.get(teacherId) === "LOGBOOK"
+            ? "from log book"
+            : "no periods recorded";
       parts.push(
-        `${periodsAttended} period(s) × Rs ${periodRateNpr.toLocaleString("en-NP")}`
+        `${periodsAttended} period(s) × Rs ${periodRateNpr.toLocaleString("en-NP")} (${source})`
       );
     }
 

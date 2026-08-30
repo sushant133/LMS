@@ -4,10 +4,13 @@ import {
   getEmployeeAttendanceById,
   getEmployeeAttendanceDashboard,
   getEmployeeAttendanceMarkContext,
+  getEmployeeAttendancePeriodDay,
+  getEmployeeAttendancePeriodLog,
   getEmployeeAttendancePermissions,
   getEmployeeAttendanceRegister,
   getMyEmployeeAttendance,
   listEmployeeAttendance,
+  recordEmployeeAttendancePeriods,
   submitEmployeeAttendance,
   unlockEmployeeAttendance,
   updateEmployeeAttendance,
@@ -70,6 +73,11 @@ router.get("/permissions", authorize(...SELF_SERVICE), getEmployeeAttendancePerm
 router.get("/dashboard", authorize(...READ), getEmployeeAttendanceDashboard);
 router.get("/context", authorize(...READ), getEmployeeAttendanceMarkContext);
 router.get("/register", authorize(...READ), getEmployeeAttendanceRegister);
+/** Period Log — monthly periods per teacher, feeding the payroll Period section. */
+router.get("/periods", authorize(...READ), getEmployeeAttendancePeriodLog);
+/** One date's teacher roster with that day's marks and period counts. */
+router.get("/periods/day", authorize(...READ), getEmployeeAttendancePeriodDay);
+router.post("/periods", authorize(...WRITE), recordEmployeeAttendancePeriods);
 router.get("/", authorize(...READ), listEmployeeAttendance);
 router.get("/:id", authorize(...READ), getEmployeeAttendanceById);
 

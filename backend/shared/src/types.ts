@@ -907,6 +907,131 @@ export interface ExamRoutineRecord {
   updatedAt?: string;
 }
 
+/**
+ * Exam Records — the administration's read-only view of completed exams.
+ * One summary row per exam a cohort has sat, so First Term can be opened on its own
+ * while a later term is still being prepared.
+ */
+export interface ExamRecordSummary {
+  examId: string;
+  examName: string;
+  academicYearBs: string;
+  startDateBs: string;
+  endDateBs: string;
+  resultPublishDateBs?: string;
+  status: ExamStatus;
+  resultsPublished: boolean;
+  resultsLocked: boolean;
+  studentCount: number;
+  /** Students whose marksheet has actually been released to them. */
+  releasedStudentCount: number;
+  subjectCount: number;
+  publishedSubjectCount: number;
+  passCount: number;
+  failCount: number;
+  averagePercentage: number;
+}
+
+export interface ExamRecordSubjectColumn {
+  subjectId: string;
+  subjectName: string;
+  subjectCode?: string;
+  fullMarks: number;
+  passMarks: number;
+  /** False when marks exist but were never released to students. */
+  published: boolean;
+}
+
+export interface ExamRecordMarkCell {
+  obtainedMarks: number;
+  theoryMarks?: number;
+  practicalMarks?: number;
+  internalMarks?: number;
+  grade?: string;
+  passFail?: string;
+  attendanceStatus?: string;
+}
+
+export interface ExamRecordStudentRow {
+  resultId: string;
+  studentId: string;
+  studentName: string;
+  rollNumber?: number;
+  registrationNumber?: string;
+  released: boolean;
+  publishedAtBs?: string;
+  /** subjectId → that student's mark for the subject. */
+  marks: Record<string, ExamRecordMarkCell>;
+  totalObtained: number;
+  totalFull: number;
+  percentage: number;
+  gpa: number;
+  grade?: string;
+  passFailStatus?: string;
+}
+
+/** One exam's full marks grid for one cohort. */
+export interface ExamRecordSheet {
+  exam: {
+    _id: string;
+    name: string;
+    academicYearBs: string;
+    startDateBs: string;
+    endDateBs: string;
+    resultPublishDateBs?: string;
+    resultsPublished: boolean;
+    resultsLocked: boolean;
+  };
+  batchName?: string;
+  yearName?: string;
+  className?: string;
+  sectionName?: string;
+  subjects: ExamRecordSubjectColumn[];
+  rows: ExamRecordStudentRow[];
+}
+
+export interface StudentExamHistoryEntry {
+  examId: string;
+  examName: string;
+  academicYearBs: string;
+  startDateBs: string;
+  resultPublishDateBs?: string;
+  released: boolean;
+  publishedAtBs?: string;
+  marks: Array<{
+    subjectId: string;
+    subjectName: string;
+    subjectCode?: string;
+    fullMarks: number;
+    passMarks: number;
+    obtainedMarks: number;
+    grade?: string;
+    passFail?: string;
+    attendanceStatus?: string;
+  }>;
+  totalObtained: number;
+  totalFull: number;
+  percentage: number;
+  gpa: number;
+  grade?: string;
+  passFailStatus?: string;
+}
+
+/** Every term one student has sat, newest first — for term-over-term comparison. */
+export interface StudentExamHistory {
+  student: {
+    studentId: string;
+    studentName: string;
+    rollNumber?: number;
+    registrationNumber?: string;
+    batchName?: string;
+    yearName?: string;
+    className?: string;
+    sectionName?: string;
+  };
+  exams: StudentExamHistoryEntry[];
+}
+
 export interface ResultSubjectMarkInput {
   subjectId: string;
   fullMarks: number;

@@ -260,6 +260,118 @@ export const createExamRoutine = asyncHandler(async (req: Request, res: Response
   return sendSuccess(res, "Exam routine created", routine, 201);
 });
 
+/**
+ * Add one dated slot across several year cohorts in a single call — the "same date/time,
+ * one subject per year" flow used to build a 1st/2nd/3rd-year routine grid in one step.
+ *
+ * Rows that clash with an existing entry (same subject already scheduled for that year)
+ * are reported back instead of failing the whole request, so the years that could be
+ * scheduled still get their entries.
+ */
+export const createExamRoutinesBulk = asyncHandler(async (req: Request, res: Response) => {
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
+  const examId = String(req.params.examId);
+  const exam = await getExamOrThrow(req, examId);
+
+  const rawEntries = (req.body as { entries?: unknown })?.entries;
+  if (!Array.isArray(rawEntries) || rawEntries.length === 0) {
+    throw new ApiError(400, "Add at least one year's subject before saving");
+  }
+
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+  const schoolId = tenantObjectId(req);
+  const allowedYearIds = (exam.yearIds ?? []).map((id) => id.toString());
+
+  const created: unknown[] = [];
+  const skipped: Array<{ yearId?: string; reason: string }> = [];
+
+  for (const raw of rawEntries) {
+    const parsed = examRoutineSchema.safeParse(raw);
+    if (!parsed.success) {
+      skipped.push({
+        yearId: (raw as { yearId?: string })?.yearId,
+        reason: parsed.error.issues[0]?.message ?? "Invalid routine entry"
+      });
+      continue;
+    }
+    const payload = parsed.data;
+
+    try {
+      ensureValidBsDate(payload.examDateBs);
+    } catch {
+      skipped.push({ yearId: payload.yearId, reason: `Invalid exam date ${payload.examDateBs}` });
+      continue;
+    }
+
+    if (college && !payload.yearId) {
+      skipped.push({ reason: "Select a year (1st / 2nd / 3rd) for every entry" });
+      continue;
+    }
+
+    if (payload.yearId) {
+      const year = await Year.findOne({ _id: payload.yearId, schoolId }).lean();
+      if (!year) {
+        skipped.push({ yearId: payload.yearId, reason: "Year not found" });
+        continue;
+      }
+      if (year.name === "Ended") {
+        skipped.push({ yearId: payload.yearId, reason: "Cannot schedule an Ended year" });
+        continue;
+      }
+      if (allowedYearIds.length > 0 && !allowedYearIds.includes(payload.yearId)) {
+        skipped.push({ yearId: payload.yearId, reason: "Year is not part of this exam" });
+        continue;
+      }
+    }
+
+    const subject = await Subject.findOne({ _id: payload.subjectId, schoolId }).lean();
+    if (!subject) {
+      skipped.push({ yearId: payload.yearId, reason: "Subject not found" });
+      continue;
+    }
+
+    const duplicateFilter: Record<string, unknown> = {
+      examId,
+      subjectId: payload.subjectId,
+      schoolId
+    };
+    duplicateFilter.yearId = payload.yearId ? payload.yearId : { $exists: false };
+    const duplicate = await ExamRoutine.findOne(duplicateFilter).lean();
+    if (duplicate) {
+      skipped.push({
+        yearId: payload.yearId,
+        reason: `${subject.name} is already scheduled for this year in this exam`
+      });
+      continue;
+    }
+
+    const routine = await ExamRoutine.create({
+      ...payload,
+      yearId: payload.yearId || undefined,
+      schoolId,
+      examId
+    });
+    created.push(routine);
+  }
+
+  if (created.length === 0) {
+    throw new ApiError(
+      409,
+      skipped[0]?.reason ?? "No routine entries could be created"
+    );
+  }
+
+  return sendSuccess(
+    res,
+    skipped.length > 0
+      ? `Added ${created.length} entr${created.length === 1 ? "y" : "ies"} · ${skipped.length} skipped`
+      : `Added ${created.length} routine entr${created.length === 1 ? "y" : "ies"}`,
+    { created, skipped },
+    201
+  );
+});
+
 export const updateExamRoutine = asyncHandler(async (req: Request, res: Response) => {
   assertInstitutionWrite(req, "Only administrators can manage exam routines");
   const examId = String(req.params.examId);
@@ -341,6 +453,57 @@ export const deleteExamRoutine = asyncHandler(async (req: Request, res: Response
   }
 
   return sendSuccess(res, "Exam routine deleted");
+});
+
+/**
+ * Delete a whole routine without touching the exam itself.
+ *
+ * - `DELETE /exams/:examId/routines`            → every schedule row of the exam
+ * - `DELETE /exams/:examId/routines?yearId=...`  → only that year cohort's rows
+ *
+ * The exam, its marks, and its results are left untouched, so an admin can rebuild a
+ * wrong routine from scratch. Once no rows remain the routine is un-published, otherwise
+ * students would keep seeing a "published" but empty schedule.
+ */
+export const deleteExamRoutineBulk = asyncHandler(async (req: Request, res: Response) => {
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
+  const examId = String(req.params.examId);
+  const exam = await getExamOrThrow(req, examId);
+  const yearId = typeof req.query.yearId === "string" ? req.query.yearId.trim() : "";
+
+  const filter: Record<string, unknown> = { examId, schoolId: tenantObjectId(req) };
+  let scopeLabel = "";
+  if (yearId) {
+    const year = await Year.findOne({ _id: yearId, schoolId: tenantObjectId(req) }).lean();
+    if (!year) throw new ApiError(404, "Year not found");
+    filter.yearId = yearId;
+    scopeLabel = year.name ? ` for ${year.name}` : "";
+  }
+
+  const { deletedCount } = await ExamRoutine.deleteMany(filter);
+  if (!deletedCount) {
+    throw new ApiError(
+      404,
+      yearId
+        ? "No routine entries exist for this year in this exam"
+        : "This exam has no routine entries to delete"
+    );
+  }
+
+  const remaining = await ExamRoutine.countDocuments({ examId, schoolId: tenantObjectId(req) });
+  if (remaining === 0 && exam.routinePublished) {
+    exam.routinePublished = false;
+    if (exam.status === "SCHEDULED") {
+      exam.status = "DRAFT";
+    }
+    await exam.save();
+  }
+
+  return sendSuccess(
+    res,
+    `Deleted ${deletedCount} routine entr${deletedCount === 1 ? "y" : "ies"}${scopeLabel}`,
+    { deletedCount, remaining, routinePublished: exam.routinePublished }
+  );
 });
 
 const notifyExamAudience = async (

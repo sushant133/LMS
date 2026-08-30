@@ -2809,6 +2809,12 @@ export const SalaryPaymentRecordsPanel = ({
                               min={0}
                               className={cn(cellInput, "text-center")}
                               value={row.periodsAttended ?? 0}
+                              // Auto-filled from the Teacher Attendance Period Log;
+                              // editing here overrides it for this month only.
+                              title={
+                                row.payBreakdown ||
+                                "Periods taught this month. Recorded in Attendance → Teacher Attendance → Period Log."
+                              }
                               onValueChange={(v) =>
                                 patchRow(
                                   rowKey,
@@ -2818,7 +2824,10 @@ export const SalaryPaymentRecordsPanel = ({
                               }
                             />
                           ) : (
-                            <span className="tabular-nums">
+                            <span
+                              className="tabular-nums"
+                              title={row.payBreakdown || undefined}
+                            >
                               {row.periodsAttended ?? 0}
                             </span>
                           )

@@ -24,6 +24,7 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
+import { TeacherPeriodLogPanel } from "features/attendance/TeacherPeriodLogPanel";
 import { api, unwrap } from "lib/api";
 import { getPrintInstitutionBranding } from "lib/printBranding";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -118,9 +119,9 @@ export const EmployeeAttendancePanel = ({
   selfOnly = false,
 }: Props) => {
   const queryClient = useQueryClient();
-  const [view, setView] = useState<"mark" | "register" | "dashboard" | "my">(
-    selfOnly ? "my" : canTake ? "mark" : "dashboard",
-  );
+  const [view, setView] = useState<
+    "mark" | "register" | "periods" | "dashboard" | "my"
+  >(selfOnly ? "my" : canTake ? "mark" : "dashboard");
   const [dateBs, setDateBs] = useState(formatTodayBs);
   const [search, setSearch] = useState("");
   const [notes, setNotes] = useState("");
@@ -634,6 +635,8 @@ export const EmployeeAttendancePanel = ({
             ...(canTake || canEdit ? (["mark"] as const) : []),
             "dashboard",
             "register",
+            // Periods are a teaching concept — staff are not paid per period.
+            ...(category === "TEACHER" ? (["periods"] as const) : []),
             "my",
           ] as const
         ).map((v) => (
@@ -649,7 +652,9 @@ export const EmployeeAttendancePanel = ({
                 ? "Dashboard"
                 : v === "register"
                   ? "Register / Reports"
-                  : "My Attendance"}
+                  : v === "periods"
+                    ? "Period Log"
+                    : "My Attendance"}
           </Button>
         ))}
       </div>
@@ -1098,6 +1103,11 @@ export const EmployeeAttendancePanel = ({
             ) : null}
           </CardContent>
         </Card>
+      ) : null}
+
+      {/* Periods taught per teacher — feeds the payroll Period section. */}
+      {view === "periods" && category === "TEACHER" ? (
+        <TeacherPeriodLogPanel canEdit={canTake || canEdit} />
       ) : null}
 
       {view === "register" ? (
