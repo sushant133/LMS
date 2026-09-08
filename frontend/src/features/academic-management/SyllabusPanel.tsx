@@ -71,7 +71,6 @@ import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
   dedupePlansByCurriculum,
-  groupByTeacher,
   matchSessionPlanKeyword,
   recordsForCurriculumSubject,
   type HierarchyScopeOption,
@@ -734,7 +733,6 @@ export const SyllabusPanel = ({
       }
     }
 
-    const optionalTeacher = (latest.teacherId || teacherId || "").trim();
     const subjectForNepali = subjectOptions.find(
       (s) =>
         s._id === latest.subjectId ||
@@ -753,7 +751,7 @@ export const SyllabusPanel = ({
           filters.session ||
           filters.academicYearBs ||
           "",
-        teacherId: optionalTeacher,
+        teacherId: "",
       },
       { nepaliMode },
     );
@@ -1029,11 +1027,6 @@ export const SyllabusPanel = ({
     subjects,
   ]);
 
-  const teacherGroups = useMemo(
-    () => groupByTeacher(selectedPlans),
-    [selectedPlans],
-  );
-
   const printPlans = useMemo(() => {
     // Individual syllabus print (admin / teacher Print button on a card)
     if (printFocusId) {
@@ -1117,11 +1110,9 @@ export const SyllabusPanel = ({
               · {plan.academicYearBs}
             </CardTitle>
             <p className="text-sm text-slate-600">
-              Teacher:{" "}
-              {plan.teacher?.user?.fullName ?? "Shared (by subject)"}
               {plan.totalTheoryHours || plan.totalPracticalHours || plan.creditHours
-                ? ` · Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
-                : null}
+                ? `Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
+                : "Official subject syllabus for this academic year"}
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {plan.totalChapters ?? chapters.length} chapters ·{" "}
@@ -1719,26 +1710,6 @@ export const SyllabusPanel = ({
                   ))}
                 </Select>
               </FormField>
-              {teachers.length > 0 ? (
-                <FormField label="Teacher (optional)">
-                  <Select
-                    value={form.teacherId || ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        teacherId: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">No specific teacher — shared syllabus</option>
-                    {teachers.map((teacher) => (
-                      <option key={teacher._id} value={teacher._id}>
-                        {teacher.user.fullName}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-              ) : null}
               <FormField label="Academic Year (BS)">
                 <Input
                   value={form.academicYearBs}
@@ -1959,6 +1930,7 @@ export const SyllabusPanel = ({
             selectedFacultyKey={selectedFacultyKey}
             selectedYearKey={selectedYearKey}
             selectedSubjectKey={selectedSubject?.subjectKey}
+            hideTeacherNames={!isAdmin}
             onSelectSubject={(facultyKey, yearKey, subject) => {
               setSelectedFacultyKey(facultyKey);
               setSelectedYearKey(yearKey);
@@ -2008,12 +1980,14 @@ export const SyllabusPanel = ({
                   <h3 className="text-lg font-semibold text-slate-900">
                     {selectedSubjectMeta.subject.subjectName}
                   </h3>
-                  <p className="text-sm text-slate-600">
-                    Assigned teacher(s):{" "}
-                    {selectedSubjectMeta.subject.teacherNames.length > 0
-                      ? selectedSubjectMeta.subject.teacherNames.join(", ")
-                      : "—"}
-                  </p>
+                  {isAdmin ? (
+                    <p className="text-sm text-slate-600">
+                      Assigned teacher(s):{" "}
+                      {selectedSubjectMeta.subject.teacherNames.length > 0
+                        ? selectedSubjectMeta.subject.teacherNames.join(", ")
+                        : "—"}
+                    </p>
+                  ) : null}
                   <p className="text-xs text-slate-500">
                     {selectedPlans.length} Syllabus
                     {selectedPlans.length === 1 ? "" : "s"} · Hierarchical Chapter →
@@ -2022,20 +1996,7 @@ export const SyllabusPanel = ({
                 </CardContent>
               </Card>
 
-              {teacherGroups.map((group) => (
-                <div key={group.teacherId} className="space-y-3">
-                  {teacherGroups.length > 1 ? (
-                    <div className="flex items-center gap-2 no-print">
-                      <div className="h-px flex-1 bg-slate-200" />
-                      <p className="text-sm font-semibold text-slate-800">
-                        Teacher: {group.teacherName}
-                      </p>
-                      <div className="h-px flex-1 bg-slate-200" />
-                    </div>
-                  ) : null}
-                  {group.items.map((plan) => renderPlanCard(plan))}
-                </div>
-              ))}
+              {selectedPlans.map((plan) => renderPlanCard(plan))}
             </>
           )}
         </div>

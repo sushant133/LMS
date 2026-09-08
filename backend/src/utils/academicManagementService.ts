@@ -33,10 +33,16 @@ import { Section } from "../models/Section.js";
 import { Batch } from "../models/Batch.js";
 import { Year } from "../models/Year.js";
 import { Subject } from "../models/Subject.js";
+import { SubjectAssignment } from "../models/SubjectAssignment.js";
 import { Teacher } from "../models/Teacher.js";
 import { TimetableSlot } from "../models/TimetableSlot.js";
 import { User } from "../models/User.js";
 import { ApiError } from "./apiError.js";
+import {
+  assignmentContinuesLeftover,
+  collectLeftoverChainTeacherIds,
+  type LeftoverAssignmentLink
+} from "./logBookContinuation.js";
 import { recordAudit } from "./audit.js";
 import { getInstitutionType, isCollege } from "./institution.js";
 import { compareBsDates, getDayOfWeekFromBs, getOffsetFromBsDate, getTodayBs } from "./nepaliDate.js";
@@ -300,6 +306,63 @@ export const applyTeacherScopeToFilter = async (req: Request, filter: Record<str
   }
 };
 
+const intersectSubjectFilter = (
+  filter: Record<string, unknown>,
+  allowed: string[]
+): void => {
+  const allowedSet = new Set(allowed);
+  const existing = filter.subjectId;
+  if (existing == null) {
+    filter.subjectId = allowed.length === 1 ? allowed[0] : { $in: allowed };
+    return;
+  }
+  const existingIds: string[] =
+    typeof existing === "string"
+      ? [existing]
+      : existing &&
+          typeof existing === "object" &&
+          Array.isArray((existing as { $in?: unknown[] }).$in)
+        ? (existing as { $in: unknown[] }).$in.map(String)
+        : [];
+  const intersected = existingIds.filter((id) => allowedSet.has(id));
+  filter.subjectId =
+    intersected.length === 0
+      ? { $in: [] }
+      : intersected.length === 1
+        ? intersected[0]
+        : { $in: intersected };
+};
+
+/**
+ * Syllabus, session plan, and lesson plan are official subject + batch/year
+ * documents. Teachers see them by assigned subject — not by who created them.
+ * Admin teacher filters resolve to that teacher's assigned subjects.
+ */
+export const applyOfficialPlanScopeToFilter = async (
+  req: Request,
+  filter: Record<string, unknown>,
+  adminTeacherId?: string
+): Promise<void> => {
+  delete filter.teacherId;
+
+  if (await actorMayUseAdminWorkspaceScope(req)) {
+    const teacherId = (adminTeacherId || "").trim();
+    if (!teacherId) return;
+    const rows = await SubjectAssignment.find({
+      schoolId: tenantObjectId(req),
+      teacherId,
+      status: "ACTIVE"
+    })
+      .select("subjectId")
+      .lean();
+    const ids = [...new Set(rows.map((row) => String(row.subjectId)))];
+    intersectSubjectFilter(filter, ids);
+    return;
+  }
+
+  await applyTeacherSubjectScopeToFilter(req, filter);
+};
+
 /**
  * Syllabus is subject-level: teachers see records for their assigned subjects
  * (not only rows that name them as teacherId).
@@ -368,10 +431,14 @@ export const assertTeacherOwnership = async (req: Request, teacherId: string): P
   }
 };
 
-/** Teachers may access a syllabus if they teach the subject (or are the named teacher). */
-export const assertSyllabusAccess = async (
+/**
+ * Teachers may access official academic documents (syllabus, session plan, lesson plan)
+ * if they teach the subject — ownership is the assigned subject, not who created the row.
+ */
+export const assertOfficialPlanAccess = async (
   req: Request,
-  params: { teacherId?: string | null; subjectId: string }
+  params: { teacherId?: string | null; subjectId: string },
+  label = "academic records"
 ): Promise<void> => {
   if (!req.user) throw new ApiError(401, "Authentication required");
   if (await actorIsAcademicAdmin(req)) return;
@@ -380,18 +447,343 @@ export const assertSyllabusAccess = async (
   if (params.teacherId && params.teacherId === scope.teacherId) return;
   if (scope.subjectIds.includes(params.subjectId)) return;
 
-  // Curriculum siblings: assignment may be on one batch-year instance while syllabus uses another
   const schoolId = tenantObjectId(req);
-  const syllabusExpanded = await expandCurriculumSubjectIds(schoolId, params.subjectId);
-  if (syllabusExpanded.some((id) => scope.subjectIds.includes(id))) return;
+  const expanded = await expandCurriculumSubjectIds(schoolId, params.subjectId);
+  if (expanded.some((id) => scope.subjectIds.includes(id))) return;
 
-  // Reverse expand each assigned subject (covers incomplete sibling graphs)
   for (const assignedId of scope.subjectIds) {
     const assignedExpanded = await expandCurriculumSubjectIds(schoolId, assignedId);
     if (assignedExpanded.includes(params.subjectId)) return;
   }
 
-  throw new ApiError(403, "You can only access syllabi for subjects assigned to you");
+  throw new ApiError(403, `You can only access ${label} for subjects assigned to you`);
+};
+
+/** Teachers may access a syllabus if they teach the subject (or are the named teacher). */
+export const assertSyllabusAccess = async (
+  req: Request,
+  params: { teacherId?: string | null; subjectId: string }
+): Promise<void> => assertOfficialPlanAccess(req, params, "syllabi");
+
+const toLeftoverLink = (row: {
+  _id: { toString(): string };
+  teacherId: { toString(): string };
+  subjectId: { toString(): string };
+  academicYearBs: string;
+  classId?: { toString(): string } | null;
+  sectionId?: { toString(): string } | null;
+  batchId?: { toString(): string } | null;
+  yearId?: { toString(): string } | null;
+  assignmentType?: string;
+  handoverBaselinePercent?: number | null;
+  supersedesAssignmentId?: { toString(): string } | null;
+}): LeftoverAssignmentLink => ({
+  _id: row._id.toString(),
+  teacherId: row.teacherId.toString(),
+  subjectId: row.subjectId.toString(),
+  academicYearBs: row.academicYearBs,
+  classId: row.classId?.toString() ?? null,
+  sectionId: row.sectionId?.toString() ?? null,
+  batchId: row.batchId?.toString() ?? null,
+  yearId: row.yearId?.toString() ?? null,
+  assignmentType: row.assignmentType,
+  handoverBaselinePercent: row.handoverBaselinePercent ?? null,
+  supersedesAssignmentId: row.supersedesAssignmentId?.toString() ?? null
+});
+
+const loadAssignmentLinks = async (
+  schoolId: mongoose.Types.ObjectId,
+  ids: string[]
+): Promise<Map<string, LeftoverAssignmentLink>> => {
+  const uniqueIds = [...new Set(ids.filter((id) => mongoose.Types.ObjectId.isValid(id)))];
+  if (uniqueIds.length === 0) return new Map();
+  const rows = await SubjectAssignment.find({
+    schoolId,
+    _id: { $in: uniqueIds }
+  }).lean();
+  const map = new Map<string, LeftoverAssignmentLink>();
+  for (const row of rows) {
+    const link = toLeftoverLink(row);
+    map.set(link._id, link);
+  }
+  return map;
+};
+
+const walkLeftoverChain = async (
+  schoolId: mongoose.Types.ObjectId,
+  start: LeftoverAssignmentLink
+): Promise<{ continueLeftover: boolean; teacherIds: string[] }> => {
+  const byId = new Map<string, LeftoverAssignmentLink>([[start._id, start]]);
+  let cursor: string | null | undefined = start.supersedesAssignmentId;
+  const seen = new Set<string>([start._id]);
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const missing = [...seen].filter((id) => !byId.has(id));
+    const loaded = await loadAssignmentLinks(schoolId, missing.concat(cursor));
+    for (const [id, link] of loaded) byId.set(id, link);
+    const next = byId.get(cursor);
+    cursor = next?.supersedesAssignmentId ?? null;
+  }
+  return collectLeftoverChainTeacherIds(byId, start);
+};
+
+export type LogBookContinuation = {
+  continueLeftover: boolean;
+  teacherIds: string[];
+  subjectIds: string[];
+  academicYearBs: string;
+  group: {
+    classId?: string | null;
+    sectionId?: string | null;
+    batchId?: string | null;
+    yearId?: string | null;
+  };
+};
+
+const matchAssignmentGroup = (
+  row: LeftoverAssignmentLink,
+  group: LogBookContinuation["group"]
+): boolean => {
+  const same = (a?: string | null, b?: string | null) => !a || !b || a === b;
+  return (
+    same(row.classId, group.classId) &&
+    same(row.sectionId, group.sectionId) &&
+    same(row.batchId, group.batchId) &&
+    same(row.yearId, group.yearId)
+  );
+};
+
+export const resolveLogBookContinuation = async (
+  req: Request,
+  params: {
+    teacherId: string;
+    subjectId: string;
+    academicYearBs?: string;
+    classId?: string;
+    sectionId?: string;
+    batchId?: string;
+    yearId?: string;
+  }
+): Promise<LogBookContinuation> => {
+  const schoolId = tenantObjectId(req);
+  const subjectIds = await expandCurriculumSubjectIds(schoolId, params.subjectId);
+  const query: Record<string, unknown> = {
+    schoolId,
+    teacherId: params.teacherId,
+    subjectId: { $in: subjectIds },
+    status: "ACTIVE"
+  };
+  if (params.academicYearBs) query.academicYearBs = params.academicYearBs;
+  const rows = await SubjectAssignment.find(query).sort({ updatedAt: -1 }).lean();
+  const group = {
+    classId: params.classId || null,
+    sectionId: params.sectionId || null,
+    batchId: params.batchId || null,
+    yearId: params.yearId || null
+  };
+  const links = rows.map(toLeftoverLink);
+  const current =
+    links.find((row) => matchAssignmentGroup(row, group)) || links[0] || null;
+  if (!current) {
+    return {
+      continueLeftover: false,
+      teacherIds: [params.teacherId],
+      subjectIds,
+      academicYearBs: params.academicYearBs || "",
+      group
+    };
+  }
+  const chain = await walkLeftoverChain(schoolId, current);
+  return {
+    continueLeftover: chain.continueLeftover,
+    teacherIds: chain.teacherIds,
+    subjectIds,
+    academicYearBs: current.academicYearBs,
+    group
+  };
+};
+
+export const applyLogBookListScope = async (
+  req: Request,
+  filter: Record<string, unknown>
+): Promise<void> => {
+  if (await actorMayUseAdminWorkspaceScope(req)) return;
+  const scope = await getTeacherScope(req);
+  if (!scope) return;
+
+  const schoolId = tenantObjectId(req);
+  const rows = await SubjectAssignment.find({
+    schoolId,
+    teacherId: scope.teacherId,
+    status: "ACTIVE"
+  }).lean();
+  const leftoverClauses: Record<string, unknown>[] = [];
+  for (const raw of rows) {
+    const current = toLeftoverLink(raw);
+    if (!assignmentContinuesLeftover(current)) continue;
+    const chain = await walkLeftoverChain(schoolId, current);
+    const predecessors = chain.teacherIds.filter((id) => id !== scope.teacherId);
+    if (predecessors.length === 0) continue;
+    const subjectIds = await expandCurriculumSubjectIds(schoolId, current.subjectId);
+    const clause: Record<string, unknown> = {
+      teacherId: predecessors.length === 1 ? predecessors[0] : { $in: predecessors },
+      subjectId: subjectIds.length === 1 ? subjectIds[0] : { $in: subjectIds },
+      academicYearBs: current.academicYearBs
+    };
+    if (current.batchId) clause.batchId = current.batchId;
+    if (current.yearId) clause.yearId = current.yearId;
+    if (current.classId) clause.classId = current.classId;
+    if (current.sectionId) clause.sectionId = current.sectionId;
+    leftoverClauses.push(clause);
+  }
+
+  if (leftoverClauses.length === 0) {
+    filter.teacherId = scope.teacherId;
+    return;
+  }
+  delete filter.teacherId;
+  filter.$or = [{ teacherId: scope.teacherId }, ...leftoverClauses];
+};
+
+export const nextContinuedLogBookSerial = async (
+  req: Request,
+  params: {
+    teacherId: string;
+    subjectId: string;
+    academicYearBs: string;
+    classId?: string;
+    sectionId?: string;
+    batchId?: string;
+    yearId?: string;
+    logBookId: mongoose.Types.ObjectId;
+  }
+): Promise<number> => {
+  const continuation = await resolveLogBookContinuation(req, params);
+  if (!continuation.continueLeftover) {
+    const count = await AcademicLogBookEntry.countDocuments({
+      logBookId: params.logBookId,
+      isDeleted: false
+    });
+    return count + 1;
+  }
+  const serialFilter: Record<string, unknown> = {
+    schoolId: tenantObjectId(req),
+    isDeleted: false,
+    teacherId: { $in: continuation.teacherIds },
+    subjectId: { $in: continuation.subjectIds },
+    academicYearBs: params.academicYearBs
+  };
+  if (params.batchId) serialFilter.batchId = params.batchId;
+  if (params.yearId) serialFilter.yearId = params.yearId;
+  if (params.classId) serialFilter.classId = params.classId;
+  if (params.sectionId) serialFilter.sectionId = params.sectionId;
+  const latest = await AcademicLogBookEntry.find(serialFilter)
+    .sort({ serialNo: -1 })
+    .limit(1)
+    .select("serialNo")
+    .lean();
+  return (Number(latest[0]?.serialNo) || 0) + 1;
+};
+
+export const assertNoDuplicateOfficialSessionPlan = async (
+  req: Request,
+  payload: {
+    subjectId: string;
+    academicYearBs: string;
+    classId?: string;
+    sectionId?: string;
+    batchId?: string;
+    yearId?: string;
+  },
+  excludeId?: string
+): Promise<void> => {
+  const schoolId = tenantObjectId(req);
+  const subjectIds = await expandCurriculumSubjectIds(schoolId, payload.subjectId);
+  const filter: Record<string, unknown> = {
+    schoolId,
+    academicYearBs: payload.academicYearBs,
+    subjectId: subjectIds.length === 1 ? subjectIds[0] : { $in: subjectIds },
+    isDeleted: false
+  };
+  if (payload.batchId) filter.batchId = payload.batchId;
+  if (payload.yearId) filter.yearId = payload.yearId;
+  if (payload.classId) filter.classId = payload.classId;
+  if (payload.sectionId) filter.sectionId = payload.sectionId;
+  if (excludeId) filter._id = { $ne: excludeId };
+  const existing = await AcademicSessionPlan.findOne(filter).select("_id").lean();
+  if (existing) {
+    throw new ApiError(
+      400,
+      "A session plan already exists for this subject and academic year. It stays the same when the assigned teacher changes — open the existing plan instead of creating another."
+    );
+  }
+};
+
+export const assertNoDuplicateOfficialLessonPlan = async (
+  req: Request,
+  payload: {
+    subjectId: string;
+    academicYearBs: string;
+    teachingDateBs: string;
+    classId?: string;
+    sectionId?: string;
+    batchId?: string;
+    yearId?: string;
+  },
+  excludeId?: string
+): Promise<void> => {
+  const date = (payload.teachingDateBs || "").trim();
+  if (!date) return;
+  const schoolId = tenantObjectId(req);
+  const subjectIds = await expandCurriculumSubjectIds(schoolId, payload.subjectId);
+  const filter: Record<string, unknown> = {
+    schoolId,
+    academicYearBs: payload.academicYearBs,
+    subjectId: subjectIds.length === 1 ? subjectIds[0] : { $in: subjectIds },
+    isDeleted: false,
+    $or: [{ teachingDateBs: date }, { startDateBs: date }]
+  };
+  if (payload.batchId) filter.batchId = payload.batchId;
+  if (payload.yearId) filter.yearId = payload.yearId;
+  if (payload.classId) filter.classId = payload.classId;
+  if (payload.sectionId) filter.sectionId = payload.sectionId;
+  if (excludeId) filter._id = { $ne: excludeId };
+  const existing = await AcademicLessonPlan.findOne(filter).select("_id").lean();
+  if (existing) {
+    throw new ApiError(
+      400,
+      "A lesson plan already exists for this subject on that teaching date. It stays the same for the batch/year when the assigned teacher changes — open the existing plan instead of creating another."
+    );
+  }
+};
+
+export const assertLogBookEntryReadAccess = async (
+  req: Request,
+  entry: {
+    teacherId: { toString(): string };
+    subjectId: { toString(): string };
+    academicYearBs?: string;
+    classId?: { toString(): string } | null;
+    sectionId?: { toString(): string } | null;
+    batchId?: { toString(): string } | null;
+    yearId?: { toString(): string } | null;
+  }
+): Promise<void> => {
+  if (await actorIsAcademicAdmin(req)) return;
+  const ownerId = entry.teacherId.toString();
+  const scope = await requireTeacherScope(req);
+  if (scope.teacherId === ownerId) return;
+  const continuation = await resolveLogBookContinuation(req, {
+    teacherId: scope.teacherId,
+    subjectId: entry.subjectId.toString(),
+    academicYearBs: entry.academicYearBs,
+    classId: entry.classId?.toString(),
+    sectionId: entry.sectionId?.toString(),
+    batchId: entry.batchId?.toString(),
+    yearId: entry.yearId?.toString()
+  });
+  if (continuation.continueLeftover && continuation.teacherIds.includes(ownerId)) return;
+  throw new ApiError(403, "You can only access your own academic records");
 };
 
 export const assertEditableStatus = (status: AcademicPlanStatus): void => {
@@ -643,7 +1035,8 @@ const SESSION_PLAN_USABLE_FOR_LESSON: AcademicPlanStatus[] = [
  * Resolve and validate a Session Plan for Lesson Plan creation.
  * Teachers may use their own non-rejected plans (including DRAFT) so they can
  * complete yearly Session Plans and monthly Lesson Plans without waiting for admin approval.
- * REJECTED plans cannot be used. Subject/teacher/year must still match.
+ * REJECTED plans cannot be used. Subject/year must still match. Teacher may
+ * change mid-year — the same session plan is reused for the batch/year.
  */
 export const assertApprovedSessionPlanForLesson = async (
   req: Request,
@@ -665,20 +1058,20 @@ export const assertApprovedSessionPlanForLesson = async (
       `Cannot create a Lesson Plan from a Session Plan with status ${plan.status}. Use a draft, submitted, or approved Session Plan (not rejected).`
     );
   }
-  // Curriculum subjects are provisioned per batch — allow sibling subject ids
   const schoolId = tenantObjectId(req);
   const lessonSubjectIds = await expandCurriculumSubjectIds(schoolId, payload.subjectId);
   const planSubjectId = plan.subjectId.toString();
   if (!lessonSubjectIds.includes(planSubjectId)) {
-    // Also expand from the plan side in case naming differs
     const planSubjectIds = await expandCurriculumSubjectIds(schoolId, planSubjectId);
     if (!planSubjectIds.includes(payload.subjectId)) {
       throw new ApiError(400, "Session Plan subject does not match the Lesson Plan subject.");
     }
   }
-  if (plan.teacherId.toString() !== payload.teacherId) {
-    throw new ApiError(400, "Session Plan teacher does not match the Lesson Plan teacher.");
-  }
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: plan.teacherId.toString(), subjectId: planSubjectId },
+    "session plans"
+  );
   if (payload.academicYearBs && plan.academicYearBs !== payload.academicYearBs) {
     throw new ApiError(400, "Session Plan academic year does not match the Lesson Plan academic year.");
   }
@@ -962,7 +1355,6 @@ export const resolveLogBookLessonPlanLink = async (
     const plans = await AcademicLessonPlan.find({
       schoolId,
       isDeleted: false,
-      teacherId: params.teacherId,
       subjectId: subjectFilter,
       ...(date
         ? {
@@ -995,7 +1387,6 @@ export const resolveLogBookLessonPlanLink = async (
           _id: cand.lessonPlanId,
           schoolId,
           isDeleted: false,
-          teacherId: params.teacherId,
           subjectId: subjectFilter
         })
           .select("_id")
@@ -1414,7 +1805,11 @@ export const getSessionPlanSyllabusCoverage = async (
   }).lean();
 
   if (!plan) throw new ApiError(404, "Session plan not found");
-  await assertTeacherOwnership(req, plan.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: plan.teacherId.toString(), subjectId: plan.subjectId.toString() },
+    "session plans"
+  );
 
   const units = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id }).sort({ unitNo: 1 }).lean();
   const lessonPlans = await AcademicLessonPlan.find({
@@ -2707,9 +3102,11 @@ const buildDashboardInner = async (
   req: Request,
   filters: AcademicManagementFilters
 ): Promise<AcademicManagementDashboard> => {
-  const baseFilter = buildAcademicFilter(req, filters);
-  await applyCurriculumSubjectFilter(req, baseFilter, filters.subjectId);
-  await applyTeacherScopeToFilter(req, baseFilter);
+  const officialFilter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, officialFilter, filters.subjectId);
+  const logFilter = { ...officialFilter };
+  await applyOfficialPlanScopeToFilter(req, officialFilter, filters.teacherId);
+  await applyLogBookListScope(req, logFilter);
   const todayBs = getTodayBs();
   const schoolId = tenantObjectId(req);
   const teacherScope = await getTeacherScope(req);
@@ -2718,7 +3115,7 @@ const buildDashboardInner = async (
     await AcademicSessionPlan.find({
       schoolId,
       isDeleted: { $ne: true },
-      ...(teacherScope ? { teacherId: teacherScope.teacherId } : {})
+      ...officialFilter
     })
       .select("_id")
       .lean()
@@ -2729,19 +3126,19 @@ const buildDashboardInner = async (
   if (liveSessionPlanIds.length > 0) {
     progressQuery.sessionPlanId = { $in: liveSessionPlanIds };
   }
-  if (teacherScope) progressQuery.teacherId = teacherScope.teacherId;
   if (filters.academicYearBs) progressQuery.academicYearBs = filters.academicYearBs;
-  if (filters.teacherId && !teacherScope) progressQuery.teacherId = filters.teacherId;
   if (filters.subjectId) {
     const subjectIds = await expandCurriculumSubjectIds(schoolId, filters.subjectId);
     progressQuery.subjectId = subjectIds.length === 1 ? subjectIds[0] : { $in: subjectIds };
+  } else if (officialFilter.subjectId) {
+    progressQuery.subjectId = officialFilter.subjectId;
   }
 
   const [sessionPlans, lessonPlans, logEntries, progressRows, subjects] = await Promise.all([
-    AcademicSessionPlan.countDocuments(baseFilter),
-    AcademicLessonPlan.countDocuments(baseFilter),
+    AcademicSessionPlan.countDocuments(officialFilter),
+    AcademicLessonPlan.countDocuments(officialFilter),
     AcademicLogBookEntry.countDocuments({
-      ...baseFilter,
+      ...logFilter,
       dateBs: filters.dateFrom || todayBs
     }),
     AcademicProgress.find(progressQuery).lean(),
@@ -2751,11 +3148,11 @@ const buildDashboardInner = async (
   ]);
 
   const [pendingLessonApprovals, pendingSessionApprovals] = await Promise.all([
-    AcademicLessonPlan.countDocuments({ ...baseFilter, status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] } }),
-    AcademicSessionPlan.countDocuments({ ...baseFilter, status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] } })
+    AcademicLessonPlan.countDocuments({ ...officialFilter, status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] } }),
+    AcademicSessionPlan.countDocuments({ ...officialFilter, status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] } })
   ]);
   const pendingApprovals = pendingLessonApprovals + pendingSessionApprovals;
-  const approvedPlans = await AcademicLessonPlan.countDocuments({ ...baseFilter, status: "APPROVED" });
+  const approvedPlans = await AcademicLessonPlan.countDocuments({ ...officialFilter, status: "APPROVED" });
 
   const avgCompletion =
     progressRows.length > 0

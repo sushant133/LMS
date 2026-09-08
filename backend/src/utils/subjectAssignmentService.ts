@@ -11,8 +11,6 @@ import type {
   SubjectAssignmentCopyYearInput
 } from "@phit-erp/shared";
 import { env } from "../config/env.js";
-import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
-import { AcademicProgress } from "../models/AcademicProgress.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
@@ -464,6 +462,22 @@ export const createSubjectAssignment = async (
       group
     );
 
+    await AcademicSyllabus.updateMany(
+      {
+        schoolId,
+        academicYearBs: payload.academicYearBs,
+        subjectId: payload.subjectId,
+        isDeleted: false
+      },
+      { $unset: { teacherId: 1 } },
+      getSessionOption(session)
+    );
+    if (payload.assignmentType === "FULL") {
+      warnings.push(
+        "Syllabus, session plan, and lesson plan stay the same for this batch/year. Log book starts from the beginning for a FULL assignment."
+      );
+    }
+
     const populated = await SubjectAssignment.findById(created!._id)
       .populate("subjectId", "name code")
       .populate({ path: "teacherId", populate: { path: "user", select: "fullName email" } })
@@ -805,28 +819,11 @@ export const deleteSubjectAssignment = async (
   });
 };
 
-const academicWorkFilter = (
-  schoolId: ObjectId,
-  academicYearBs: string,
-  subjectId: ObjectId | string,
-  teacherId: ObjectId | string,
-  group: GroupKeys
-): Record<string, unknown> => {
-  const filter: Record<string, unknown> = {
-    schoolId,
-    academicYearBs,
-    subjectId,
-    teacherId,
-    isDeleted: false
-  };
-  if (group.batchId) filter.batchId = group.batchId;
-  if (group.yearId) filter.yearId = group.yearId;
-  if (group.classId) filter.classId = group.classId;
-  if (group.sectionId) filter.sectionId = group.sectionId;
-  return filter;
-};
-
-/** Move session plan, leftover lesson plans, and timetable to the incoming teacher. */
+/**
+ * Official syllabus / session / lesson plans stay on the subject + batch/year.
+ * Only timetable moves with the incoming teacher. Log book is not rewritten:
+ * leftover continuation is resolved from assignment handoverBaselinePercent.
+ */
 const transferAcademicHandover = async (
   schoolId: ObjectId,
   academicYearBs: string,
@@ -834,74 +831,23 @@ const transferAcademicHandover = async (
   fromTeacherId: ObjectId,
   toTeacherId: ObjectId,
   group: GroupKeys,
-  session: ClientSession | null
+  session: ClientSession | null,
+  continueLeftover: boolean
 ): Promise<string[]> => {
   const notes: string[] = [];
   const opt = getSessionOption(session);
-  const fromFilter = academicWorkFilter(schoolId, academicYearBs, subjectId, fromTeacherId, group);
 
-  const plans = await AcademicSessionPlan.find(fromFilter).session(session);
-  for (const plan of plans) {
-    const clashFilter = academicWorkFilter(schoolId, academicYearBs, subjectId, toTeacherId, group);
-    const clash = await AcademicSessionPlan.findOne({
-      ...clashFilter,
-      _id: { $ne: plan._id }
-    }).session(session);
-
-    if (!clash) {
-      plan.teacherId = toTeacherId;
-      await plan.save(opt);
-      await AcademicLessonPlan.updateMany(
-        { schoolId, sessionPlanId: plan._id, isDeleted: false },
-        { $set: { teacherId: toTeacherId } },
-        opt
-      );
-      await AcademicProgress.updateMany(
-        { schoolId, sessionPlanId: plan._id },
-        { $set: { teacherId: toTeacherId } },
-        opt
-      );
-      notes.push("Session plan continued for the incoming teacher (same units and progress).");
-      continue;
-    }
-
-    const oldUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id }).session(session);
-    const clashUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: clash._id }).session(session);
-    const clashNos = new Set(clashUnits.map((u) => u.unitNo));
-    const toInsert = oldUnits
-      .filter((u) => !clashNos.has(u.unitNo))
-      .map((u) => {
-        const raw = u.toObject() as Record<string, unknown>;
-        delete raw._id;
-        return {
-          ...raw,
-          sessionPlanId: clash._id,
-          schoolId
-        };
-      });
-    if (toInsert.length > 0) {
-      await AcademicSessionPlanUnit.insertMany(toInsert, opt);
-      notes.push(
-        `Merged ${toInsert.length} leftover session-plan unit(s) into the incoming teacher's existing plan.`
-      );
-    }
-  }
-
-  await AcademicLessonPlan.updateMany(
+  await AcademicSyllabus.updateMany(
     {
       schoolId,
       academicYearBs,
       subjectId,
-      teacherId: fromTeacherId,
-      isDeleted: false,
-      ...(group.batchId ? { batchId: group.batchId } : {}),
-      ...(group.yearId ? { yearId: group.yearId } : {}),
-      ...(group.classId ? { classId: group.classId } : {}),
-      ...(group.sectionId ? { sectionId: group.sectionId } : {})
+      isDeleted: false
     },
-    { $set: { teacherId: toTeacherId } },
+    { $unset: { teacherId: 1 } },
     opt
   );
+  notes.push("Syllabus stays the official subject plan for this batch/year (not tied to a teacher).");
 
   const slotFilter: Record<string, unknown> = {
     schoolId,
@@ -922,17 +868,14 @@ const transferAcademicHandover = async (
     notes.push(`Moved ${slotResult.modifiedCount} timetable slot(s) to the incoming teacher.`);
   }
 
-  await AcademicSyllabus.updateMany(
-    {
-      schoolId,
-      academicYearBs,
-      subjectId,
-      teacherId: fromTeacherId,
-      isDeleted: false
-    },
-    { $set: { teacherId: toTeacherId } },
-    opt
+  notes.push(
+    "Session plan and lesson plan stay the same for this batch/year."
   );
+  if (continueLeftover) {
+    notes.push("Log book continues from leftover teaching (serial numbers carry on).");
+  } else {
+    notes.push("Log book starts from the beginning for the incoming FULL assignment.");
+  }
 
   return notes;
 };
@@ -1144,19 +1087,18 @@ export const reassignSubjectAssignment = async (
       yearId: existing.yearId?.toString() ?? null
     });
 
-    if (continueLeftover) {
-      const handoverNotes = await transferAcademicHandover(
-        schoolId,
-        existing.academicYearBs,
-        existing.subjectId,
-        existing.teacherId,
-        new mongoose.Types.ObjectId(payload.teacherId),
-        group,
-        session
-      );
-      warnings.push(...handoverNotes);
-      if (leftoverNote) warnings.unshift(leftoverNote);
-    }
+    const handoverNotes = await transferAcademicHandover(
+      schoolId,
+      existing.academicYearBs,
+      existing.subjectId,
+      existing.teacherId,
+      new mongoose.Types.ObjectId(payload.teacherId),
+      group,
+      session,
+      continueLeftover
+    );
+    warnings.push(...handoverNotes);
+    if (leftoverNote) warnings.unshift(leftoverNote);
 
     const populated = await SubjectAssignment.findById(created!._id)
       .populate("subjectId", "name code")

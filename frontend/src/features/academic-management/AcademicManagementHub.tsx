@@ -356,6 +356,8 @@ export const AcademicManagementHub = () => {
         unitFrom: pair.unitFrom ?? null,
         unitTo: pair.unitTo ?? null,
         assignedPercentage: pair.assignedPercentage ?? null,
+        handoverBaselinePercent: pair.handoverBaselinePercent ?? null,
+        supersedesAssignmentId: pair.supersedesAssignmentId ?? null,
         status: "ACTIVE",
         effectiveFromBs: "",
         effectiveToBs: null,
@@ -485,8 +487,8 @@ export const AcademicManagementHub = () => {
         }
         description={
           isTeacher
-            ? "Your assigned subjects: syllabus, session plans, lesson plans, and daily log book."
-            : "Institution syllabus, session/lesson plans, log books, and approvals for every teacher."
+            ? "Your assigned subjects: official syllabus, session plan, and lesson plan stay the same for the batch/year. Log book continues leftover work or starts from the beginning on a FULL assignment."
+            : "Institution syllabus, session/lesson plans, log books, and approvals. Syllabus, session plan, and lesson plan are official for the batch/year even when the teacher changes."
         }
       />
 

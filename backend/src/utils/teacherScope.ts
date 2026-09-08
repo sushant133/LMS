@@ -46,6 +46,8 @@ const buildScopeFromAssignments = (
     unitFrom?: number | null;
     unitTo?: number | null;
     assignedPercentage?: number | null;
+    handoverBaselinePercent?: number | null;
+    supersedesAssignmentId?: { toString(): string } | null;
   }>
 ): TeacherScope => {
   const assignments: TeacherAssignmentPair[] = rows.map((row) => ({
@@ -58,7 +60,9 @@ const buildScopeFromAssignments = (
     assignmentType: row.assignmentType,
     unitFrom: row.unitFrom ?? null,
     unitTo: row.unitTo ?? null,
-    assignedPercentage: row.assignedPercentage ?? null
+    assignedPercentage: row.assignedPercentage ?? null,
+    handoverBaselinePercent: row.handoverBaselinePercent ?? null,
+    supersedesAssignmentId: row.supersedesAssignmentId?.toString() ?? null
   }));
 
   return {

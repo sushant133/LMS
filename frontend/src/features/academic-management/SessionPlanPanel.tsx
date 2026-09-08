@@ -56,7 +56,6 @@ import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
   dedupePlansByCurriculum,
-  groupByTeacher,
   matchSessionPlanKeyword,
   recordsForCurriculumSubject,
   type HierarchyScopeOption,
@@ -652,7 +651,7 @@ export const SessionPlanPanel = ({
   // Tree badges must match the right-hand list: one plan per curriculum subject
   // per teacher, not one per batch-provisioned subject instance.
   const uniquePlans = useMemo(
-    () => dedupePlansByCurriculum(keywordFilteredPlans, subjects, true),
+    () => dedupePlansByCurriculum(keywordFilteredPlans, subjects, false),
     [keywordFilteredPlans, subjects],
   );
 
@@ -668,7 +667,7 @@ export const SessionPlanPanel = ({
         filterYearId: filters.yearId,
         filterClassId: filters.classId,
         filterSubjectId: filters.subjectId,
-        filterTeacherId: filters.teacherId || teacherId,
+        filterTeacherId: isAdmin ? filters.teacherId : undefined,
         filterFaculty: filters.faculty,
         keyword: filters.keyword,
         records: uniquePlans.map((plan) => ({
@@ -695,7 +694,7 @@ export const SessionPlanPanel = ({
       filters.teacherId,
       filters.faculty,
       filters.keyword,
-      teacherId,
+      isAdmin,
       uniquePlans,
     ],
   );
@@ -767,8 +766,7 @@ export const SessionPlanPanel = ({
       yearIdToLevelKey,
       isCollege,
     );
-    // Collapse batch-instance duplicates; keep separate plans per teacher
-    return dedupePlansByCurriculum(matched, subjects, true);
+    return dedupePlansByCurriculum(matched, subjects, false);
   }, [
     keywordFilteredPlans,
     selectedSubject,
@@ -777,11 +775,6 @@ export const SessionPlanPanel = ({
     isCollege,
     subjects,
   ]);
-
-  const teacherGroups = useMemo(
-    () => groupByTeacher(selectedPlans),
-    [selectedPlans],
-  );
 
   // PDF export includes all filtered plans (or selected subject when chosen)
   const printPlans = useMemo(() => {
@@ -797,8 +790,7 @@ export const SessionPlanPanel = ({
             {plan.subject?.name} · {plan.academicYearBs}
           </CardTitle>
           <p className="text-sm text-slate-600">
-            Teacher: {plan.teacher?.user?.fullName ?? "—"} · Completed:{" "}
-            {plan.completedUnits} · Remaining: {plan.remainingUnits}
+            Completed: {plan.completedUnits} · Remaining: {plan.remainingUnits}
           </p>
           <AcademicProgressBar
             className="mt-2 max-w-md"
@@ -1770,6 +1762,7 @@ export const SessionPlanPanel = ({
             selectedFacultyKey={selectedFacultyKey}
             selectedYearKey={selectedYearKey}
             selectedSubjectKey={selectedSubject?.subjectKey}
+            hideTeacherNames={!isAdmin}
             onSelectSubject={(facultyKey, yearKey, subject) => {
               setSelectedFacultyKey(facultyKey);
               setSelectedYearKey(yearKey);
@@ -1811,34 +1804,23 @@ export const SessionPlanPanel = ({
                   <h3 className="text-lg font-semibold text-slate-900">
                     {selectedSubjectMeta.subject.subjectName}
                   </h3>
-                  <p className="text-sm text-slate-600">
-                    Assigned teacher(s):{" "}
-                    {selectedSubjectMeta.subject.teacherNames.length > 0
-                      ? selectedSubjectMeta.subject.teacherNames.join(", ")
-                      : "—"}
-                  </p>
+                  {isAdmin ? (
+                    <p className="text-sm text-slate-600">
+                      Assigned teacher(s):{" "}
+                      {selectedSubjectMeta.subject.teacherNames.length > 0
+                        ? selectedSubjectMeta.subject.teacherNames.join(", ")
+                        : "—"}
+                    </p>
+                  ) : null}
                   <p className="text-xs text-slate-500">
                     {selectedPlans.length} Session Plan
-                    {selectedPlans.length === 1 ? "" : "s"} · One curriculum
-                    subject · Teachers listed separately (not by batch)
+                    {selectedPlans.length === 1 ? "" : "s"} · Official plan for
+                    this subject and academic year
                   </p>
                 </CardContent>
               </Card>
 
-              {teacherGroups.map((group) => (
-                <div key={group.teacherId} className="space-y-3">
-                  {teacherGroups.length > 1 ? (
-                    <div className="flex items-center gap-2 no-print">
-                      <div className="h-px flex-1 bg-slate-200" />
-                      <p className="text-sm font-semibold text-slate-800">
-                        Teacher: {group.teacherName}
-                      </p>
-                      <div className="h-px flex-1 bg-slate-200" />
-                    </div>
-                  ) : null}
-                  {group.items.map((plan) => renderPlanCard(plan))}
-                </div>
-              ))}
+              {selectedPlans.map((plan) => renderPlanCard(plan))}
             </>
           )}
         </div>
@@ -1925,15 +1907,7 @@ export const SessionPlanPanel = ({
         {printPlans.length === 0 ? (
           <p className="text-sm text-slate-600">No session plans to export.</p>
         ) : (
-          groupByTeacher(printPlans).map((group) => (
-            <div key={group.teacherId} className="sp-print-section">
-              <h3
-                className="sp-print-meta"
-                style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}
-              >
-                Teacher: {group.teacherName}
-              </h3>
-              {group.items.map((plan) => (
+          printPlans.map((plan) => (
                 <div key={plan._id} className="sp-print-section">
                   <p className="sp-print-meta" style={{ fontWeight: 600 }}>
                     Subject: {plan.subject?.name ?? "—"}
@@ -1987,8 +1961,6 @@ export const SessionPlanPanel = ({
                     </tbody>
                   </table>
                 </div>
-              ))}
-            </div>
           ))
         )}
         <AcademicPrintFooter />

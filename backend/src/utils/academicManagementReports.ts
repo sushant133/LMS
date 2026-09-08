@@ -10,7 +10,8 @@ import { Teacher } from "../models/Teacher.js";
 import { ApiError } from "./apiError.js";
 import {
   applyCurriculumSubjectFilter,
-  applyTeacherScopeToFilter,
+  applyOfficialPlanScopeToFilter,
+  applyLogBookListScope,
   buildAcademicFilter,
   computeItemStatus,
   expandCurriculumSubjectIds,
@@ -77,7 +78,19 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
   const filters = parseFilters(req.query as Record<string, unknown>);
   const baseFilter = buildAcademicFilter(req, filters);
   await applyCurriculumSubjectFilter(req, baseFilter, filters.subjectId);
-  await applyTeacherScopeToFilter(req, baseFilter);
+  const logBookReports = new Set<AcademicReportType>([
+    "teacher-log-book",
+    "pending-log-book",
+    "daily-teaching",
+    "monthly-teaching",
+    "late-submission",
+    "teacher-performance"
+  ]);
+  if (logBookReports.has(reportType)) {
+    await applyLogBookListScope(req, baseFilter);
+  } else {
+    await applyOfficialPlanScopeToFilter(req, baseFilter, filters.teacherId);
+  }
   const schoolId = tenantObjectId(req);
 
   const subjectFilter =

@@ -24,6 +24,8 @@ interface AcademicYearSubjectTreeProps {
   emptyMessage?: string;
   defaultExpandAll?: boolean;
   className?: string;
+  /** Teacher-facing syllabus / official plans: never show a teacher name. */
+  hideTeacherNames?: boolean;
 }
 
 export const AcademicYearSubjectTree = ({
@@ -36,6 +38,7 @@ export const AcademicYearSubjectTree = ({
   emptyMessage = "No years or subjects match the current filters.",
   defaultExpandAll = true,
   className,
+  hideTeacherNames = false,
 }: AcademicYearSubjectTreeProps) => {
   const facultyNodes: HierarchyFacultyNode[] = useMemo(() => {
     if (faculties && faculties.length > 0) return faculties;
@@ -234,7 +237,7 @@ export const AcademicYearSubjectTree = ({
                                           ({subject.subjectCode})
                                         </span>
                                       ) : null}
-                                      {subject.teacherNames.length > 0 ? (
+                                      {hideTeacherNames ? null : subject.teacherNames.length > 0 ? (
                                         <span className="mt-0.5 block text-xs text-slate-500 truncate">
                                           {subject.teacherNames.length === 1
                                             ? subject.teacherNames[0]

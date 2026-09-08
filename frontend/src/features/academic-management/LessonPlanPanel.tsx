@@ -63,7 +63,6 @@ import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
-  groupByTeacher,
   matchLessonPlanKeyword,
   recordsForCurriculumSubject,
   type HierarchyScopeOption,
@@ -1467,7 +1466,7 @@ export const LessonPlanPanel = ({
         filterYearId: filters.yearId,
         filterClassId: filters.classId,
         filterSubjectId: filters.subjectId,
-        filterTeacherId: filters.teacherId || teacherId,
+        filterTeacherId: isAdmin ? filters.teacherId : undefined,
         filterFaculty: filters.faculty,
         keyword: filters.keyword,
         records: filteredPlans.map((plan) => ({
@@ -1493,7 +1492,7 @@ export const LessonPlanPanel = ({
       filters.teacherId,
       filters.faculty,
       filters.keyword,
-      teacherId,
+      isAdmin,
       filteredPlans,
     ],
   );
@@ -1580,7 +1579,7 @@ export const LessonPlanPanel = ({
   ]);
 
   const teacherGroups = useMemo(
-    () => groupByTeacher(selectedPlans),
+    () => [{ teacherId: "shared", teacherName: "", items: selectedPlans }],
     [selectedPlans],
   );
 
@@ -2308,6 +2307,7 @@ export const LessonPlanPanel = ({
             selectedFacultyKey={selectedFacultyKey}
             selectedYearKey={selectedYearKey}
             selectedSubjectKey={selectedSubject?.subjectKey}
+            hideTeacherNames={!isAdmin}
             onSelectSubject={(facultyKey, yearKey, subject) => {
               setSelectedFacultyKey(facultyKey);
               setSelectedYearKey(yearKey);
@@ -2345,13 +2345,14 @@ export const LessonPlanPanel = ({
                   <h3 className="text-lg font-semibold text-slate-900">
                     {selectedSubjectMeta.subject.subjectName}
                   </h3>
-                  <p className="text-sm text-slate-600">
-                    Teacher(s):{" "}
-                    {selectedSubjectMeta.subject.teacherNames.join(", ") || "—"}
-                  </p>
+                  {isAdmin ? (
+                    <p className="text-sm text-slate-600">
+                      Assigned teacher(s):{" "}
+                      {selectedSubjectMeta.subject.teacherNames.join(", ") || "—"}
+                    </p>
+                  ) : null}
                   <p className="text-xs text-slate-500">
-                    One curriculum subject · Teachers grouped below (not by
-                    batch)
+                    Official lesson plan for this subject and academic year
                   </p>
                 </CardContent>
               </Card>
@@ -2368,23 +2369,13 @@ export const LessonPlanPanel = ({
                 );
                 return (
                 <div key={group.teacherId} className="space-y-3">
-                  {teacherGroups.length > 1 ? (
-                    <div className="flex items-center gap-2 no-print">
-                      <div className="h-px flex-1 bg-slate-200" />
-                      <p className="text-sm font-semibold text-slate-800">
-                        Teacher: {group.teacherName}
-                      </p>
-                      <div className="h-px flex-1 bg-slate-200" />
-                    </div>
-                  ) : null}
                   <Card>
                     <CardHeader>
                       <CardTitle>Lesson Plan</CardTitle>
                       <p className="text-sm text-slate-600">
-                        {group.teacherName}
                         {selectedSubjectMeta
-                          ? ` · ${selectedSubjectMeta.subject.subjectName}`
-                          : ""}
+                          ? selectedSubjectMeta.subject.subjectName
+                          : "Lesson plan"}
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -2778,18 +2769,16 @@ export const LessonPlanPanel = ({
         {printPlans.length === 0 ? (
           <p className="text-sm text-slate-600">No lesson plans to export.</p>
         ) : (
-          groupByTeacher(printPlans).map((group) => {
-            const tableRows = flattenLessonPlanTableRows(group.items);
+          (() => {
+            const tableRows = flattenLessonPlanTableRows(printPlans);
             const subjectName =
-              group.items[0]?.subject?.name ??
+              printPlans[0]?.subject?.name ??
               selectedSubjectMeta?.subject.subjectName ??
               "—";
-            const subjectCode = group.items[0]?.subject?.code;
+            const subjectCode = printPlans[0]?.subject?.code;
             return (
-            <div key={group.teacherId} className="lp-print-section">
+            <div className="lp-print-section">
               <p className="lp-print-meta" style={{ fontWeight: 600 }}>
-                Teacher: {group.teacherName}
-                {" · "}
                 Subject: {subjectName}
                 {subjectCode ? ` (${subjectCode})` : ""}
               </p>
@@ -2850,7 +2839,7 @@ export const LessonPlanPanel = ({
               </table>
             </div>
             );
-          })
+          })()
         )}
         <AcademicPrintFooter />
       </div>

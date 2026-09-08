@@ -23,6 +23,9 @@ export interface TeacherAssignmentPair {
   unitFrom?: number | null;
   unitTo?: number | null;
   assignedPercentage?: number | null;
+  /** Set when this assignment continues leftover work from a previous teacher. */
+  handoverBaselinePercent?: number | null;
+  supersedesAssignmentId?: string | null;
 }
 
 /** Stable teacher academic scope — always returned by getTeacherScope / portal */

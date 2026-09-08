@@ -950,6 +950,24 @@ export const LogBookPanel = ({
     };
   }, [faculties, selectedSubject, selectedYearKey, selectedFacultyKey]);
 
+  const leftoverAssignment = useMemo(() => {
+    if (!selectedSubject) return null;
+    const ids = new Set(selectedSubject.subjectIds.filter(Boolean));
+    return (
+      assignments.find((row) => {
+        const subjectId =
+          typeof row.subjectId === "string"
+            ? row.subjectId
+            : row.subjectId?._id;
+        if (!subjectId || !ids.has(subjectId)) return false;
+        return (
+          row.handoverBaselinePercent != null &&
+          Number.isFinite(Number(row.handoverBaselinePercent))
+        );
+      }) ?? null
+    );
+  }, [assignments, selectedSubject]);
+
   const selectedEntries = useMemo(() => {
     if (!selectedSubject) return [];
     return recordsForCurriculumSubject(
@@ -971,9 +989,12 @@ export const LogBookPanel = ({
    * Row actions, shared by the desktop table cell and the mobile cards so both
    * stay in step (a button added here shows up in both layouts).
    */
+  const isOwnLogEntry = (entry: AcademicLogBookEntryRecord) =>
+    !teacherId || entry.teacherId === teacherId;
+
   const renderEntryActions = (entry: AcademicLogBookEntryRecord) => (
     <div className="flex flex-wrap gap-1">
-      {canEditDelete ? (
+      {canEditDelete && isOwnLogEntry(entry) ? (
         <Button
           size="sm"
           variant="outline"
@@ -1039,6 +1060,7 @@ export const LogBookPanel = ({
         </>
       ) : null}
       {canEditDelete &&
+      isOwnLogEntry(entry) &&
       (isAdmin ||
         entry.reviewStatus !== "APPROVED") ? (
         <Button
@@ -1596,10 +1618,22 @@ export const LogBookPanel = ({
                   <h3 className="text-lg font-semibold text-slate-900">
                     {selectedSubjectMeta.subject.subjectName}
                   </h3>
-                  <p className="text-sm text-slate-600">
-                    Teacher(s):{" "}
-                    {selectedSubjectMeta.subject.teacherNames.join(", ") || "—"}
-                  </p>
+                  {isAdmin ? (
+                    <p className="text-sm text-slate-600">
+                      Teacher(s):{" "}
+                      {selectedSubjectMeta.subject.teacherNames.join(", ") || "—"}
+                    </p>
+                  ) : leftoverAssignment ? (
+                    <p className="text-sm text-amber-800">
+                      Continuing leftover log book from previous teaching (
+                      {Number(leftoverAssignment.handoverBaselinePercent)}% already
+                      taught). New entries continue from leftover serial numbers.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-600">
+                      Log book starts from the beginning for this FULL assignment.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 

@@ -44,8 +44,8 @@ import { getSessionOption, withTransaction } from "../utils/transaction.js";
 import {
   addAcademicComment,
   applyCurriculumSubjectFilter,
-  applyTeacherScopeToFilter,
-  applyTeacherSubjectScopeToFilter,
+  applyOfficialPlanScopeToFilter,
+  applyLogBookListScope,
   assertApprovableStatus,
   assertApprovedSessionPlanForLesson,
   assertEditableStatus,
@@ -54,10 +54,15 @@ import {
   assertTeachingDateWithinSessionPlanUnits,
   assertUniqueUnitsInLessonPlan,
   assertNoDuplicateLogBookForItemDate,
+  assertNoDuplicateOfficialSessionPlan,
+  assertNoDuplicateOfficialLessonPlan,
   nextLogBookPeriodNumber,
+  nextContinuedLogBookSerial,
   resolveLogBookLessonPlanLink,
   resolveTaughtSyllabusSubUnitIds,
   assertSyllabusAccess,
+  assertOfficialPlanAccess,
+  assertLogBookEntryReadAccess,
   assertTeacherOwnership,
   buildAcademicFilter,
   buildDashboard,
@@ -322,7 +327,7 @@ export const listSessionPlans = asyncHandler(async (req: Request, res: Response)
   const filters = parseFilters(req);
   const filter = buildAcademicFilter(req, filters);
   await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
-  await applyTeacherScopeToFilter(req, filter);
+  await applyOfficialPlanScopeToFilter(req, filter, filters.teacherId);
 
   const plans = await AcademicSessionPlan.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (await Promise.all(plans.map((plan) => serializeSessionPlan(plan._id.toString())))).filter(Boolean);
@@ -346,7 +351,11 @@ export const getSessionPlan = asyncHandler(async (req: Request, res: Response) =
   }).lean();
 
   if (!plan) throw new ApiError(404, "Session plan not found");
-  await assertTeacherOwnership(req, plan.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: plan.teacherId.toString(), subjectId: plan.subjectId.toString() },
+    "session plans"
+  );
 
   const serialized = await serializeSessionPlan(plan._id.toString());
   return sendSuccess(res, "Session plan fetched", serialized);
@@ -421,6 +430,8 @@ export const createSessionPlan = asyncHandler(async (req: Request, res: Response
     }
   }
 
+  await assertNoDuplicateOfficialSessionPlan(req, payload);
+
   const header = sanitizeSessionPlanScope(payload);
 
   let result: string;
@@ -485,7 +496,11 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
   });
 
   if (!existing) throw new ApiError(404, "Session plan not found");
-  await assertTeacherOwnership(req, existing.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: existing.teacherId.toString(), subjectId: existing.subjectId.toString() },
+    "session plans"
+  );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   const safePayload = await sanitizeTeacherOwnedUpdate(
@@ -588,7 +603,11 @@ export const deleteSessionPlan = asyncHandler(async (req: Request, res: Response
   });
 
   if (!existing) throw new ApiError(404, "Session plan not found");
-  await assertTeacherOwnership(req, existing.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: existing.teacherId.toString(), subjectId: existing.subjectId.toString() },
+    "session plans"
+  );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   existing.isDeleted = true;
@@ -602,7 +621,11 @@ export const deleteSessionPlan = asyncHandler(async (req: Request, res: Response
 export const submitSessionPlan = asyncHandler(async (req: Request, res: Response) => {
   const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Session plan not found");
-  await assertTeacherOwnership(req, existing.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: existing.teacherId.toString(), subjectId: existing.subjectId.toString() },
+    "session plans"
+  );
   assertEditableStatus(existing.status);
 
   existing.status = "PENDING_APPROVAL";
@@ -714,7 +737,7 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
   const filter = buildAcademicFilter(req, filters);
   await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   // Teachers see syllabi for subjects they are assigned (not only their teacherId)
-  await applyTeacherSubjectScopeToFilter(req, filter);
+  await applyOfficialPlanScopeToFilter(req, filter, filters.teacherId);
 
   /**
    * Syllabus is curriculum-level (shared). For teachers, drop filters that commonly
@@ -954,7 +977,6 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
   }
 
   const payload = academicSyllabusSchema.parse(req.body);
-  const optionalTeacherId = payload.teacherId?.trim() || undefined;
   // Deep-clone structure so later header mutations cannot drop units/subs
   const structureSource = {
     chapters: Array.isArray(payload.chapters)
@@ -1066,7 +1088,7 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
       existingDraft.remarks = payload.remarks ?? existingDraft.remarks;
       existingDraft.attachmentUrl =
         payload.attachmentUrl ?? existingDraft.attachmentUrl;
-      if (optionalTeacherId) existingDraft.teacherId = optionalTeacherId as never;
+      existingDraft.teacherId = undefined;
       if (shouldRewriteHierarchy) {
         existingDraft.hierarchyMigratedAt = new Date();
       }
@@ -1118,7 +1140,7 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
             batchId,
             classId,
             sectionId,
-            teacherId: optionalTeacherId || undefined,
+            teacherId: undefined,
             schoolId: tenantObjectId(req),
             status: "DRAFT",
             hierarchyMigratedAt: new Date(),
@@ -1676,7 +1698,7 @@ export const listLessonPlans = asyncHandler(async (req: Request, res: Response) 
   const filters = parseFilters(req);
   const filter = buildAcademicFilter(req, filters);
   await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
-  await applyTeacherScopeToFilter(req, filter);
+  await applyOfficialPlanScopeToFilter(req, filter, filters.teacherId);
 
   const plans = await AcademicLessonPlan.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (
@@ -1742,6 +1764,15 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     teachingDateBs,
     unitIds
   );
+  await assertNoDuplicateOfficialLessonPlan(req, {
+    subjectId: payload.subjectId,
+    academicYearBs: payload.academicYearBs,
+    teachingDateBs,
+    classId: payload.classId,
+    sectionId: payload.sectionId,
+    batchId: payload.batchId,
+    yearId: payload.yearId
+  });
   // Sub-unit rows carry their own dates — hold those to the unit window too
   await assertLessonPlanItemDatesWithinSessionPlanUnits(
     req,
@@ -1825,7 +1856,11 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
-  await assertTeacherOwnership(req, existing.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: existing.teacherId.toString(), subjectId: existing.subjectId.toString() },
+    "lesson plans"
+  );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   const sessionPlanId = payload.sessionPlanId ?? existing.sessionPlanId?.toString();
@@ -2024,7 +2059,11 @@ export const deleteLessonPlan = asyncHandler(async (req: Request, res: Response)
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
-  await assertTeacherOwnership(req, existing.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: existing.teacherId.toString(), subjectId: existing.subjectId.toString() },
+    "lesson plans"
+  );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   const items = await AcademicLessonPlanItem.find({ lessonPlanId: existing._id })
@@ -2057,7 +2096,11 @@ export const submitLessonPlan = asyncHandler(async (req: Request, res: Response)
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
-  await assertTeacherOwnership(req, existing.teacherId.toString());
+  await assertOfficialPlanAccess(
+    req,
+    { teacherId: existing.teacherId.toString(), subjectId: existing.subjectId.toString() },
+    "lesson plans"
+  );
   assertEditableStatus(existing.status);
 
   existing.status = "PENDING_APPROVAL";
@@ -2148,7 +2191,7 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
   // Log book entries store dateBs only — never filter on plan-style month string
   const monthName = typeof filter.month === "string" ? filter.month : undefined;
   delete filter.month;
-  await applyTeacherScopeToFilter(req, filter);
+  await applyLogBookListScope(req, filter);
 
   if (filters.dateFrom || filters.dateTo) {
     filter.dateBs = {
@@ -2324,13 +2367,22 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     yearId: optionalObjectId(payload.yearId)
   });
 
-  const count = await AcademicLogBookEntry.countDocuments({ logBookId, isDeleted: false });
   const periodNumber = await nextLogBookPeriodNumber(
     req,
     payload.teacherId,
     payload.subjectId,
     dateBs
   );
+  const serialNo = await nextContinuedLogBookSerial(req, {
+    teacherId: payload.teacherId,
+    subjectId: payload.subjectId,
+    academicYearBs: payload.academicYearBs,
+    classId: optionalObjectId(payload.classId),
+    sectionId: optionalObjectId(payload.sectionId),
+    batchId: optionalObjectId(payload.batchId),
+    yearId: optionalObjectId(payload.yearId),
+    logBookId
+  });
 
   const taughtSubUnitIds = await resolveTaughtSyllabusSubUnitIds(req, {
     taughtTitles,
@@ -2373,7 +2425,7 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     subjectId: payload.subjectId,
     teacherId: payload.teacherId,
     timetableSlotId: optionalObjectId(payload.timetableSlotId),
-    serialNo: count + 1,
+    serialNo,
     dateBs,
     unit: unitLabel,
     topicCovered: payload.topicCovered || "",
@@ -2824,22 +2876,54 @@ const findCommentEntity = async (
   }
 };
 
+const assertCommentEntityAccess = async (
+  req: Request,
+  entityType: string,
+  entity: {
+    teacherId?: { toString(): string } | null;
+    subjectId?: { toString(): string };
+    academicYearBs?: string;
+    classId?: { toString(): string } | null;
+    sectionId?: { toString(): string } | null;
+    batchId?: { toString(): string } | null;
+    yearId?: { toString(): string } | null;
+  }
+): Promise<void> => {
+  const subjectId = entity.subjectId?.toString() ?? "";
+  const teacherId = entity.teacherId?.toString();
+  if (entityType === "SYLLABUS" || entityType === "SESSION_PLAN" || entityType === "LESSON_PLAN") {
+    if (!subjectId) return;
+    const label =
+      entityType === "SYLLABUS"
+        ? "syllabi"
+        : entityType === "SESSION_PLAN"
+          ? "session plans"
+          : "lesson plans";
+    await assertOfficialPlanAccess(req, { teacherId, subjectId }, label);
+    return;
+  }
+  if (entityType === "LOG_BOOK_ENTRY" && entity.teacherId && entity.subjectId) {
+    await assertLogBookEntryReadAccess(req, {
+      teacherId: entity.teacherId,
+      subjectId: entity.subjectId,
+      academicYearBs: entity.academicYearBs,
+      classId: entity.classId,
+      sectionId: entity.sectionId,
+      batchId: entity.batchId,
+      yearId: entity.yearId
+    });
+    return;
+  }
+  if (teacherId) await assertTeacherOwnership(req, teacherId);
+};
+
 export const addComment = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicCommentSchema.parse(req.body);
 
   const entity = await findCommentEntity(req, payload.entityType, payload.entityId);
   if (!entity) throw new ApiError(404, "Entity not found for comment");
 
-  // Access: syllabus is subject-scoped; other entities use teacher ownership
-  if (payload.entityType === "SYLLABUS") {
-    const syllabus = entity as { teacherId?: { toString(): string }; subjectId: { toString(): string } };
-    await assertSyllabusAccess(req, {
-      teacherId: syllabus.teacherId?.toString(),
-      subjectId: syllabus.subjectId.toString()
-    });
-  } else if ("teacherId" in entity && entity.teacherId) {
-    await assertTeacherOwnership(req, entity.teacherId.toString());
-  }
+  await assertCommentEntityAccess(req, payload.entityType, entity);
 
   const comment = await addAcademicComment(req, payload.entityType, payload.entityId, payload.comment);
 
@@ -2921,24 +3005,7 @@ export const listComments = asyncHandler(async (req: Request, res: Response) => 
   // Soft-fail list: panel should not hard-break if entity lookup fails.
   // Still enforce access when the entity is found.
   if (entity) {
-    if (entityType === "SYLLABUS") {
-      const syllabus = entity as {
-        teacherId?: { toString(): string } | null;
-        subjectId: { toString(): string };
-      };
-      const subjectId =
-        typeof syllabus.subjectId === "object" && syllabus.subjectId
-          ? syllabus.subjectId.toString()
-          : String(syllabus.subjectId ?? "");
-      if (subjectId) {
-        await assertSyllabusAccess(req, {
-          teacherId: syllabus.teacherId?.toString?.() ?? undefined,
-          subjectId
-        });
-      }
-    } else if ("teacherId" in entity && entity.teacherId) {
-      await assertTeacherOwnership(req, entity.teacherId.toString());
-    }
+    await assertCommentEntityAccess(req, entityType, entity);
   } else if (!(await actorIsAcademicAdmin(req))) {
     // Non-admins cannot list comments for unknown entities
     throw new ApiError(404, "Entity not found");

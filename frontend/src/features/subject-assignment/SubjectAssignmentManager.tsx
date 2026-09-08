@@ -574,7 +574,7 @@ export const SubjectAssignmentManager = () => {
       );
     },
     onSuccess: async (data) => {
-      toast.success("Incoming teacher will continue leftover syllabus");
+      toast.success("Incoming teacher will continue leftover syllabus and log book");
       data.warnings?.forEach((w) => toast.warning(w));
       closeContinue();
       await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
@@ -676,7 +676,7 @@ export const SubjectAssignmentManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Subject Assignment"
-        description="Assign teachers to subjects for class/section or batch/year with FULL, UNIT, or PERCENTAGE coverage. If a teacher leaves mid-syllabus, use Continue leftover so the incoming teacher picks up remaining units on the same batch/year plan."
+        description="Assign teachers to subjects for class/section or batch/year with FULL, UNIT, or PERCENTAGE coverage. Syllabus, session plan, and lesson plan stay the same for that batch/year even if the teacher changes. Continue leftover so the incoming teacher picks up remaining units and continues the log book; a new FULL (100%) assignment starts the log book from the beginning."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -902,8 +902,9 @@ export const SubjectAssignmentManager = () => {
                     {labelOfTeacher(continuingRow.teacherId)} left{" "}
                     {labelOfSubject(continuingRow.subjectId)} ({groupLabel(continuingRow)}
                     ). The incoming teacher continues remaining units on the same
-                    batch/year syllabus and session plan. Prior completed work stays
-                    with the previous teacher for tender pay.
+                    batch/year syllabus, session plan, and lesson plan, and continues
+                    the log book from leftover. Prior completed work stays with the
+                    previous teacher for tender pay.
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={closeContinue}>
