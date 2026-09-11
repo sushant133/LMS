@@ -61,6 +61,7 @@ import {
   filterSubjectsByYear,
   resolveSubjectSelectValue,
   statusBadgeClass,
+  syllabusStatusLabel,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
 import { AcademicAttachmentUpload } from "./AcademicAttachmentUpload";
@@ -985,6 +986,12 @@ export const SyllabusPanel = ({
       : null;
   }, [faculties, selectedSubject, selectedYearKey, selectedFacultyKey]);
 
+  /** Nepali chrome for the subject header card above the syllabus list. */
+  const selectedSubjectNepali = isNepaliSubject({
+    name: selectedSubjectMeta?.subject.subjectName,
+    code: selectedSubjectMeta?.subject.subjectCode,
+  });
+
   const selectedPlans = useMemo(() => {
     if (!selectedSubject) return [];
     // Prefer year-level match (1st/2nd Year), but syllabus may be stored on another
@@ -1132,37 +1139,65 @@ export const SyllabusPanel = ({
       <Card key={plan._id} className={compact ? "border-slate-200 shadow-none" : undefined}>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-base">
+            <CardTitle className={cn("text-base", planNepali && nepaliTextClass)}>
               {plan.subject?.name}
               {plan.subjectCode || plan.subject?.code
                 ? ` (${plan.subjectCode || plan.subject?.code})`
                 : ""}{" "}
               · {plan.academicYearBs}
             </CardTitle>
-            <p className="text-sm text-slate-600">
+            <p className={cn("text-sm text-slate-600", planNepali && nepaliTextClass)}>
               {plan.totalTheoryHours || plan.totalPracticalHours || plan.creditHours
-                ? `Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
-                : "Official subject syllabus for this academic year"}
+                ? planNepali
+                  ? `${nepaliStructuralLabels.theory} ${formatCount(plan.totalTheoryHours ?? 0, true)} ${nepaliStructuralLabels.hours} · ${nepaliStructuralLabels.practical} ${formatCount(plan.totalPracticalHours ?? 0, true)} ${nepaliStructuralLabels.hours} · ${nepaliStructuralLabels.credit} ${formatCount(plan.creditHours ?? 0, true)}`
+                  : `Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
+                : planNepali
+                  ? "यस शैक्षिक वर्षको आधिकारिक विषय पाठ्यक्रम"
+                  : "Official subject syllabus for this academic year"}
             </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {plan.totalChapters ?? chapters.length} chapters ·{" "}
-              {plan.totalTopics ?? 0} units · {totalSub} sub-units · Completed:{" "}
-              {completedSub} · Remaining: {plan.remainingSubUnits ?? totalSub - completedSub}
+            <p
+              className={cn(
+                "mt-1 text-xs text-slate-500",
+                planNepali && nepaliTextClass,
+              )}
+            >
+              {planNepali
+                ? `${formatCount(plan.totalChapters ?? chapters.length, true)} ${nepaliStructuralLabels.chapter} · ${formatCount(plan.totalTopics ?? 0, true)} ${nepaliStructuralLabels.unit} · ${formatCount(totalSub, true)} ${nepaliStructuralLabels.subUnit} · ${nepaliStructuralLabels.completed}: ${formatCount(completedSub, true)} · बाँकी: ${formatCount(plan.remainingSubUnits ?? totalSub - completedSub, true)}`
+                : `${plan.totalChapters ?? chapters.length} chapters · ${plan.totalTopics ?? 0} units · ${totalSub} sub-units · Completed: ${completedSub} · Remaining: ${plan.remainingSubUnits ?? totalSub - completedSub}`}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 no-print">
-            <Badge className={statusBadgeClass(plan.status)}>
-              {plan.status.replace(/_/g, " ")}
+            <Badge
+              className={cn(
+                statusBadgeClass(plan.status),
+                planNepali && nepaliTextClass,
+              )}
+            >
+              {planNepali
+                ? syllabusStatusLabel(plan.status, true)
+                : plan.status.replace(/_/g, " ")}
             </Badge>
             <Button
               size="sm"
               variant="outline"
               disabled={printingPlanId === plan._id}
               onClick={() => void printSingleSyllabus(plan)}
-              title="Print this syllabus only"
+              title={
+                planNepali
+                  ? "यही पाठ्यक्रम मात्र प्रिन्ट गर्नुहोस्"
+                  : "Print this syllabus only"
+              }
             >
               <Printer className="mr-1.5 h-3.5 w-3.5" />
-              {printingPlanId === plan._id ? "Printing…" : "Print"}
+              <span className={cn(planNepali && nepaliTextClass)}>
+                {printingPlanId === plan._id
+                  ? planNepali
+                    ? "प्रिन्ट हुँदै…"
+                    : "Printing…"
+                  : planNepali
+                    ? "प्रिन्ट"
+                    : "Print"}
+              </span>
             </Button>
             {editable ? (
               <Button
@@ -1170,14 +1205,24 @@ export const SyllabusPanel = ({
                 onClick={() => void openEditForm(plan)}
                 title={
                   plan.status === "DRAFT" || plan.status === "REJECTED"
-                    ? "Continue this draft — add more units and save again"
-                    : "Edit all sections, units, sub-units and nested children"
+                    ? planNepali
+                      ? "यो मस्यौदा जारी राख्नुहोस् — थप एकाइ हालेर पुनः सेभ गर्नुहोस्"
+                      : "Continue this draft — add more units and save again"
+                    : planNepali
+                      ? "सबै खण्ड, एकाइ र उप–एकाइ सम्पादन गर्नुहोस्"
+                      : "Edit all sections, units, sub-units and nested children"
                 }
               >
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                {plan.status === "DRAFT" || plan.status === "REJECTED"
-                  ? "Continue / Add units"
-                  : "Edit full syllabus"}
+                <span className={cn(planNepali && nepaliTextClass)}>
+                  {plan.status === "DRAFT" || plan.status === "REJECTED"
+                    ? planNepali
+                      ? "जारी राख्नुहोस् / एकाइ थप्नुहोस्"
+                      : "Continue / Add units"
+                    : planNepali
+                      ? "पूरा पाठ्यक्रम सम्पादन"
+                      : "Edit full syllabus"}
+                </span>
               </Button>
             ) : canManageStructure ? (
               <Button
@@ -1197,10 +1242,19 @@ export const SyllabusPanel = ({
                   });
                 }}
               >
-                Unlock &amp; edit
+                <span className={cn(planNepali && nepaliTextClass)}>
+                  {planNepali ? "खोलेर सम्पादन" : "Unlock & edit"}
+                </span>
               </Button>
             ) : isTeacher ? (
-              <Badge className="bg-slate-100 text-slate-700">View only</Badge>
+              <Badge
+                className={cn(
+                  "bg-slate-100 text-slate-700",
+                  planNepali && nepaliTextClass,
+                )}
+              >
+                {planNepali ? "हेर्न मात्र" : "View only"}
+              </Badge>
             ) : null}
           </div>
         </CardHeader>
@@ -1546,7 +1600,11 @@ export const SyllabusPanel = ({
               {editable ? (
                 <Button size="sm" onClick={() => void openEditForm(plan)}>
                   <Pencil className="mr-2 h-4 w-4" />
-                  Edit units &amp; sub-units
+                  <span className={cn(planNepali && nepaliTextClass)}>
+                    {planNepali
+                      ? "एकाइ र उप–एकाइ सम्पादन"
+                      : "Edit units & sub-units"}
+                  </span>
                 </Button>
               ) : canEditDelete ? (
                 <Button
@@ -1564,7 +1622,11 @@ export const SyllabusPanel = ({
                     });
                   }}
                 >
-                  Unlock &amp; edit all
+                  <span className={cn(planNepali && nepaliTextClass)}>
+                    {planNepali
+                      ? "सबै खोलेर सम्पादन"
+                      : "Unlock & edit all"}
+                  </span>
                 </Button>
               ) : null}
               {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
@@ -1578,7 +1640,15 @@ export const SyllabusPanel = ({
                   onClick={() => submitMutation.mutate(plan._id)}
                 >
                   <Send className="mr-2 h-4 w-4" />
-                  {submitMutation.isPending ? "Submitting…" : "Submit"}
+                  <span className={cn(planNepali && nepaliTextClass)}>
+                    {submitMutation.isPending
+                      ? planNepali
+                        ? "पेस हुँदै…"
+                        : "Submitting…"
+                      : planNepali
+                        ? "पेस गर्नुहोस्"
+                        : "Submit"}
+                  </span>
                 </Button>
               ) : null}
               {(plan.status === "SUBMITTED" ||
@@ -1592,7 +1662,9 @@ export const SyllabusPanel = ({
                     }
                     onClick={() => approveMutation.mutate({ id: plan._id })}
                   >
-                    Approve
+                    <span className={cn(planNepali && nepaliTextClass)}>
+                      {planNepali ? "स्वीकृत गर्नुहोस्" : "Approve"}
+                    </span>
                   </Button>
                   <Button
                     size="sm"
@@ -1602,12 +1674,18 @@ export const SyllabusPanel = ({
                       canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
                     }
                     onClick={() => {
-                      const remarks = window.prompt("Rejection remarks");
+                      const remarks = window.prompt(
+                        planNepali
+                          ? "अस्वीकृतिको कारण"
+                          : "Rejection remarks",
+                      );
                       if (remarks)
                         rejectMutation.mutate({ id: plan._id, remarks });
                     }}
                   >
-                    Reject
+                    <span className={cn(planNepali && nepaliTextClass)}>
+                      {planNepali ? "अस्वीकृत गर्नुहोस्" : "Reject"}
+                    </span>
                   </Button>
                 </>
               ) : null}
@@ -1621,7 +1699,9 @@ export const SyllabusPanel = ({
                   }
                   onClick={() => unlockMutation.mutate(plan._id)}
                 >
-                  Unlock only
+                  <span className={cn(planNepali && nepaliTextClass)}>
+                    {planNepali ? "खोल्नुहोस् मात्र" : "Unlock only"}
+                  </span>
                 </Button>
               ) : null}
               {canEditDelete ? (
@@ -1631,7 +1711,9 @@ export const SyllabusPanel = ({
                 onClick={() => deleteMutation.mutate(plan._id)}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Delete
+                <span className={cn(planNepali && nepaliTextClass)}>
+                  {planNepali ? "मेट्नुहोस्" : "Delete"}
+                </span>
               </Button>
               ) : null}
             </div>
@@ -1665,6 +1747,7 @@ export const SyllabusPanel = ({
             <AcademicCommentsPanel
               entityType="SYLLABUS"
               entityId={plan._id}
+              nepaliText={planNepali}
               canComment={isAdmin || plan.status !== "APPROVED"}
             />
           </div>
@@ -2116,21 +2199,38 @@ export const SyllabusPanel = ({
                       : ""}
                     {selectedSubjectMeta.year.label}
                   </p>
-                  <h3 className="text-lg font-semibold text-slate-900">
+                  <h3
+                    className={cn(
+                      "text-lg font-semibold text-slate-900",
+                      selectedSubjectNepali && nepaliTextClass,
+                    )}
+                  >
                     {selectedSubjectMeta.subject.subjectName}
                   </h3>
                   {isAdmin ? (
-                    <p className="text-sm text-slate-600">
-                      Assigned teacher(s):{" "}
+                    <p
+                      className={cn(
+                        "text-sm text-slate-600",
+                        selectedSubjectNepali && nepaliTextClass,
+                      )}
+                    >
+                      {selectedSubjectNepali
+                        ? "तोकिएका शिक्षक:"
+                        : "Assigned teacher(s):"}{" "}
                       {selectedSubjectMeta.subject.teacherNames.length > 0
                         ? selectedSubjectMeta.subject.teacherNames.join(", ")
                         : "—"}
                     </p>
                   ) : null}
-                  <p className="text-xs text-slate-500">
-                    {selectedPlans.length} Syllabus
-                    {selectedPlans.length === 1 ? "" : "s"} · Hierarchical Chapter →
-                    Unit → Sub Unit structure
+                  <p
+                    className={cn(
+                      "text-xs text-slate-500",
+                      selectedSubjectNepali && nepaliTextClass,
+                    )}
+                  >
+                    {selectedSubjectNepali
+                      ? `${formatCount(selectedPlans.length, true)} ${nepaliStructuralLabels.syllabus} · ${nepaliStructuralLabels.chapter} → ${nepaliStructuralLabels.unit} → ${nepaliStructuralLabels.subUnit} संरचना`
+                      : `${selectedPlans.length} Syllabus${selectedPlans.length === 1 ? "" : "s"} · Hierarchical Chapter → Unit → Sub Unit structure`}
                   </p>
                 </CardContent>
               </Card>

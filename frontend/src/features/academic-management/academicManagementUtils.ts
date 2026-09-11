@@ -93,6 +93,28 @@ export const resolveSubjectSelectValue = <
   return match?._id ?? selectedId;
 };
 
+/**
+ * Workflow status in Devanagari for Nepali subjects. Display only — the stored
+ * value stays the English enum the API validates.
+ */
+const NEPALI_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "मस्यौदा",
+  SUBMITTED: "पेस गरिएको",
+  PENDING_APPROVAL: "स्वीकृति पर्खाइमा",
+  PENDING: "पर्खाइमा",
+  APPROVED: "स्वीकृत",
+  REJECTED: "अस्वीकृत",
+  COMPLETED: "सम्पन्न",
+  IN_PROGRESS: "चालु",
+  NEEDS_IMPROVEMENT: "सुधार आवश्यक",
+  DELAYED: "ढिलाइ",
+};
+
+export const syllabusStatusLabel = (status: string, nepali = false): string => {
+  if (!nepali) return status.replace(/_/g, " ");
+  return NEPALI_STATUS_LABELS[status] ?? status.replace(/_/g, " ");
+};
+
 export const statusBadgeClass = (status: string): string => {
   switch (status) {
     case "APPROVED":

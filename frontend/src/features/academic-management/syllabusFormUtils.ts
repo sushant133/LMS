@@ -8,6 +8,20 @@ import type {
   SyllabusSubUnitStatus,
 } from "@phit-erp/shared";
 import { ensureUnicodeNepali } from "lib/preetiToUnicode";
+import { nepaliStructuralLabels, toNepaliDigits } from "lib/nepaliSubject";
+
+/**
+ * Title stamped on a unit the author left blank. It is persisted, so a Nepali
+ * syllabus must get "एकाइ १" — an English "Unit 1" would survive in the record
+ * and in print for the life of the syllabus.
+ */
+export const fallbackUnitTitle = (
+  unitNo: number,
+  nepaliMode: boolean,
+): string =>
+  nepaliMode
+    ? `${nepaliStructuralLabels.unit} ${toNepaliDigits(unitNo)}`
+    : `Unit ${unitNo}`;
 
 /**
  * Text normalize for payload. When nepaliMode is false, return text unchanged
@@ -413,7 +427,14 @@ const mapRecordSub = (sub: RecordSubLike): SubUnitDraft => ({
 const stripLegacyUnitPrefix = (raw: string): string => {
   const trimmed = (raw || "").trim();
   if (!trimmed) return "";
-  return trimmed.replace(/^unit\s*\d+\s*[:\-–—.]?\s*/i, "").trim() || trimmed;
+  // Strip "Unit 3 — " and the Nepali "एकाइ ३ — " so the label is not doubled
+  // when the row already renders its own unit prefix.
+  return (
+    trimmed
+      .replace(/^unit\s*\d+\s*[:\-–—.]?\s*/i, "")
+      .replace(/^एकाइ\s*[०-९\d]+\s*[:\-–—.]?\s*/, "")
+      .trim() || trimmed
+  );
 };
 
 export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState => {
@@ -669,8 +690,10 @@ export const formToPayload = (
       const typedTitle = t(rawTitle).trim();
       const unitNo =
         typeof unit.unitNo === "number" && unit.unitNo > 0 ? unit.unitNo : 1;
-      // Never send empty title to API (fixes old VPS validators + blank-drop logic)
-      const title = typedTitle || `Unit ${unitNo}`;
+      // Never send empty title to API (fixes old VPS validators + blank-drop logic).
+      // The fallback is persisted, so a Nepali syllabus must not be stamped with
+      // the English "Unit 1" — it would show that way forever, including in print.
+      const title = typedTitle || fallbackUnitTitle(unitNo, nepaliMode);
       return {
         clientKey: unit.clientKey,
         unitNo,
@@ -727,7 +750,7 @@ export const formToPayload = (
       const unitNo = unit.unitNo || legacyUnitSeq;
       return {
         unitNo,
-        chapterName: unit.title?.trim() || `Unit ${unitNo}`,
+        chapterName: unit.title?.trim() || fallbackUnitTitle(unitNo, nepaliMode),
         estimatedTeachingHours: safeHours(unit.teachingHours),
         learningOutcomes: unit.learningObjective || "",
         topicsCovered: flattenSubUnitDrafts(unit.subUnits ?? [])

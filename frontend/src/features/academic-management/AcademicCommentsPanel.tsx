@@ -6,18 +6,22 @@ import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Textarea } from "components/ui/textarea";
 import { api, unwrap } from "lib/api";
-import { parseErrorMessage } from "lib/utils";
+import { nepaliTextClass } from "lib/nepaliSubject";
+import { cn, parseErrorMessage } from "lib/utils";
 
 interface AcademicCommentsPanelProps {
   entityType: "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY";
   entityId: string;
   canComment: boolean;
+  /** Nepali subject records show their review notes in Nepali too. */
+  nepaliText?: boolean;
 }
 
 export const AcademicCommentsPanel = ({
   entityType,
   entityId,
   canComment,
+  nepaliText = false,
 }: AcademicCommentsPanelProps) => {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
@@ -67,15 +71,24 @@ export const AcademicCommentsPanel = ({
 
   return (
     <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
-      <p className="text-sm font-medium text-slate-800">
-        Comments & Review Notes
+      <p
+        className={cn(
+          "text-sm font-medium text-slate-800",
+          nepaliText && nepaliTextClass,
+        )}
+      >
+        {nepaliText ? "टिप्पणी तथा समीक्षा नोट" : "Comments & Review Notes"}
       </p>
       {commentsQuery.isError ? (
-        <p className="text-sm text-amber-700">
-          Comments could not be loaded right now.
+        <p className={cn("text-sm text-amber-700", nepaliText && nepaliTextClass)}>
+          {nepaliText
+            ? "अहिले टिप्पणीहरू लोड गर्न सकिएन।"
+            : "Comments could not be loaded right now."}
         </p>
       ) : (commentsQuery.data ?? []).length === 0 ? (
-        <p className="text-sm text-slate-500">No comments yet.</p>
+        <p className={cn("text-sm text-slate-500", nepaliText && nepaliTextClass)}>
+          {nepaliText ? "अहिलेसम्म कुनै टिप्पणी छैन।" : "No comments yet."}
+        </p>
       ) : (
         <div className="space-y-2">
           {commentsQuery.data?.map((item) => (
@@ -95,8 +108,13 @@ export const AcademicCommentsPanel = ({
         <div className="space-y-2">
           <Textarea
             value={comment}
+            nepali={nepaliText}
             onChange={(event) => setComment(event.target.value)}
-            placeholder="Add a comment or review note"
+            placeholder={
+              nepaliText
+                ? "टिप्पणी वा समीक्षा नोट लेख्नुहोस्"
+                : "Add a comment or review note"
+            }
           />
           <Button
             size="sm"
@@ -104,7 +122,9 @@ export const AcademicCommentsPanel = ({
             onClick={() => addMutation.mutate(comment.trim())}
           >
             <MessageSquarePlus className="mr-2 h-4 w-4" />
-            Add Comment
+            <span className={cn(nepaliText && nepaliTextClass)}>
+              {nepaliText ? "टिप्पणी थप्नुहोस्" : "Add Comment"}
+            </span>
           </Button>
         </div>
       ) : null}
