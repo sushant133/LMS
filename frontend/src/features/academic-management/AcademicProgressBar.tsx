@@ -1,8 +1,12 @@
+import { nepaliTextClass, toNepaliDigits } from "lib/nepaliSubject";
+
 interface AcademicProgressBarProps {
   completedPercent: number;
   remainingPercent?: number;
   className?: string;
   compact?: boolean;
+  /** Nepali subjects read "७०% सम्पन्न · ३०% बाँकी" with Devanagari digits. */
+  nepaliText?: boolean;
 }
 
 /** Compact progress bar: completed (green) + remaining (amber). */
@@ -11,6 +15,7 @@ export const AcademicProgressBar = ({
   remainingPercent,
   className = "",
   compact = false,
+  nepaliText = false,
 }: AcademicProgressBarProps) => {
   const completed = Math.min(100, Math.max(0, completedPercent));
   const remaining = remainingPercent ?? Math.max(0, 100 - completed);
@@ -31,10 +36,16 @@ export const AcademicProgressBar = ({
         />
       </div>
       {!compact ? (
-        <p className="text-xs text-slate-600">
-          {completed}% complete ·{" "}
+        <p
+          className={`text-xs text-slate-600 ${nepaliText ? nepaliTextClass : ""}`}
+        >
+          {nepaliText
+            ? `${toNepaliDigits(completed)}% सम्पन्न · `
+            : `${completed}% complete · `}
           <span className="font-medium text-amber-700">
-            {remaining}% remaining
+            {nepaliText
+              ? `${toNepaliDigits(remaining)}% बाँकी`
+              : `${remaining}% remaining`}
           </span>
         </p>
       ) : null}

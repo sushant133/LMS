@@ -55,7 +55,125 @@ export const nepaliStructuralLabels = {
   remarks: "टिप्पणी",
   hoursPerWeekHint: "घण्टा / हप्ता",
   hierarchy: "पाठ्यक्रम संरचना",
+  subUnits: "उप–एकाइहरू",
+  hours: "घण्टा",
+  objective: "उद्देश्य",
+  practical: "प्रयोगात्मक",
+  theory: "थ्योरी",
+  credit: "क्रेडिट",
+  heading: "शीर्षक",
+  headings: "शीर्षकहरू",
+  sectionType: "खण्ड प्रकार",
+  sectionTypeHint: "वैकल्पिक — अध्याय वा भाग, दुवै होइन",
+  noHeading: "— (शीर्षक छैन)",
+  completed: "सम्पन्न",
+  administration: "प्रशासन",
+  notSalary: "तलबमा गणना हुँदैन",
+  syllabus: "पाठ्यक्रम",
+  syllabusReport: "पाठ्यक्रम प्रतिवेदन",
+  academicYear: "शैक्षिक वर्ष",
+  emptyHierarchy: "यस पाठ्यक्रममा अहिलेसम्म कुनै अध्याय वा एकाइ छैन।",
+  estimatedHours: "अनुमानित घण्टा",
+  weightagePercent: "भार प्रतिशत",
+  expectedCompletionMonth: "सम्पन्न हुने अनुमानित महिना",
+  optional: "वैकल्पिक",
+  noSectionSelected:
+    "अध्याय वा भाग छानिएको छैन। एकाइहरू सिधै यसै खण्डमा थप्नुहोस्।",
 } as const;
+
+/**
+ * Display-only Devanagari month names. The stored value stays the romanised
+ * form the backend validates (`NEPALI_MONTH_NAMES`) — never write these back.
+ */
+export const NEPALI_MONTH_LABELS: Record<string, string> = {
+  Baisakh: "बैशाख",
+  Jestha: "जेठ",
+  Ashadh: "असार",
+  Shrawan: "साउन",
+  Bhadra: "भदौ",
+  Ashwin: "असोज",
+  Kartik: "कात्तिक",
+  Mangsir: "मंसिर",
+  Poush: "पुस",
+  Magh: "माघ",
+  Falgun: "फागुन",
+  Chaitra: "चैत",
+};
+
+/** Romanised month → Devanagari for display; unchanged when not Nepali. */
+export const formatNepaliMonth = (month: string, nepali = false): string =>
+  nepali ? (NEPALI_MONTH_LABELS[month] ?? month) : month;
+
+/** Syllabus header form labels for Nepali subjects. */
+export const nepaliFormLabels = {
+  subject: "विषय",
+  subjectCode: "विषय संकेत",
+  academicYearBs: "शैक्षिक वर्ष (वि.सं.)",
+  facultyProgram: "संकाय / कार्यक्रम",
+  semester: "सत्र (वैकल्पिक)",
+  selectSubject: "विषय छान्नुहोस्",
+  selectYearFirst: "पहिले वर्ष छान्नुहोस्",
+  selectClassFirst: "पहिले कक्षा छान्नुहोस्",
+  noSubjects: "यस वर्षका लागि कुनै विषय छैन",
+  subjectCodeHint: "खाली भए विषयबाट स्वतः",
+} as const;
+
+/** Editor action labels for Nepali subjects (buttons, tooltips). */
+export const nepaliActionLabels = {
+  addUnit: "एकाइ थप्नुहोस्",
+  addSubUnit: "उप–एकाइ थप्नुहोस्",
+  sameLevel: "उही तह",
+  nest: "भित्री तह",
+  remove: "हटाउनुहोस्",
+  removeSubUnit: "यो उप–एकाइ हटाउनुहोस् (वैकल्पिक)",
+  moveUp: "माथि सार्नुहोस् (नम्बर स्वतः मिल्छ)",
+  moveDown: "तल सार्नुहोस् (नम्बर स्वतः मिल्छ)",
+  duplicate: "प्रतिलिपि बनाउनुहोस्",
+  duplicateChapter: "अध्यायको प्रतिलिपि",
+  copySuffix: "(प्रतिलिपि)",
+  expandAll: "सबै खोल्नुहोस्",
+  collapseAll: "सबै बन्द गर्नुहोस्",
+  autoNumber: "स्वतः नम्बर",
+  addUnder: "अन्तर्गत थप्नुहोस्",
+} as const;
+
+/**
+ * Count with Devanagari digits in Nepali mode: 3 → "३".
+ * Numbers stay Western for every other subject.
+ */
+export const formatCount = (value: number, nepali = false): string =>
+  nepali ? toNepaliDigits(value) : String(value);
+
+/**
+ * Teaching hours for display: 3 → "३ घण्टा" (Nepali) or "3h" (English).
+ * Returns "" for 0 / missing so callers can skip the node entirely.
+ */
+export const formatHours = (
+  hours: number | null | undefined,
+  nepali = false,
+): string => {
+  if (!hours) return "";
+  return nepali
+    ? `${toNepaliDigits(hours)} ${nepaliStructuralLabels.hours}`
+    : `${hours}h`;
+};
+
+/**
+ * Nepali counts read "५ एकाइ" — the noun is not pluralised the English way,
+ * so callers must not append an "s".
+ */
+export const formatLabelledCount = (
+  value: number,
+  singular: string,
+  plural: string,
+  nepali = false,
+  nepaliNoun?: string,
+): string => {
+  if (nepali) {
+    return `${toNepaliDigits(value)} ${nepaliNoun ?? singular}`;
+  }
+  return `${value} ${value === 1 ? singular : plural}`;
+};
 
 /** Western 0–9 → Devanagari digits ०–९ */
 const NEPALI_DIGITS = ["०", "१", "२", "३", "४", "५", "६", "७", "८", "९"] as const;

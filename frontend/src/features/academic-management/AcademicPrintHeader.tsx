@@ -1,5 +1,7 @@
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { getPrintInstitutionBranding } from "lib/printBranding";
+import { nepaliStructuralLabels, nepaliTextClass } from "lib/nepaliSubject";
+import { cn } from "lib/utils";
 
 interface AcademicPrintHeaderProps {
   institutionName: string;
@@ -8,6 +10,8 @@ interface AcademicPrintHeaderProps {
   title: string;
   subtitle?: string;
   academicYearBs?: string;
+  /** Nepali subject documents print their chrome in Nepali too. */
+  nepaliText?: boolean;
 }
 
 /** Shown in on-screen print area and PDF export (institution branding). */
@@ -17,6 +21,7 @@ export const AcademicPrintHeader = ({
   title,
   subtitle,
   academicYearBs,
+  nepaliText = false,
 }: AcademicPrintHeaderProps) => {
   const branding = getPrintInstitutionBranding();
   const address =
@@ -31,13 +36,30 @@ export const AcademicPrintHeader = ({
           {address ? (
             <p className="text-sm text-slate-600">{address}</p>
           ) : null}
-          <p className="text-base font-semibold text-slate-800">{title}</p>
+          <p
+            className={cn(
+              "text-base font-semibold text-slate-800",
+              nepaliText && nepaliTextClass,
+            )}
+            {...(nepaliText ? { lang: "ne" } : {})}
+          >
+            {title}
+          </p>
           {subtitle ? (
-            <p className="text-sm text-slate-600">{subtitle}</p>
+            <p
+              className={cn("text-sm text-slate-600", nepaliText && nepaliTextClass)}
+              {...(nepaliText ? { lang: "ne" } : {})}
+            >
+              {subtitle}
+            </p>
           ) : null}
           {academicYearBs ? (
-            <p className="mt-1 text-xs text-slate-500">
-              Academic Year: {academicYearBs}
+            <p
+              className={cn("mt-1 text-xs text-slate-500", nepaliText && nepaliTextClass)}
+              {...(nepaliText ? { lang: "ne" } : {})}
+            >
+              {nepaliText ? nepaliStructuralLabels.academicYear : "Academic Year"}:{" "}
+              {academicYearBs}
             </p>
           ) : null}
         </div>

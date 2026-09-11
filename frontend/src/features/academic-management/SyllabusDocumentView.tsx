@@ -1,12 +1,14 @@
 import type { AcademicSyllabusRecord } from "@phit-erp/shared";
 import {
   formatChapterLabel,
+  formatHours,
   formatPartLabel,
   formatStoredSubUnitDisplayNo,
   formatUnitLabel,
   isNepaliSubject,
   nepaliStructuralLabels,
   nepaliTextClass,
+  toNepaliDigits,
 } from "lib/nepaliSubject";
 import { cn } from "lib/utils";
 
@@ -46,23 +48,35 @@ const renderSubUnits = (
               unitNo,
               nepali,
             )}{" "}
-            {sub.heading?.trim() || (nepali ? "— (शीर्षक छैन)" : "— (no heading)")}
+            {sub.heading?.trim() ||
+              (nepali ? nepaliStructuralLabels.noHeading : "— (no heading)")}
           </span>
           {sub.teachingHours ? (
-            <span className="text-slate-600"> · {sub.teachingHours}h</span>
+            <span className="text-slate-600">
+              {" "}
+              · {formatHours(sub.teachingHours, nepali)}
+            </span>
           ) : null}
           {sub.status === "COMPLETED" || sub.status === "SKIPPED" ? (
-            <span className="ml-1 text-xs text-slate-500">
+            <span className={cn("ml-1 text-xs text-slate-500", nepali && nepaliTextClass)}>
               {sub.attribution?.source === "ADMINISTRATION" ||
               sub.attribution?.countsTowardSalary === false
-                ? `(administration${
-                    sub.attribution?.deliveredByName
-                      ? `: ${sub.attribution.deliveredByName}`
-                      : ""
-                  } · not salary)`
+                ? nepali
+                  ? `(${nepaliStructuralLabels.administration}${
+                      sub.attribution?.deliveredByName
+                        ? `: ${sub.attribution.deliveredByName}`
+                        : ""
+                    } · ${nepaliStructuralLabels.notSalary})`
+                  : `(administration${
+                      sub.attribution?.deliveredByName
+                        ? `: ${sub.attribution.deliveredByName}`
+                        : ""
+                    } · not salary)`
                 : sub.attribution?.completedByTeacherName
                   ? `(${sub.attribution.completedByTeacherName})`
-                  : " (completed)"}
+                  : nepali
+                    ? ` (${nepaliStructuralLabels.completed})`
+                    : " (completed)"}
             </span>
           ) : null}
           {sub.description?.trim() ? (
@@ -97,8 +111,29 @@ export const SyllabusDocumentView = ({
   const chapters = plan.chapters ?? [];
   const isPrint = mode === "print";
 
+  /** Devanagari needs the language tag for correct shaping in print/PDF. */
+  const langProps = nepali ? ({ lang: "ne" } as const) : {};
+
+  const summaryLine =
+    plan.totalTheoryHours || plan.totalPracticalHours || plan.creditHours
+      ? nepali
+        ? [
+            `${nepaliStructuralLabels.theory} ${toNepaliDigits(plan.totalTheoryHours ?? 0)} ${nepaliStructuralLabels.hours}`,
+            `${nepaliStructuralLabels.practical} ${toNepaliDigits(plan.totalPracticalHours ?? 0)} ${nepaliStructuralLabels.hours}`,
+            `${nepaliStructuralLabels.credit} ${toNepaliDigits(plan.creditHours ?? 0)}`,
+          ].join(" · ")
+        : `Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
+      : null;
+
   return (
-    <div className={cn(isPrint ? "mb-6 break-inside-avoid" : "space-y-3", className)}>
+    <div
+      {...langProps}
+      className={cn(
+        isPrint ? "mb-6 break-inside-avoid" : "space-y-3",
+        nepali && nepaliTextClass,
+        className,
+      )}
+    >
       <div className={cn(isPrint ? "" : "space-y-1")}>
         <h3 className={cn("font-semibold text-slate-900", nepali && nepaliTextClass)}>
           {plan.subject?.name || "Subject"}
@@ -107,18 +142,22 @@ export const SyllabusDocumentView = ({
             : ""}
           {plan.academicYearBs ? ` · ${plan.academicYearBs}` : ""}
         </h3>
-        <p className="text-sm text-slate-600">
-          {plan.totalTheoryHours || plan.totalPracticalHours || plan.creditHours
-            ? `Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
-            : null}
+        <p className={cn("text-sm text-slate-600", nepali && nepaliTextClass)}>
+          {summaryLine}
           {plan.remarks?.trim() ? (
-            <span className="block mt-0.5">Remarks: {plan.remarks}</span>
+            <span className="block mt-0.5">
+              {nepali ? nepaliStructuralLabels.remarks : "Remarks"}: {plan.remarks}
+            </span>
           ) : null}
         </p>
       </div>
 
       {chapters.length === 0 ? (
-        <p className="text-sm text-slate-500">No chapters or units in this syllabus yet.</p>
+        <p className={cn("text-sm text-slate-500", nepali && nepaliTextClass)}>
+          {nepali
+            ? nepaliStructuralLabels.emptyHierarchy
+            : "No chapters or units in this syllabus yet."}
+        </p>
       ) : (
         chapters.map((chapter) => (
           <div
@@ -141,7 +180,9 @@ export const SyllabusDocumentView = ({
                     })}
             </p>
             {chapter.description?.trim() ? (
-              <p className="mt-0.5 text-xs text-slate-600">{chapter.description}</p>
+              <p className={cn("mt-0.5 text-xs text-slate-600", nepali && nepaliTextClass)}>
+                {chapter.description}
+              </p>
             ) : null}
             {(chapter.units ?? []).map((unit) => (
               <div key={unit._id} className={cn(isPrint ? "ml-3 mt-1" : "mt-2 ml-1")}>
@@ -153,21 +194,24 @@ export const SyllabusDocumentView = ({
                   {unit.teachingHours ? (
                     <span className="font-normal text-slate-500">
                       {" "}
-                      · {unit.teachingHours}h
+                      · {formatHours(unit.teachingHours, nepali)}
                     </span>
                   ) : null}
                   {unit.practicalRequired ? (
                     <span className="ml-1 text-xs font-normal text-amber-700">
-                      (Practical)
+                      ({nepali ? nepaliStructuralLabels.practical : "Practical"})
                     </span>
                   ) : null}
                 </p>
                 {unit.description?.trim() ? (
-                  <p className="ml-1 text-xs text-slate-600">{unit.description}</p>
+                  <p className={cn("ml-1 text-xs text-slate-600", nepali && nepaliTextClass)}>
+                    {unit.description}
+                  </p>
                 ) : null}
                 {unit.learningObjective?.trim() ? (
-                  <p className="ml-1 text-xs text-slate-600">
-                    Objective: {unit.learningObjective}
+                  <p className={cn("ml-1 text-xs text-slate-600", nepali && nepaliTextClass)}>
+                    {nepali ? nepaliStructuralLabels.objective : "Objective"}:{" "}
+                    {unit.learningObjective}
                   </p>
                 ) : null}
                 {renderSubUnits(unit.subUnits ?? [], unit.unitNo, nepali)}

@@ -43,7 +43,10 @@ import {
   formatPartLabel,
   formatStoredSubUnitDisplayNo,
   formatUnitLabel,
+  formatCount,
+  formatNepaliMonth,
   isNepaliSubject,
+  nepaliFormLabels,
   nepaliStructuralLabels,
   nepaliTextClass,
 } from "lib/nepaliSubject";
@@ -85,6 +88,7 @@ import {
   recordToForm,
   SUB_UNIT_STATUS_OPTIONS,
   subUnitStatusBadgeClass,
+  subUnitStatusLabel,
   type SyllabusFormState,
 } from "./syllabusFormUtils";
 
@@ -1056,6 +1060,22 @@ export const SyllabusPanel = ({
     keywordFilteredPlans,
   ]);
 
+  /**
+   * A print run is Nepali only when every syllabus in it is a Nepali subject —
+   * a mixed report keeps English chrome so other subjects stay readable.
+   */
+  const printNepali = useMemo(
+    () =>
+      printPlans.length > 0 &&
+      printPlans.every((plan) =>
+        isNepaliSubject({
+          name: plan.subject?.name,
+          code: plan.subjectCode || plan.subject?.code,
+        }),
+      ),
+    [printPlans],
+  );
+
   const printSingleSyllabus = async (plan: AcademicSyllabusRecord) => {
     setPrintingPlanId(plan._id);
     setPrintFocusId(plan._id);
@@ -1189,6 +1209,7 @@ export const SyllabusPanel = ({
             className="max-w-md"
             completedPercent={plan.completedPercent}
             remainingPercent={plan.remainingPercent}
+            nepaliText={planNepali}
           />
           <div className="flex flex-wrap items-center gap-2 no-print">
             <Button
@@ -1210,43 +1231,75 @@ export const SyllabusPanel = ({
               {globalExpand ? (
                 <>
                   <ChevronsDownUp className="mr-1 h-4 w-4" />
-                  Collapse tree
+                  <span className={cn(planNepali && nepaliTextClass)}>
+                    {planNepali ? "संरचना बन्द गर्नुहोस्" : "Collapse tree"}
+                  </span>
                 </>
               ) : (
                 <>
                   <ChevronsUpDown className="mr-1 h-4 w-4" />
-                  Expand tree
+                  <span className={cn(planNepali && nepaliTextClass)}>
+                    {planNepali ? "संरचना खोल्नुहोस्" : "Expand tree"}
+                  </span>
                 </>
               )}
             </Button>
           </div>
-          <div className="grid gap-2 sm:grid-cols-4 text-sm no-print">
+          <div
+            className={cn(
+              "grid gap-2 sm:grid-cols-4 text-sm no-print",
+              planNepali && nepaliTextClass,
+            )}
+          >
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-xs text-slate-500">Chapters</p>
-              <p className="font-semibold">{plan.totalChapters ?? chapters.length}</p>
+              <p className="text-xs text-slate-500">
+                {planNepali
+                  ? `${nepaliStructuralLabels.chapter}हरू`
+                  : "Chapters"}
+              </p>
+              <p className="font-semibold">
+                {formatCount(
+                  plan.totalChapters ?? chapters.length,
+                  planNepali,
+                )}
+              </p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-xs text-slate-500">Sub-units</p>
-              <p className="font-semibold">{totalSub}</p>
+              <p className="text-xs text-slate-500">
+                {planNepali ? nepaliStructuralLabels.subUnits : "Sub-units"}
+              </p>
+              <p className="font-semibold">
+                {formatCount(totalSub, planNepali)}
+              </p>
             </div>
             <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-              <p className="text-xs text-emerald-700">Completed</p>
-              <p className="font-semibold text-emerald-900">{completedSub}</p>
+              <p className="text-xs text-emerald-700">
+                {planNepali ? nepaliStructuralLabels.completed : "Completed"}
+              </p>
+              <p className="font-semibold text-emerald-900">
+                {formatCount(completedSub, planNepali)}
+              </p>
             </div>
             <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
-              <p className="text-xs text-amber-700">Hours covered</p>
+              <p className="text-xs text-amber-700">
+                {planNepali ? "समेटिएका घण्टा" : "Hours covered"}
+              </p>
               <p className="font-semibold text-amber-900">
-                {plan.teachingHoursCovered ?? 0}
+                {formatCount(plan.teachingHoursCovered ?? 0, planNepali)}
                 {plan.remainingTeachingHours != null
-                  ? ` / rem. ${plan.remainingTeachingHours}`
+                  ? planNepali
+                    ? ` / बाँकी ${formatCount(plan.remainingTeachingHours, true)}`
+                    : ` / rem. ${plan.remainingTeachingHours}`
                   : ""}
               </p>
             </div>
           </div>
 
           {chapters.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              No hierarchy yet. Edit to add chapters, units, and sub-units.
+            <p className={cn("text-sm text-slate-500", planNepali && nepaliTextClass)}>
+              {planNepali
+                ? "अहिलेसम्म संरचना छैन। अध्याय, एकाइ र उप–एकाइ थप्न सम्पादन गर्नुहोस्।"
+                : "No hierarchy yet. Edit to add chapters, units, and sub-units."}
             </p>
           ) : (
             <div className="space-y-3">
@@ -1289,18 +1342,28 @@ export const SyllabusPanel = ({
                                   nepali: planNepali,
                                 })}
                         </p>
-                        <p className="text-xs text-slate-500">
-                          {chapter.units.length}{" "}
+                        <p
+                          className={cn(
+                            "text-xs text-slate-500",
+                            planNepali && nepaliTextClass,
+                          )}
+                        >
+                          {formatCount(chapter.units.length, planNepali)}{" "}
                           {planNepali
                             ? nepaliStructuralLabels.unit
                             : "unit(s)"}{" "}
-                          · {chapter.totalSubUnits}{" "}
+                          · {formatCount(chapter.totalSubUnits, planNepali)}{" "}
                           {planNepali
                             ? nepaliStructuralLabels.subUnit
                             : "sub-unit(s)"}{" "}
-                          · {chapter.completedPercent}% complete
+                          ·{" "}
+                          {planNepali
+                            ? `${formatCount(chapter.completedPercent, true)}% ${nepaliStructuralLabels.completed}`
+                            : `${chapter.completedPercent}% complete`}
                           {chapter.tentativeCompletionMonth
-                            ? ` · Expected: ${chapter.tentativeCompletionMonth}`
+                            ? planNepali
+                              ? ` · अनुमानित: ${formatNepaliMonth(chapter.tentativeCompletionMonth, true)}`
+                              : ` · Expected: ${chapter.tentativeCompletionMonth}`
                             : ""}
                         </p>
                       </div>
@@ -1308,6 +1371,7 @@ export const SyllabusPanel = ({
                         <AcademicProgressBar
                           completedPercent={chapter.completedPercent}
                           remainingPercent={chapter.remainingPercent}
+                          nepaliText={planNepali}
                         />
                       </div>
                     </button>
@@ -1358,12 +1422,25 @@ export const SyllabusPanel = ({
                                       nepali: planNepali,
                                     })}
                                   </p>
-                                  <p className="text-xs text-slate-500">
-                                    {unit.totalSubUnits}{" "}
+                                  <p
+                                    className={cn(
+                                      "text-xs text-slate-500",
+                                      planNepali && nepaliTextClass,
+                                    )}
+                                  >
+                                    {formatCount(
+                                      unit.totalSubUnits,
+                                      planNepali,
+                                    )}{" "}
                                     {planNepali
                                       ? nepaliStructuralLabels.subUnit
                                       : "sub-unit(s)"}{" "}
-                                    · {unit.completedPercent}%
+                                    ·{" "}
+                                    {formatCount(
+                                      unit.completedPercent,
+                                      planNepali,
+                                    )}
+                                    %
                                   </p>
                                 </div>
                               </button>
@@ -1412,7 +1489,10 @@ export const SyllabusPanel = ({
                                         </p>
                                         {canUpdateProgress(plan) ? (
                                           <Select
-                                            className="h-8 w-[160px] shrink-0 text-xs no-print"
+                                            className={cn(
+                                              "h-8 w-[160px] shrink-0 text-xs no-print",
+                                              planNepali && nepaliTextClass,
+                                            )}
                                             value={sub.status}
                                             disabled={progressMutation.isPending}
                                             onChange={(e) => {
@@ -1426,15 +1506,23 @@ export const SyllabusPanel = ({
                                           >
                                             {SUB_UNIT_STATUS_OPTIONS.map((opt) => (
                                               <option key={opt.value} value={opt.value}>
-                                                {opt.label}
+                                                {planNepali
+                                                  ? opt.nepaliLabel
+                                                  : opt.label}
                                               </option>
                                             ))}
                                           </Select>
                                         ) : (
                                           <Badge
-                                            className={subUnitStatusBadgeClass(sub.status)}
+                                            className={cn(
+                                              subUnitStatusBadgeClass(sub.status),
+                                              planNepali && nepaliTextClass,
+                                            )}
                                           >
-                                            {sub.status.replace(/_/g, " ")}
+                                            {subUnitStatusLabel(
+                                              sub.status,
+                                              planNepali,
+                                            )}
                                           </Badge>
                                         )}
                                       </div>
@@ -1683,8 +1771,13 @@ export const SyllabusPanel = ({
                   </Select>
                 </FormField>
               ) : null}
-              <FormField label="Subject">
+              <FormField
+                label={
+                  formNepaliText ? nepaliFormLabels.subject : "Subject"
+                }
+              >
                 <Select
+                  className={cn(formNepaliText && nepaliTextClass)}
                   value={subjectSelectValue}
                   onChange={(event) => {
                     const subjectId = event.target.value;
@@ -1705,12 +1798,20 @@ export const SyllabusPanel = ({
                 >
                   <option value="">
                     {yearOptions.length > 0 && !form.yearId
-                      ? "Select year first"
+                      ? formNepaliText
+                        ? nepaliFormLabels.selectYearFirst
+                        : "Select year first"
                       : classes.length > 0 && !form.classId
-                        ? "Select class first"
+                        ? formNepaliText
+                          ? nepaliFormLabels.selectClassFirst
+                          : "Select class first"
                         : subjectOptions.length === 0
-                          ? "No subjects for this year"
-                          : "Select subject"}
+                          ? formNepaliText
+                            ? nepaliFormLabels.noSubjects
+                            : "No subjects for this year"
+                          : formNepaliText
+                            ? nepaliFormLabels.selectSubject
+                            : "Select subject"}
                   </option>
                   {subjectOptions.map((subject) => (
                     <option key={subject._id} value={subject._id}>
@@ -1720,7 +1821,13 @@ export const SyllabusPanel = ({
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Academic Year (BS)">
+              <FormField
+                label={
+                  formNepaliText
+                    ? nepaliFormLabels.academicYearBs
+                    : "Academic Year (BS)"
+                }
+              >
                 <Input
                   value={form.academicYearBs}
                   onChange={(event) =>
@@ -1733,8 +1840,15 @@ export const SyllabusPanel = ({
                   placeholder="e.g. 2082/083"
                 />
               </FormField>
-              <FormField label="Faculty / Program">
+              <FormField
+                label={
+                  formNepaliText
+                    ? nepaliFormLabels.facultyProgram
+                    : "Faculty / Program"
+                }
+              >
                 <Input
+                  nepali={formNepaliText}
                   value={form.faculty ?? ""}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -1745,8 +1859,15 @@ export const SyllabusPanel = ({
                   placeholder="e.g. Health Assistant / Nursing"
                 />
               </FormField>
-              <FormField label="Semester (optional)">
+              <FormField
+                label={
+                  formNepaliText
+                    ? nepaliFormLabels.semester
+                    : "Semester (optional)"
+                }
+              >
                 <Input
+                  nepali={formNepaliText}
                   value={form.semesterBs ?? ""}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -1757,7 +1878,11 @@ export const SyllabusPanel = ({
                   placeholder="e.g. 1st / Odd"
                 />
               </FormField>
-              <FormField label="Subject Code">
+              <FormField
+                label={
+                  formNepaliText ? nepaliFormLabels.subjectCode : "Subject Code"
+                }
+              >
                 <Input
                   value={form.subjectCode ?? ""}
                   onChange={(event) =>
@@ -1766,7 +1891,11 @@ export const SyllabusPanel = ({
                       subjectCode: event.target.value,
                     }))
                   }
-                  placeholder="Auto from subject if empty"
+                  placeholder={
+                    formNepaliText
+                      ? nepaliFormLabels.subjectCodeHint
+                      : "Auto from subject if empty"
+                  }
                 />
               </FormField>
               <FormField
@@ -2015,10 +2144,15 @@ export const SyllabusPanel = ({
       <div id="syllabus-print-area" className="hidden print:block">
         <AcademicPrintHeader
           institutionName={institutionName}
+          nepaliText={printNepali}
           title={
             printPlans.length === 1
-              ? "Syllabus"
-              : "Syllabus Report"
+              ? printNepali
+                ? nepaliStructuralLabels.syllabus
+                : "Syllabus"
+              : printNepali
+                ? nepaliStructuralLabels.syllabusReport
+                : "Syllabus Report"
           }
           subtitle={
             printPlans.length === 1

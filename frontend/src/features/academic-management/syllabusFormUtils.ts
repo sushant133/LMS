@@ -795,13 +795,29 @@ export const moveItem = <T,>(list: T[], from: number, to: number): T[] => {
 export const SUB_UNIT_STATUS_OPTIONS: Array<{
   value: SyllabusSubUnitStatus;
   label: string;
+  /** Display only — the stored value stays the English enum. */
+  nepaliLabel: string;
 }> = [
-  { value: "NOT_STARTED", label: "Not Started" },
-  { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "COMPLETED", label: "Completed" },
-  { value: "SKIPPED", label: "Skipped" },
-  { value: "REVISION_REQUIRED", label: "Revision Required" },
+  { value: "NOT_STARTED", label: "Not Started", nepaliLabel: "सुरु भएको छैन" },
+  { value: "IN_PROGRESS", label: "In Progress", nepaliLabel: "चालु" },
+  { value: "COMPLETED", label: "Completed", nepaliLabel: "सम्पन्न" },
+  { value: "SKIPPED", label: "Skipped", nepaliLabel: "छाडिएको" },
+  {
+    value: "REVISION_REQUIRED",
+    label: "Revision Required",
+    nepaliLabel: "पुनरावलोकन आवश्यक",
+  },
 ];
+
+/** Status label for a syllabus sub-unit, Devanagari for Nepali subjects. */
+export const subUnitStatusLabel = (
+  status: string,
+  nepali = false,
+): string => {
+  const option = SUB_UNIT_STATUS_OPTIONS.find((o) => o.value === status);
+  if (!option) return status.replace(/_/g, " ");
+  return nepali ? option.nepaliLabel : option.label;
+};
 
 export const subUnitStatusBadgeClass = (status: string): string => {
   switch (status) {

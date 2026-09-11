@@ -16,9 +16,13 @@ import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { FormField } from "components/shared/FormField";
 import {
+  formatCount,
+  formatLabelledCount,
+  formatNepaliMonth,
   formatSubUnitDisplayNo,
   formatSubUnitSiblingPreview,
   formatUnitLabel,
+  nepaliActionLabels,
   nepaliStructuralLabels,
   nepaliTextClass,
 } from "lib/nepaliSubject";
@@ -117,7 +121,9 @@ const SubUnitNodeEditor = ({
             "shrink-0 rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-800",
             nepaliText ? nepaliTextClass : "font-mono",
           )}
-          title={`Auto number: ${displayNo}`}
+          title={`${
+            nepaliText ? nepaliActionLabels.autoNumber : "Auto number"
+          }: ${displayNo}`}
         >
           {displayNo}
         </span>
@@ -132,7 +138,9 @@ const SubUnitNodeEditor = ({
               ? `${displayNo} शीर्षक (युनिकोड नेपालीमा लेख्नुहोस् वा पेस्ट गर्नुहोस्)`
               : `Heading for ${displayNo}`
           }
-          aria-label={`Heading ${displayNo}`}
+          aria-label={`${
+            nepaliText ? nepaliStructuralLabels.heading : "Heading"
+          } ${displayNo}`}
         />
         {!readOnly ? (
           <div className="flex flex-wrap items-center gap-1">
@@ -141,7 +149,11 @@ const SubUnitNodeEditor = ({
               size="sm"
               variant="outline"
               className="h-8 shrink-0 border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
-              title={`Add same level after this → ${nextSiblingPreview}`}
+              title={
+                nepaliText
+                  ? `यसपछि उही तहमा थप्नुहोस् → ${nextSiblingPreview}`
+                  : `Add same level after this → ${nextSiblingPreview}`
+              }
               onClick={() => {
                 onUpdateTree((subs) =>
                   addSiblingAfterPath(subs, path, emptySubUnit()),
@@ -149,14 +161,21 @@ const SubUnitNodeEditor = ({
               }}
             >
               <Plus className="mr-1 h-3.5 w-3.5" />
-              Same ({nextSiblingPreview})
+              <span className={cn(nepaliText && nepaliTextClass)}>
+                {nepaliText ? nepaliActionLabels.sameLevel : "Same"} (
+                {nextSiblingPreview})
+              </span>
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
               className="h-8 shrink-0 border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100"
-              title={`Add nested child under this → ${firstChildPreview}`}
+              title={
+                nepaliText
+                  ? `यस अन्तर्गत भित्री तह थप्नुहोस् → ${firstChildPreview}`
+                  : `Add nested child under this → ${firstChildPreview}`
+              }
               onClick={() => {
                 onUpdateTree((subs) =>
                   addChildAtPath(subs, path, emptySubUnit()),
@@ -164,14 +183,21 @@ const SubUnitNodeEditor = ({
               }}
             >
               <Plus className="mr-1 h-3.5 w-3.5" />
-              Nest ({firstChildPreview})
+              <span className={cn(nepaliText && nepaliTextClass)}>
+                {nepaliText ? nepaliActionLabels.nest : "Nest"} (
+                {firstChildPreview})
+              </span>
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
               className="h-8 shrink-0 text-rose-600 border-rose-200"
-              title="Remove this sub-unit (optional — can leave unit with none)"
+              title={
+                nepaliText
+                  ? nepaliActionLabels.removeSubUnit
+                  : "Remove this sub-unit (optional — can leave unit with none)"
+              }
               onClick={() =>
                 onUpdateTree((subs) => removeSubAtPath(subs, path))
               }
@@ -184,7 +210,11 @@ const SubUnitNodeEditor = ({
               variant="ghost"
               className="h-8 px-2"
               disabled={index === 0}
-              title="Move up (renumbers automatically)"
+              title={
+                nepaliText
+                  ? nepaliActionLabels.moveUp
+                  : "Move up (renumbers automatically)"
+              }
               onClick={() =>
                 onUpdateTree((subs) => moveSubAtPath(subs, path, -1))
               }
@@ -197,7 +227,11 @@ const SubUnitNodeEditor = ({
               variant="ghost"
               className="h-8 px-2"
               disabled={index >= siblingCount - 1}
-              title="Move down (renumbers automatically)"
+              title={
+                nepaliText
+                  ? nepaliActionLabels.moveDown
+                  : "Move down (renumbers automatically)"
+              }
               onClick={() =>
                 onUpdateTree((subs) => moveSubAtPath(subs, path, 1))
               }
@@ -225,7 +259,10 @@ const SubUnitNodeEditor = ({
         {!readOnly ? (
           <button
             type="button"
-            className="ml-1 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50"
+            className={cn(
+              "ml-1 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50",
+              nepaliText && nepaliTextClass,
+            )}
             onClick={() => {
               onUpdateTree((subs) =>
                 addChildAtPath(subs, path, emptySubUnit()),
@@ -233,9 +270,15 @@ const SubUnitNodeEditor = ({
             }}
           >
             <Plus className="h-3.5 w-3.5" />
-            Add under {displayNo} → {firstChildPreview}
+            {nepaliText
+              ? `${displayNo} ${nepaliActionLabels.addUnder} → ${firstChildPreview}`
+              : `Add under ${displayNo} → ${firstChildPreview}`}
             {children.length > 0
-              ? ` / ${displayNo}.${children.length + 1}`
+              ? ` / ${formatSubUnitDisplayNo(
+                  unitNo,
+                  [...path, children.length],
+                  nepaliText,
+                )}`
               : ""}
           </button>
         ) : null}
@@ -399,12 +442,16 @@ export const SyllabusHierarchyEditor = ({
             {allExpanded ? (
               <>
                 <ChevronsDownUp className="mr-1.5 h-4 w-4" />
-                Collapse All
+                <span className={cn(nepaliText && nepaliTextClass)}>
+                  {nepaliText ? nepaliActionLabels.collapseAll : "Collapse All"}
+                </span>
               </>
             ) : (
               <>
                 <ChevronsUpDown className="mr-1.5 h-4 w-4" />
-                Expand All
+                <span className={cn(nepaliText && nepaliTextClass)}>
+                  {nepaliText ? nepaliActionLabels.expandAll : "Expand All"}
+                </span>
               </>
             )}
           </Button>
@@ -513,8 +560,12 @@ export const SyllabusHierarchyEditor = ({
               <button
                 type="button"
                 className="cursor-grab text-slate-400 hover:text-slate-600"
-                title="Drag to reorder section"
-                aria-label="Drag section"
+                title={
+                  nepaliText
+                    ? "क्रम मिलाउन तान्नुहोस्"
+                    : "Drag to reorder section"
+                }
+                aria-label={nepaliText ? "खण्ड तान्नुहोस्" : "Drag section"}
               >
                 <GripVertical className="h-4 w-4" />
               </button>
@@ -562,12 +613,15 @@ export const SyllabusHierarchyEditor = ({
                         ? "भाग समूह"
                         : "Part grouping"}
                   {" · "}
-                  {units.length}{" "}
+                  {formatCount(units.length, nepaliText)}{" "}
                   {nepaliText
                     ? nepaliStructuralLabels.unit
                     : `unit${units.length === 1 ? "" : "s"}`}{" "}
                   ·{" "}
-                  {units.reduce((n, u) => n + countSubUnits(u.subUnits), 0)}{" "}
+                  {formatCount(
+                    units.reduce((n, u) => n + countSubUnits(u.subUnits), 0),
+                    nepaliText,
+                  )}{" "}
                   {nepaliText
                     ? nepaliStructuralLabels.subUnit
                     : "sub-unit(s)"}
@@ -597,13 +651,21 @@ export const SyllabusHierarchyEditor = ({
                   type="button"
                   size="sm"
                   variant="outline"
-                  title="Duplicate chapter"
+                  title={
+                    nepaliText
+                      ? nepaliActionLabels.duplicateChapter
+                      : "Duplicate chapter"
+                  }
                   onClick={() => {
                     const clone: ChapterDraft = {
                       ...structuredClone(chapter),
                       clientKey: emptyChapter().clientKey,
                       title: chapter.title
-                        ? `${chapter.title} (copy)`
+                        ? `${chapter.title} ${
+                            nepaliText
+                              ? nepaliActionLabels.copySuffix
+                              : "(copy)"
+                          }`
                         : "",
                       units: chapter.units.map((u) => ({
                         ...structuredClone(u),
@@ -644,7 +706,13 @@ export const SyllabusHierarchyEditor = ({
             {chOpen ? (
               <div className="space-y-4 p-4">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label="Section type (optional — Chapter or Part, not both)">
+                  <FormField
+                    label={
+                      nepaliText
+                        ? `${nepaliStructuralLabels.sectionType} (${nepaliStructuralLabels.sectionTypeHint})`
+                        : "Section type (optional — Chapter or Part, not both)"
+                    }
+                  >
                     <Select
                       value={kind}
                       onChange={(e) => {
@@ -699,15 +767,27 @@ export const SyllabusHierarchyEditor = ({
                     </FormField>
                   ) : (
                     <div className="flex items-end">
-                      <p className="pb-2 text-xs text-slate-500">
-                        No Chapter or Part selected. Add units directly under
-                        this section.
+                      <p
+                        className={cn(
+                          "pb-2 text-xs text-slate-500",
+                          nepaliText && nepaliTextClass,
+                        )}
+                      >
+                        {nepaliText
+                          ? nepaliStructuralLabels.noSectionSelected
+                          : "No Chapter or Part selected. Add units directly under this section."}
                       </p>
                     </div>
                   )}
                   {kind !== "NONE" ? (
                     <>
-                      <FormField label="Estimated hours">
+                      <FormField
+                        label={
+                          nepaliText
+                            ? nepaliStructuralLabels.estimatedHours
+                            : "Estimated hours"
+                        }
+                      >
                         <NumberInput
                           min={0}
                           value={
@@ -726,7 +806,13 @@ export const SyllabusHierarchyEditor = ({
                           }
                         />
                       </FormField>
-                      <FormField label="Weightage %">
+                      <FormField
+                        label={
+                          nepaliText
+                            ? nepaliStructuralLabels.weightagePercent
+                            : "Weightage %"
+                        }
+                      >
                         <NumberInput
                           min={0}
                           max={100}
@@ -746,8 +832,15 @@ export const SyllabusHierarchyEditor = ({
                           }
                         />
                       </FormField>
-                      <FormField label="Expected completion month">
+                      <FormField
+                        label={
+                          nepaliText
+                            ? nepaliStructuralLabels.expectedCompletionMonth
+                            : "Expected completion month"
+                        }
+                      >
                         <Select
+                          className={cn(nepaliText && nepaliTextClass)}
                           value={chapter.tentativeCompletionMonth || ""}
                           onChange={(e) =>
                             updateChapter(cIndex, {
@@ -755,10 +848,15 @@ export const SyllabusHierarchyEditor = ({
                             })
                           }
                         >
-                          <option value="">Optional</option>
+                          <option value="">
+                            {nepaliText
+                              ? nepaliStructuralLabels.optional
+                              : "Optional"}
+                          </option>
+                          {/* value stays romanised — only the label is Devanagari */}
                           {NEPALI_MONTHS.map((m) => (
                             <option key={m} value={m}>
-                              {m}
+                              {formatNepaliMonth(m, nepaliText)}
                             </option>
                           ))}
                         </Select>
@@ -766,9 +864,15 @@ export const SyllabusHierarchyEditor = ({
                       <div className="md:col-span-2">
                         <FormField
                           label={
-                            kind === "CHAPTER"
-                              ? "Chapter description (optional)"
-                              : "Part description (optional)"
+                            nepaliText
+                              ? `${
+                                  kind === "CHAPTER"
+                                    ? nepaliStructuralLabels.chapter
+                                    : nepaliStructuralLabels.part
+                                } ${nepaliStructuralLabels.description} (${nepaliStructuralLabels.optional})`
+                              : kind === "CHAPTER"
+                                ? "Chapter description (optional)"
+                                : "Part description (optional)"
                           }
                         >
                           <Textarea
@@ -853,7 +957,11 @@ export const SyllabusHierarchyEditor = ({
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            title="Optional — not required to save the syllabus"
+                            title={
+                              nepaliText
+                                ? "वैकल्पिक — पाठ्यक्रम सेभ गर्न अनिवार्य होइन"
+                                : "Optional — not required to save the syllabus"
+                            }
                             onClick={() => {
                               updateUnit(cIndex, uIndex, {
                                 subUnits: [
@@ -876,7 +984,11 @@ export const SyllabusHierarchyEditor = ({
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            title="Duplicate unit"
+                            title={
+                              nepaliText
+                                ? `${nepaliStructuralLabels.unit} ${nepaliActionLabels.duplicate}`
+                                : "Duplicate unit"
+                            }
                             onClick={() => {
                               const rekey = (
                                 node: SubUnitDraft,
@@ -888,7 +1000,11 @@ export const SyllabusHierarchyEditor = ({
                               const clone: UnitDraft = {
                                 ...structuredClone(unit),
                                 clientKey: emptyUnit().clientKey,
-                                title: `${unit.title || (nepaliText ? nepaliStructuralLabels.unit : "Unit")} (copy)`,
+                                title: `${unit.title || (nepaliText ? nepaliStructuralLabels.unit : "Unit")} ${
+                                  nepaliText
+                                    ? nepaliActionLabels.copySuffix
+                                    : "(copy)"
+                                }`,
                                 subUnits: subUnits.map(rekey),
                               };
                               const next = [...units];
@@ -933,7 +1049,11 @@ export const SyllabusHierarchyEditor = ({
                                 units: moveItem(units, uIndex, uIndex - 1),
                               })
                             }
-                            title="Move up"
+                            title={
+                              nepaliText
+                                ? nepaliActionLabels.moveUp
+                                : "Move up"
+                            }
                           >
                             ↑
                           </Button>
@@ -948,7 +1068,11 @@ export const SyllabusHierarchyEditor = ({
                                 units: moveItem(units, uIndex, uIndex + 1),
                               })
                             }
-                            title="Move down"
+                            title={
+                              nepaliText
+                                ? nepaliActionLabels.moveDown
+                                : "Move down"
+                            }
                           >
                             ↓
                           </Button>
@@ -1133,9 +1257,19 @@ export const SyllabusHierarchyEditor = ({
                                     </p>
                                   ) : null}
                                 </div>
-                                <span className="text-xs text-slate-500">
-                                  {countSubUnits(subUnits)} heading
-                                  {countSubUnits(subUnits) === 1 ? "" : "s"}
+                                <span
+                                  className={cn(
+                                    "text-xs text-slate-500",
+                                    nepaliText && nepaliTextClass,
+                                  )}
+                                >
+                                  {formatLabelledCount(
+                                    countSubUnits(subUnits),
+                                    "heading",
+                                    "headings",
+                                    nepaliText,
+                                    nepaliStructuralLabels.heading,
+                                  )}
                                 </span>
                               </div>
                               {subUnits.map((sub, sIndex) => (
@@ -1163,9 +1297,16 @@ export const SyllabusHierarchyEditor = ({
                                 }
                               >
                                 <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                Add sub unit{" "}
-                                {unit.unitNo || uIndex + 1}.
-                                {subUnits.length + 1}
+                                <span className={cn(nepaliText && nepaliTextClass)}>
+                                  {nepaliText
+                                    ? nepaliActionLabels.addSubUnit
+                                    : "Add sub unit"}{" "}
+                                  {formatSubUnitDisplayNo(
+                                    unit.unitNo || uIndex + 1,
+                                    [subUnits.length],
+                                    nepaliText,
+                                  )}
+                                </span>
                               </Button>
                             </div>
                           </div>
