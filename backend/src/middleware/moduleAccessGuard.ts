@@ -12,18 +12,20 @@ import {
   EDIT_DELETE_ADMIN_ONLY_MESSAGE,
   hasModuleAction,
   inferActionFromApiPath,
+  isGrantedAdminEditModule,
   isInstitutionAdmin,
   isSystemAdministrator,
   MODULE_ACCESS_DENIED_MESSAGE,
   MODULE_ACCESS_DISABLED_MESSAGE,
   normalizeModuleAccessMode,
   normalizeUserRole,
+  type ErpModuleKey,
   type ModuleAccessMode
 } from "@phit-erp/shared";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { isAssignedFieldCoordinator } from "../utils/fieldDutyService.js";
-import { wantsAdminWorkspaceScope } from "../utils/workspaceScope.js";
+import { actorCanAdministerModule, wantsAdminWorkspaceScope } from "../utils/workspaceScope.js";
 import {
   getUserModuleAccessMap,
   getUserModuleActionsMap,
@@ -72,6 +74,31 @@ const isRecordApprovalRequest = (method: string, path: string): boolean => {
   );
 };
 
+/**
+ * Unlock / lock only reopens a record for editing — it is not an approval.
+ * Kept inside `isRecordApprovalRequest` so untouched modules behave as before,
+ * and carved back out for granted module administrators below.
+ */
+const isRecordReopenRequest = (method: string, path: string): boolean => {
+  if (READ_METHODS.has(method.toUpperCase())) return false;
+  const p = (path.split("?")[0] ?? path).toLowerCase();
+  return /\/(?:unlock|lock)(?:\/|$)/.test(p);
+};
+
+/**
+ * True when this actor runs the department the request belongs to and that
+ * department allows granted administrators to edit / delete / unlock.
+ * Principal / Vice Principal / Coordinator qualify through their extra
+ * Administration grants; a plain teacher never does.
+ */
+const actorMayEditGrantedModuleRecords = async (
+  req: Request,
+  moduleKey: string | null
+): Promise<boolean> => {
+  if (!isGrantedAdminEditModule(moduleKey)) return false;
+  return actorCanAdministerModule(req, moduleKey as ErpModuleKey);
+};
+
 const actorCanApproveRecords = (role: string, secondary: readonly string[]): boolean =>
   [role, ...secondary].some((entry) => canApproveRecords(entry));
 
@@ -85,20 +112,32 @@ const denyGrantedApproval = async (
   if (canApproveRecords(role)) return null;
   const extra = secondary ?? (await getUserSecondaryRoles(req.user!.userId));
   if (actorCanApproveRecords(role, extra)) return null;
+  // Reopening a locked record is department upkeep, not approval.
+  if (
+    isRecordReopenRequest(req.method, path) &&
+    (await actorMayEditGrantedModuleRecords(req, resolveModuleForRequest(req)))
+  ) {
+    return null;
+  }
   return new ApiError(403, APPROVE_ADMIN_ONLY_MESSAGE);
 };
 
-/** Granted VP / Principal / staff may create and operate, not edit or delete. */
-const shouldBlockGrantedEditDelete = (
+/**
+ * Granted VP / Principal / staff may create and operate, not edit or delete —
+ * except in departments listed in GRANTED_ADMIN_RECORD_EDIT_MODULE_KEYS, where
+ * the granted administrator owns the records outright.
+ */
+const shouldBlockGrantedEditDelete = async (
   req: Request,
   role: string,
   isTeacherRole: boolean,
   moduleKey: string | null
-): boolean => {
+): Promise<boolean> => {
   if (!RECORD_EDIT_DELETE_METHODS.has(req.method)) return false;
   if (canEditOrDeleteRecords(role)) return false;
   if (isOperationalStatusPath(req.originalUrl || req.path || "")) return false;
   if (operationalDepartmentEditRole(role, moduleKey)) return false;
+  if (await actorMayEditGrantedModuleRecords(req, moduleKey)) return false;
   if (
     isTeacherRole &&
     !wantsAdminWorkspaceScope(req) &&
@@ -185,7 +224,7 @@ export const enforceModuleAccess = async (
           const moduleKey = resolveModuleForRequest(req);
           const approvalDenied = await denyGrantedApproval(req, role, originalPath);
           if (approvalDenied) return next(approvalDenied);
-          if (shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
+          if (await shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
             return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
           }
           return next();
@@ -256,7 +295,7 @@ export const enforceModuleAccess = async (
         }
       }
       if (
-        shouldBlockGrantedEditDelete(
+        await shouldBlockGrantedEditDelete(
           req,
           role,
           req.user.role === "TEACHER",
@@ -320,7 +359,7 @@ export const enforceModuleAccess = async (
         }
       }
       if (
-        shouldBlockGrantedEditDelete(
+        await shouldBlockGrantedEditDelete(
           req,
           req.user.role,
           isTeacherRole,
@@ -364,7 +403,7 @@ export const enforceModuleAccess = async (
             return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
           }
         }
-        if (shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
+        if (await shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
           return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
         }
         const approvalDenied = await denyGrantedApproval(req, role, originalPath);
@@ -373,7 +412,7 @@ export const enforceModuleAccess = async (
       }
       const isCoord = await isAssignedFieldCoordinator(req);
       if (isCoord) {
-        if (shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
+        if (await shouldBlockGrantedEditDelete(req, role, role === "TEACHER", "field-duty")) {
           return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
         }
         const approvalDenied = await denyGrantedApproval(req, role, originalPath);
@@ -530,7 +569,7 @@ export const enforceModuleAccess = async (
         secondaryRoles
       );
       if (approvalDenied) return next(approvalDenied);
-      if (shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
+      if (await shouldBlockGrantedEditDelete(req, role, true, moduleKey)) {
         return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
       }
       return next();
@@ -561,7 +600,7 @@ export const enforceModuleAccess = async (
       }
     }
 
-    if (shouldBlockGrantedEditDelete(req, role, isTeacherRole, moduleKey)) {
+    if (await shouldBlockGrantedEditDelete(req, role, isTeacherRole, moduleKey)) {
       return next(new ApiError(403, EDIT_DELETE_ADMIN_ONLY_MESSAGE));
     }
 

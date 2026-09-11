@@ -680,6 +680,24 @@ export const hasExtraAdminModuleGrants = (
 };
 
 /**
+ * Departments where a *granted module administrator* — Principal / Vice
+ * Principal / Coordinator with the department turned on, or dedicated
+ * department staff — may edit, delete and unlock records, not only the
+ * institution Administrator.
+ *
+ * Approve / reject / publish stays Administrator-only in every module
+ * (see `canApproveRecords`). Unlock only reopens a record for editing, so it
+ * belongs to whoever runs the department day to day.
+ */
+export const GRANTED_ADMIN_RECORD_EDIT_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "academic-management"
+];
+
+export const isGrantedAdminEditModule = (moduleKey?: string | null): boolean =>
+  !!moduleKey &&
+  (GRANTED_ADMIN_RECORD_EDIT_MODULE_KEYS as readonly string[]).includes(moduleKey);
+
+/**
  * Keep teaching tools available when a custom module-access map was saved.
  * Does not downgrade READ_ONLY / WRITE; only elevates missing/NONE baseline keys.
  */

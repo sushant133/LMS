@@ -35,6 +35,7 @@ import { useAuth } from "features/auth/AuthProvider";
 import {
   APPROVE_ADMIN_ONLY_MESSAGE,
   useCanApproveRecords,
+  useCanEditOrDeleteModuleRecords,
 } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import {
@@ -128,6 +129,14 @@ export const SyllabusPanel = ({
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
   const canPerformApprove = useCanApproveRecords();
+  /**
+   * Granted Academic Management administrators (Vice Principal / Principal /
+   * Coordinator) own syllabus records: they may edit, delete and unlock.
+   * Approving still belongs to the institution Administrator.
+   */
+  const canAdministerSyllabi = useCanEditOrDeleteModuleRecords(
+    "academic-management",
+  );
   const isTeacher =
     !isAdmin &&
     (user?.role === "TEACHER" ||
@@ -135,8 +144,9 @@ export const SyllabusPanel = ({
   /** Teachers only view syllabi; admins create/edit structure. */
   const canManageStructure = writeAccess && isAdmin;
   const canMutate = writeAccess && !isTeacher;
-  const canEditDelete =
-    canMutate && (canManageInstitution(user?.role ?? "") || !isAdminView);
+  const canEditDelete = canMutate && (canAdministerSyllabi || !isAdminView);
+  /** Unlock reopens a locked syllabus for editing — not an approval action. */
+  const canPerformUnlock = canPerformApprove || canAdministerSyllabi;
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
@@ -1454,9 +1464,9 @@ export const SyllabusPanel = ({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!canPerformApprove || unlockMutation.isPending}
+                  disabled={!canPerformUnlock || unlockMutation.isPending}
                   title={
-                    canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                    canPerformUnlock ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
                   }
                   onClick={() => {
                     unlockMutation.mutate(plan._id, {
@@ -1517,9 +1527,9 @@ export const SyllabusPanel = ({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!canPerformApprove || unlockMutation.isPending}
+                  disabled={!canPerformUnlock || unlockMutation.isPending}
                   title={
-                    canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                    canPerformUnlock ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
                   }
                   onClick={() => unlockMutation.mutate(plan._id)}
                 >

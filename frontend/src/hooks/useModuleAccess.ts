@@ -6,6 +6,7 @@ import {
   canApproveRecords,
   canEditOrDeleteRecords,
   hasModuleAction,
+  isGrantedAdminEditModule,
   isInstitutionAdmin,
   isPortalRole,
   isSystemAdministrator,
@@ -187,6 +188,22 @@ export const useIsGrantedAdmin = (moduleKey: ErpModuleKey): boolean => {
 export const useCanEditOrDeleteRecords = (): boolean => {
   const { user } = useAuth();
   return canEditOrDeleteRecords(user?.role ?? "");
+};
+
+/**
+ * Edit / Delete / Unlock within one department. Administrator and System
+ * Administrator always; plus the granted administrator of a department listed
+ * in GRANTED_ADMIN_RECORD_EDIT_MODULE_KEYS (Vice Principal / Principal /
+ * Coordinator running Academic Management, or its department staff).
+ * Approving still needs `useCanApproveRecords`.
+ */
+export const useCanEditOrDeleteModuleRecords = (
+  moduleKey: ErpModuleKey,
+): boolean => {
+  const { user } = useAuth();
+  const isGrantedAdmin = useIsGrantedAdmin(moduleKey);
+  if (canEditOrDeleteRecords(user?.role ?? "")) return true;
+  return isGrantedAdminEditModule(moduleKey) && isGrantedAdmin;
 };
 
 /**
