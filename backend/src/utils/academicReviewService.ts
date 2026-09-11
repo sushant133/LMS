@@ -18,7 +18,6 @@ import {
   actorIsAcademicAdmin,
   actorIsInstitutionApprover,
   buildAcademicFilter,
-  getNepaliMonthNameFromBsDate,
   notifyAdminsOfPendingAcademic,
   notifyTeacherOfAcademicDecision,
   recordApproval,

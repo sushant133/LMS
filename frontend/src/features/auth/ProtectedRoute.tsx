@@ -70,6 +70,7 @@ export const ProtectedRoute = ({
       pathname: location.pathname,
       moduleAccess: (user.moduleAccess ?? {}) as ModuleAccessMap,
       moduleAccessConfigured: Boolean(user.moduleAccessConfigured),
+      designation: user.designation,
     })
   ) {
     const fallback = getRoleRedirectPath(user.role);

@@ -1,4 +1,7 @@
-import { hasInstitutionAccess } from "@phit-erp/shared";
+import {
+  canUseAcademicManagementAdminHub,
+  hasInstitutionAccess,
+} from "@phit-erp/shared";
 import { Navigate, useLocation } from "react-router-dom";
 import { AcademicManagementHub } from "features/academic-management/AcademicManagementHub";
 import { useAuth } from "features/auth/AuthProvider";
@@ -14,7 +17,13 @@ export const AcademicManagementPage = () => {
   const mayUseAdminHub =
     hasInstitutionAccess(user?.role ?? "") ||
     isDualRoleTeacher(user) ||
-    (!userIsTeacher(user) && staffGranted);
+    staffGranted ||
+    canUseAcademicManagementAdminHub({
+      role: user?.role ?? "",
+      secondaryRoles: user?.secondaryRoles,
+      designation: user?.designation,
+      moduleAccess: user?.moduleAccess,
+    });
 
   if (isAdminHub && userIsTeacher(user) && !mayUseAdminHub) {
     return <Navigate to="/academic-management" replace />;

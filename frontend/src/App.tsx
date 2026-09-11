@@ -517,7 +517,7 @@ export default function App() {
               <Route path="/timetable-view" element={<TimetablePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF", "PRINCIPAL"]} />}>
               <Route path="/academic-management" element={<LazyRoute><AcademicManagementPage /></LazyRoute>} />
               <Route path="/academic-management-view" element={<LazyRoute><AcademicManagementPage /></LazyRoute>} />
             </Route>

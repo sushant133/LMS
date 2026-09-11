@@ -11,6 +11,7 @@ import {
   canAccessModule,
   canAccessStaffDirectory,
   canManageInstitution,
+  canUseAcademicManagementAdminHub,
   hasInstitutionAccess,
   isAcademicStructurePath,
   isAttendanceAdminHubPath,
@@ -741,7 +742,13 @@ export const AppLayout = () => {
         dualRole ||
         isAdmin ||
         institutionAccess ||
-        staffGrant("academic-management")
+        staffGrant("academic-management") ||
+        canUseAcademicManagementAdminHub({
+          role: user?.role ?? "",
+          secondaryRoles: user?.secondaryRoles,
+          designation: user?.designation,
+          moduleAccess: moduleAccessMap,
+        })
       );
     }
     if (path === "/timetable-view" || path.startsWith("/timetable-view/")) {

@@ -45,7 +45,6 @@ import { AcademicReportsPanel } from "./AcademicReportsPanel";
 import { SessionPlanPanel } from "./SessionPlanPanel";
 import { SyllabusOversightPanel } from "./SyllabusOversightPanel";
 import { SyllabusPanel } from "./SyllabusPanel";
-import { isInstitutionAdmin, isSystemAdministrator } from "lib/roles";
 import {
   academicListApiParams,
   defaultAcademicFilters,
@@ -109,7 +108,7 @@ export const AcademicManagementHub = () => {
   const canPerformApprove = useCanApproveRecords();
   const canSyllabusOversight =
     isAdminWorkspace &&
-    (isInstitutionAdmin(user?.role ?? "") || isSystemAdministrator(user?.role ?? ""));
+    (user?.role === "SUPER_ADMIN" || user?.role === "COLLEGE_ADMIN");
   const tabs = allTabs.filter((tab) => !tab.adminOnly || canSyllabusOversight);
 
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
@@ -526,7 +525,9 @@ export const AcademicManagementHub = () => {
         description={
           isTeacher
             ? "Your assigned subjects: official syllabus, session plan, and lesson plan stay the same for the batch/year. Log book continues leftover work or starts from the beginning on a FULL assignment."
-            : "Institution syllabus, session/lesson plans, log books, and approvals. Syllabus, session plan, and lesson plan are official for the batch/year even when the teacher changes."
+            : canPerformApprove
+              ? "Institution syllabus, session/lesson plans, log books, and approvals. Syllabus, session plan, and lesson plan are official for the batch/year even when the teacher changes."
+              : "Institution syllabus, session/lesson plans, and log books for every assigned teacher. You can prepare, verify, and update records. Only the Administrator or Super Admin can approve."
         }
       />
 

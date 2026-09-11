@@ -9,6 +9,7 @@ import {
   canAccessStaffDirectory,
   canApproveRecords,
   canManageInstitution,
+  canUseAcademicManagementAdminHub,
   hasExtraAdminModuleGrants,
   hasInstitutionAccess,
   isAcademicStructurePath,
@@ -46,6 +47,7 @@ export const hasProtectedRouteAccess = (
     moduleAccess?: ModuleAccessMap | null;
     /** Only unlock role-gated routes when an admin has saved a custom map */
     moduleAccessConfigured?: boolean;
+    designation?: string | null;
   }
 ): boolean => {
   if (!allowedRoles || allowedRoles.length === 0) {
@@ -137,6 +139,17 @@ export const hasProtectedRouteAccess = (
         (TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(moduleKey) &&
         !hasExtraAdminModuleGrants(options.moduleAccess)
       ) {
+        if (
+          moduleKey === "academic-management" &&
+          canUseAcademicManagementAdminHub({
+            role: userRole,
+            secondaryRoles,
+            designation: options.designation,
+            moduleAccess: options.moduleAccess
+          })
+        ) {
+          return true;
+        }
         return false;
       }
       return true;

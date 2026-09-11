@@ -1,12 +1,14 @@
 import type { Request } from "express";
 import {
   canManageInstitution,
+  canUseAcademicManagementAdminHub,
   canWriteModule,
   hasExtraAdminModuleGrants,
   TEACHER_BASELINE_MODULE_KEYS,
   type ErpModuleKey,
   type ModuleAccessMap
 } from "@phit-erp/shared";
+import { User } from "../models/User.js";
 import { getUserModuleAccessMap, getUserSecondaryRoles } from "./moduleAccessService.js";
 
 export const wantsAdminWorkspaceScope = (req: Request): boolean => {
@@ -37,7 +39,32 @@ export const actorHasExtraAdminGrants = async (req: Request): Promise<boolean> =
 
 export const actorMayUseAdminWorkspaceScope = async (req: Request): Promise<boolean> => {
   if (!wantsAdminWorkspaceScope(req)) return false;
-  return actorHasExtraAdminGrants(req);
+  if (await actorHasExtraAdminGrants(req)) return true;
+  return actorHasAcademicManagementAdminHub(req);
+};
+
+const academicHubCache = new WeakMap<Request, boolean>();
+
+/** Vice Principal / granted Academic Management staff: college-wide AM hub. */
+export const actorHasAcademicManagementAdminHub = async (
+  req: Request
+): Promise<boolean> => {
+  if (!req.user) return false;
+  const cached = academicHubCache.get(req);
+  if (cached !== undefined) return cached;
+
+  const user = await User.findById(req.user.userId)
+    .select("role designation secondaryRoles moduleAccess")
+    .lean();
+  const map = (await getUserModuleAccessMap(req.user.userId)) as ModuleAccessMap;
+  const allowed = canUseAcademicManagementAdminHub({
+    role: req.user.role,
+    secondaryRoles: (user?.secondaryRoles as string[] | undefined) ?? [],
+    designation: user?.designation,
+    moduleAccess: map
+  });
+  academicHubCache.set(req, allowed);
+  return allowed;
 };
 
 const actorIsTeacher = async (req: Request): Promise<boolean> => {
@@ -65,6 +92,9 @@ export const actorCanAdministerModule = async (
   if (!(await actorIsTeacher(req))) return true;
 
   if ((TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(moduleKey)) {
+    if (moduleKey === "academic-management") {
+      return actorHasAcademicManagementAdminHub(req);
+    }
     return hasExtraAdminModuleGrants(map);
   }
   return true;

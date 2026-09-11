@@ -7,6 +7,7 @@ import {
   canEditOrDeleteRecords,
   hasModuleAction,
   isGrantedAdminEditModule,
+  canUseAcademicManagementAdminHub,
   isInstitutionAdmin,
   isPortalRole,
   isSystemAdministrator,
@@ -153,6 +154,17 @@ export const useCanManageGrantedModule = (moduleKey: ErpModuleKey): boolean => {
   if (!canWrite) return false;
   if (isInstitutionAdmin(user?.role ?? "")) return true;
   if (isDualRoleTeacher(user)) return true;
+  if (
+    moduleKey === "academic-management" &&
+    canUseAcademicManagementAdminHub({
+      role: user?.role ?? "",
+      secondaryRoles: user?.secondaryRoles,
+      designation: user?.designation,
+      moduleAccess: user?.moduleAccess,
+    })
+  ) {
+    return true;
+  }
   if (userIsTeacher(user)) {
     return !(TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(
       moduleKey,

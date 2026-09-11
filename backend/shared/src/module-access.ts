@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  hasInstitutionAccess,
+  isInstitutionAdmin,
+  isPortalRole,
+  isSystemAdministrator,
+  normalizeUserRole
+} from "./constants.js";
 
 /**
  * Canonical ERP modules (departments) for Module Access Control.
@@ -876,6 +883,53 @@ export const canWriteModule = (
   map: ModuleAccessMap | null | undefined,
   moduleKey: ErpModuleKey
 ): boolean => resolveModuleAccessMode(map, moduleKey) === "WRITE";
+
+/**
+ * College-wide Academic Management hub (`/academic-management-view`):
+ * all teachers' syllabi, session/lesson plans, and log books — the same UI as
+ * Administrator, except Approve stays Administrator / Super Admin only.
+ *
+ * Who gets it:
+ * - Institution Administrator / Super Admin / College Viewer
+ * - Principal role
+ * - Staff with Academic Management granted
+ * - Teachers with extra Administration departments (dual-role)
+ * - Teachers with a leadership title (Vice Principal, Principal, Coordinator, …)
+ *   so they can run Academic Management without a second department grant
+ */
+export const canUseAcademicManagementAdminHub = (input: {
+  role: string;
+  secondaryRoles?: readonly string[] | null;
+  designation?: string | null;
+  moduleAccess?: ModuleAccessMap | null;
+}): boolean => {
+  const role = normalizeUserRole(input.role);
+  if (isPortalRole(role)) return false;
+  if (isInstitutionAdmin(role) || hasInstitutionAccess(role)) return true;
+  if (isSystemAdministrator(role)) return true;
+
+  const secondary = (input.secondaryRoles ?? []).map((entry) =>
+    normalizeUserRole(String(entry))
+  );
+  if (role === "PRINCIPAL" || secondary.includes("PRINCIPAL")) {
+    return (
+      !hasConfiguredModuleAccess(input.moduleAccess) ||
+      canAccessModule(input.moduleAccess, "academic-management")
+    );
+  }
+
+  const isTeacher = role === "TEACHER" || secondary.includes("TEACHER");
+  const hasAm =
+    !hasConfiguredModuleAccess(input.moduleAccess) ||
+    canAccessModule(input.moduleAccess, "academic-management");
+
+  if (!isTeacher) {
+    return hasAm;
+  }
+
+  if (hasExtraAdminModuleGrants(input.moduleAccess)) return true;
+  return isLeadershipDesignation(input.designation) && hasAm;
+};
 
 /**
  * Attendance Management hub modules. Granting any of these should unlock

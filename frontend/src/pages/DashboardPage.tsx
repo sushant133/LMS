@@ -26,6 +26,7 @@ import {
   canAccessAttendanceAdminHub,
   canAccessExaminationManagement,
   canAccessModule,
+  canUseAcademicManagementAdminHub,
   hasExtraAdminModuleGrants,
   hasInstitutionAccess,
   type CollegeStaffCategory,
@@ -912,9 +913,22 @@ const dashboardStatHint = (label: string, href?: string): string | null => {
 const teacherAdminQuickActions = (
   user: UserProfile,
 ): Array<{ label: string; href: string }> => {
-  if (!user.moduleAccessConfigured) return [];
   const map = (user.moduleAccess ?? {}) as ModuleAccessMap;
   const actions: Array<{ label: string; href: string }> = [];
+  if (
+    canUseAcademicManagementAdminHub({
+      role: user.role,
+      secondaryRoles: user.secondaryRoles,
+      designation: user.designation,
+      moduleAccess: map,
+    })
+  ) {
+    actions.push({
+      label: "Academic Management",
+      href: "/academic-management-view",
+    });
+  }
+  if (!user.moduleAccessConfigured) return actions;
   if (canAccessModule(map, "teachers") || canAccessModule(map, "staff")) {
     actions.push({
       label: "Staff Management",
@@ -945,10 +959,12 @@ const teacherAdminQuickActions = (
     actions.push({ label: "Reports", href: "/reports" });
   }
   if (hasExtraAdminModuleGrants(map)) {
-    actions.push({
-      label: "Academic Management",
-      href: "/academic-management-view",
-    });
+    if (!actions.some((row) => row.href === "/academic-management-view")) {
+      actions.push({
+        label: "Academic Management",
+        href: "/academic-management-view",
+      });
+    }
     actions.push({ label: "Student Management", href: "/students" });
     actions.push({ label: "Timetable Management", href: "/timetable-view" });
   }
