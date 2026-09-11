@@ -236,17 +236,38 @@ export const toNepaliLetter = (zeroBasedIndex: number): string => {
  * Unit display: "Unit 1" | "एकाइ १"
  * DB still stores unitNo as number.
  */
+/**
+ * A title that only repeats the auto-numbering — "Unit 1", "एकाइ १", "Chapter 2"
+ * — carries no information. Older saves stamped one in whenever the author left
+ * the field blank, so a Nepali syllabus ends up rendering the mixed
+ * "एकाइ १: Unit 1". Treat these as untitled at display time, which also repairs
+ * records already saved that way.
+ *
+ * A digit is required, so real titles like "Unit Operations" are never dropped.
+ */
+const PLACEHOLDER_STRUCTURAL_TITLE =
+  /^(?:unit|chapter|part|एकाइ|अध्याय|भाग)\s*[0-9०-९]+\s*$/i;
+
+export const isPlaceholderStructuralTitle = (
+  title?: string | null,
+): boolean => PLACEHOLDER_STRUCTURAL_TITLE.test((title || "").trim());
+
+/** Title to render beside an auto-number — "" when it is only a placeholder. */
+const meaningfulTitle = (title?: string | null): string => {
+  const trimmed = (title || "").trim();
+  return isPlaceholderStructuralTitle(trimmed) ? "" : trimmed;
+};
+
 export const formatUnitLabel = (
   unitNo: number,
   options?: { title?: string; nepali?: boolean },
 ): string => {
+  const title = meaningfulTitle(options?.title);
   if (!options?.nepali) {
     const base = `Unit ${unitNo}`;
-    const title = (options?.title || "").trim();
     return title ? `${base}: ${title}` : base;
   }
   const base = `${nepaliStructuralLabels.unit} ${toNepaliDigits(unitNo)}`;
-  const title = (options?.title || "").trim();
   return title ? `${base}: ${title}` : base;
 };
 
@@ -254,13 +275,12 @@ export const formatChapterLabel = (
   chapterNo: number,
   options?: { title?: string; nepali?: boolean },
 ): string => {
+  const title = meaningfulTitle(options?.title);
   if (!options?.nepali) {
     const base = `Chapter ${chapterNo}`;
-    const title = (options?.title || "").trim();
     return title ? `${base}: ${title}` : base;
   }
   const base = `${nepaliStructuralLabels.chapter} ${toNepaliDigits(chapterNo)}`;
-  const title = (options?.title || "").trim();
   return title ? `${base}: ${title}` : base;
 };
 
@@ -268,13 +288,12 @@ export const formatPartLabel = (
   partNo: number,
   options?: { title?: string; nepali?: boolean },
 ): string => {
+  const title = meaningfulTitle(options?.title);
   if (!options?.nepali) {
     const base = `Part ${partNo}`;
-    const title = (options?.title || "").trim();
     return title ? `${base}: ${title}` : base;
   }
   const base = `${nepaliStructuralLabels.part} ${toNepaliDigits(partNo)}`;
-  const title = (options?.title || "").trim();
   return title ? `${base}: ${title}` : base;
 };
 

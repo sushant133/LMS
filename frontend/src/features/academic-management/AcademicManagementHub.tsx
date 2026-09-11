@@ -106,9 +106,13 @@ export const AcademicManagementHub = () => {
   const { canWrite: canWriteAcademic, isReadOnly: academicReadOnly } =
     useModuleAccess("academic-management");
   const canPerformApprove = useCanApproveRecords();
-  const canSyllabusOversight =
-    isAdminWorkspace &&
-    (user?.role === "SUPER_ADMIN" || user?.role === "COLLEGE_ADMIN");
+  /**
+   * Syllabus Completion is an Administration surface, not an institution-admin
+   * privilege: the API behind it (`/syllabus-oversight`) already admits anyone
+   * who administers Academic Management, so a granted Vice Principal /
+   * Principal sees the same tabs as the Administrator.
+   */
+  const canSyllabusOversight = isAdminWorkspace && isAdmin;
   const tabs = allTabs.filter((tab) => !tab.adminOnly || canSyllabusOversight);
 
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");

@@ -8,7 +8,11 @@ import type {
   SyllabusSubUnitStatus,
 } from "@phit-erp/shared";
 import { ensureUnicodeNepali } from "lib/preetiToUnicode";
-import { nepaliStructuralLabels, toNepaliDigits } from "lib/nepaliSubject";
+import {
+  isPlaceholderStructuralTitle,
+  nepaliStructuralLabels,
+  toNepaliDigits,
+} from "lib/nepaliSubject";
 
 /**
  * Title stamped on a unit the author left blank. It is persisted, so a Nepali
@@ -482,7 +486,12 @@ export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState =>
                 ? units.map((unit) => ({
                     clientKey: unit._id || nextClientKey("unit"),
                     unitNo: unit.unitNo,
-                    title: unit.title || "",
+                    // A stored "Unit 1" / "एकाइ १" is the old blank-title
+                    // fallback, not a real title — open the field empty so the
+                    // author can type one instead of editing around it.
+                    title: isPlaceholderStructuralTitle(unit.title)
+                      ? ""
+                      : unit.title || "",
                     description: unit.description || "",
                     teachingHours: unit.teachingHours ?? 0,
                     learningObjective: unit.learningObjective || "",
