@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import {
   academicApprovalActionSchema,
+  academicBulkReviewSchema,
   academicCommentSchema,
   academicLessonPlanSchema,
   academicLogBookEntrySchema,
@@ -12,7 +13,10 @@ import {
   academicSyllabusUpdateSchema,
   academicSyllabusSubUnitProgressSchema,
   academicSyllabusReorderSchema,
+  academicSyllabusOversightCompleteSchema,
+  academicVerifyActionSchema,
   normalizeSubUnitSelection,
+  isInstitutionAdmin,
   type AcademicManagementFilters,
   type AcademicSyllabusChapterInput
 } from "@phit-erp/shared";
@@ -26,6 +30,22 @@ import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { AcademicSyllabusChapter } from "../models/AcademicSyllabusChapter.js";
 import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
+import { markSubUnitsCompleted } from "../utils/syllabusCompletionAttribution.js";
+import {
+  completeSyllabusOversight,
+  getSyllabusOversightDetail,
+  listSyllabusOversight
+} from "../utils/syllabusOversightService.js";
+import {
+  approveLessonPlanById,
+  approveLogBookById,
+  approveSessionPlanById,
+  assertCanVerifyAcademic,
+  bulkApproveAcademic,
+  verifyLessonPlanById,
+  verifyLogBookById,
+  verifySessionPlanById
+} from "../utils/academicReviewService.js";
 import { AcademicComment } from "../models/AcademicComment.js";
 import {
   chaptersHaveRealContent,
@@ -645,33 +665,8 @@ export const submitSessionPlan = asyncHandler(async (req: Request, res: Response
 });
 
 export const approveSessionPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can approve plans");
   const { remarks } = academicApprovalActionSchema.parse(req.body);
-
-  const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
-  if (!existing) throw new ApiError(404, "Session plan not found");
-  assertApprovableStatus(existing.status);
-
-  existing.status = "APPROVED";
-  existing.adminRemarks = remarks;
-  existing.audit = {
-    ...existing.audit,
-    approvedBy: actorObjectId(req),
-    approvedAt: new Date(),
-    updatedBy: actorObjectId(req)
-  };
-  await existing.save();
-  await recordApproval(req, "SESSION_PLAN", existing._id.toString(), "APPROVED", remarks);
-  await notifyTeacherOfAcademicDecision(req, {
-    kind: "SESSION_PLAN",
-    teacherId: existing.teacherId.toString(),
-    subjectId: existing.subjectId.toString(),
-    extra: existing.academicYearBs,
-    action: "APPROVED",
-    entityId: existing._id.toString()
-  });
-
-  const serialized = await serializeSessionPlan(existing._id.toString());
+  const serialized = await approveSessionPlanById(req, routeParamId(req.params.id), remarks);
   return sendSuccess(res, "Session plan approved", serialized);
 });
 
@@ -1389,6 +1384,19 @@ export const updateSyllabusSubUnitProgress = asyncHandler(async (req: Request, r
   });
   if (!subUnit) throw new ApiError(404, "Sub unit not found");
 
+  const existingSource = String((subUnit as { completionSource?: string }).completionSource || "");
+  if (
+    existingSource === "ADMINISTRATION" &&
+    payload.status !== undefined &&
+    payload.status !== "COMPLETED" &&
+    !isInstitutionAdmin(req.user?.role ?? "")
+  ) {
+    throw new ApiError(
+      403,
+      "This sub-unit was completed by administration extra lectures. Only an administrator can change it."
+    );
+  }
+
   if (payload.status !== undefined) subUnit.status = payload.status;
   if (payload.teachingNotes !== undefined) subUnit.teachingNotes = payload.teachingNotes;
   if (payload.teacherAttachments !== undefined) {
@@ -1396,6 +1404,20 @@ export const updateSyllabusSubUnitProgress = asyncHandler(async (req: Request, r
   }
   if (payload.todaysCoverage !== undefined) subUnit.todaysCoverage = payload.todaysCoverage;
   if (payload.remarks !== undefined) subUnit.remarks = payload.remarks;
+
+  if (
+    payload.status === "COMPLETED" &&
+    existingSource !== "ADMINISTRATION" &&
+    (subUnit as { countsTowardSalary?: boolean }).countsTowardSalary !== false
+  ) {
+    const scope = await getTeacherScope(req);
+    subUnit.set("completionSource", "TEACHER");
+    subUnit.set("countsTowardSalary", true);
+    subUnit.set("completedByUserId", actorObjectId(req));
+    subUnit.set("completedAt", new Date());
+    if (scope?.teacherId) subUnit.set("completedByTeacherId", scope.teacherId);
+  }
+
   await subUnit.save();
 
   // Keep legacy flat unit status in sync for THIS topic (unitNo), not chapter number
@@ -2120,30 +2142,8 @@ export const submitLessonPlan = asyncHandler(async (req: Request, res: Response)
 });
 
 export const approveLessonPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can approve plans");
   const { remarks } = academicApprovalActionSchema.parse(req.body);
-
-  const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
-  if (!existing) throw new ApiError(404, "Lesson plan not found");
-  assertApprovableStatus(existing.status);
-
-  existing.status = "APPROVED";
-  existing.adminRemarks = remarks;
-  existing.approvedByName = await getActorName(req.user!.userId);
-  existing.approvalDate = getTodayBs();
-  existing.audit = { ...existing.audit, approvedBy: actorObjectId(req), approvedAt: new Date(), updatedBy: actorObjectId(req) };
-  await existing.save();
-  await recordApproval(req, "LESSON_PLAN", existing._id.toString(), "APPROVED", remarks);
-  await notifyTeacherOfAcademicDecision(req, {
-    kind: "LESSON_PLAN",
-    teacherId: existing.teacherId.toString(),
-    subjectId: existing.subjectId.toString(),
-    extra: existing.teachingDateBs || existing.month,
-    action: "APPROVED",
-    entityId: existing._id.toString()
-  });
-
-  const serialized = await serializeLessonPlan(existing._id.toString());
+  const serialized = await approveLessonPlanById(req, routeParamId(req.params.id), remarks);
   return sendSuccess(res, "Lesson plan approved", serialized);
 });
 
@@ -2446,6 +2446,8 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     nextClassPlan: payload.nextClassPlan || "",
     attachmentUrl: payload.attachmentUrl?.trim() || undefined,
     teacherSignature: payload.teacherSignature?.trim() || "",
+    completionSource: "TEACHER",
+    countsTowardSalary: true,
     audit: { createdBy: actorObjectId(req) }
   });
 
@@ -2454,22 +2456,19 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
   }
 
-  // Mark all linked syllabus sub-units completed when a class log is recorded
+  // Mark all linked syllabus sub-units completed when a class log is recorded.
+  // Leaves already completed by administration stay attributed that way (no salary).
   if (taughtSubUnitIds.length > 0) {
     try {
-      const { AcademicSyllabusSubUnit } = await import("../models/AcademicSyllabusSubUnit.js");
-      await AcademicSyllabusSubUnit.updateMany(
-        {
-          _id: { $in: taughtSubUnitIds },
-          schoolId: tenantObjectId(req)
-        },
-        {
-          $set: {
-            status: "COMPLETED",
-            todaysCoverage: payload.topicCovered || taughtTitles.join("; ") || ""
-          }
-        }
-      );
+      await markSubUnitsCompleted({
+        schoolId: tenantObjectId(req),
+        subUnitIds: taughtSubUnitIds,
+        source: "TEACHER",
+        teacherId: payload.teacherId,
+        userId: req.user!.userId,
+        todaysCoverage: payload.topicCovered || taughtTitles.join("; ") || "",
+        overwriteAttribution: false
+      });
     } catch {
       // Non-blocking — log book entry is still valid without syllabus progress
     }
@@ -2689,15 +2688,15 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     existing.set("syllabusSubUnitIds", updatedSubIds);
     existing.set("syllabusSubUnitId", updatedSubIds[0]);
     await existing.save();
-    await AcademicSyllabusSubUnit.updateMany(
-      { _id: { $in: updatedSubIds }, schoolId: tenantObjectId(req) },
-      {
-        $set: {
-          status: "COMPLETED",
-          todaysCoverage: existing.topicCovered || updatedTitles.join("; ") || ""
-        }
-      }
-    );
+    await markSubUnitsCompleted({
+      schoolId: tenantObjectId(req),
+      subUnitIds: updatedSubIds,
+      source: "TEACHER",
+      teacherId: existing.teacherId.toString(),
+      userId: req.user!.userId,
+      todaysCoverage: existing.topicCovered || updatedTitles.join("; ") || "",
+      overwriteAttribution: false
+    });
   }
 
   if (previousItemId) await syncLessonPlanItemProgress(previousItemId);
@@ -2732,6 +2731,16 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (!(await actorIsAcademicAdmin(req)) && existing.reviewStatus === "APPROVED") {
     throw new ApiError(403, "Approved log book entries cannot be deleted");
   }
+  if (
+    String((existing as { completionSource?: string }).completionSource || "") ===
+      "ADMINISTRATION" &&
+    !(await actorIsAcademicAdmin(req))
+  ) {
+    throw new ApiError(
+      403,
+      "Log book entries filed by administration extra lectures can only be changed by an administrator"
+    );
+  }
 
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
@@ -2758,8 +2767,11 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
 });
 
 export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
-  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can review log book entries");
+  await assertCanVerifyAcademic(req);
   const payload = academicLogBookReviewSchema.parse(req.body);
+  if (payload.reviewStatus !== "NEEDS_IMPROVEMENT") {
+    throw new ApiError(400, "Use the verification or approval action for this log book entry");
+  }
 
   const existing = await AcademicLogBookEntry.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Log book entry not found");
@@ -2803,6 +2815,38 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
   return sendSuccess(res, "Log book entry reviewed", serialized);
 });
 
+export const verifySessionPlan = asyncHandler(async (req: Request, res: Response) => {
+  academicVerifyActionSchema.parse(req.body ?? {});
+  const serialized = await verifySessionPlanById(req, routeParamId(req.params.id));
+  return sendSuccess(res, "Session plan verified", serialized);
+});
+
+export const verifyLessonPlan = asyncHandler(async (req: Request, res: Response) => {
+  academicVerifyActionSchema.parse(req.body ?? {});
+  const serialized = await verifyLessonPlanById(req, routeParamId(req.params.id));
+  return sendSuccess(res, "Lesson plan verified", serialized);
+});
+
+export const verifyLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
+  const { remarks } = academicVerifyActionSchema.parse(req.body ?? {});
+  const serialized = await verifyLogBookById(req, routeParamId(req.params.id), remarks);
+  return sendSuccess(res, "Log book entry verified", serialized);
+});
+
+export const approveLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
+  const { remarks } = academicApprovalActionSchema.parse(req.body ?? {});
+  const serialized = await approveLogBookById(req, routeParamId(req.params.id), remarks);
+  return sendSuccess(res, "Log book entry approved", serialized);
+});
+
+export const approveAllVerifiedAcademic = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicBulkReviewSchema.parse(req.body ?? {});
+  const filters = parseFilters(req);
+  if (payload.academicYearBs) filters.academicYearBs = payload.academicYearBs;
+  const result = await bulkApproveAcademic(req, filters, payload.remarks || undefined);
+  return sendSuccess(res, "All verified academic records approved", result);
+});
+
 export const listSessionPlanUnits = asyncHandler(async (req: Request, res: Response) => {
   const sessionPlanId = typeof req.query.sessionPlanId === "string" ? req.query.sessionPlanId : "";
   if (!sessionPlanId) throw new ApiError(400, "sessionPlanId is required");
@@ -2810,6 +2854,37 @@ export const listSessionPlanUnits = asyncHandler(async (req: Request, res: Respo
   const coverage = await getSessionPlanSyllabusCoverage(req, sessionPlanId);
   // Return enriched units (with plannedInMonths / planningStatus) for Lesson Plan selectors
   return sendSuccess(res, "Session plan units fetched", coverage.units);
+});
+
+const assertOversightAdmin = (req: Request): void => {
+  if (!isInstitutionAdmin(req.user?.role ?? "")) {
+    throw new ApiError(
+      403,
+      "Only Administrator and Super Admin can use syllabus completion oversight"
+    );
+  }
+};
+
+export const listSyllabusOversightRecords = asyncHandler(async (req: Request, res: Response) => {
+  assertOversightAdmin(req);
+  const rows = await listSyllabusOversight(req, parseFilters(req));
+  return sendSuccess(res, "Syllabus oversight fetched", rows);
+});
+
+const routeParamId = (value: string | string[] | undefined): string =>
+  Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+
+export const getSyllabusOversightRecord = asyncHandler(async (req: Request, res: Response) => {
+  assertOversightAdmin(req);
+  const detail = await getSyllabusOversightDetail(req, routeParamId(req.params.id));
+  return sendSuccess(res, "Syllabus oversight detail fetched", detail);
+});
+
+export const completeSyllabusOversightRecord = asyncHandler(async (req: Request, res: Response) => {
+  assertOversightAdmin(req);
+  const payload = academicSyllabusOversightCompleteSchema.parse(req.body ?? {});
+  const detail = await completeSyllabusOversight(req, routeParamId(req.params.id), payload);
+  return sendSuccess(res, "Syllabus completion recorded", detail);
 });
 
 export const getSyllabusCoverage = asyncHandler(async (req: Request, res: Response) => {

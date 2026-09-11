@@ -600,10 +600,61 @@ export const academicCommentSchema = z.object({
 });
 
 export const academicLogBookReviewSchema = z.object({
-  reviewStatus: z.enum(["REVIEWED", "APPROVED", "NEEDS_IMPROVEMENT"]),
+  reviewStatus: z.enum(["REVIEWED", "VERIFIED", "APPROVED", "NEEDS_IMPROVEMENT"]),
   adminRemarks: z.string().optional(),
   adminSignature: z.string().optional()
 });
+
+export const academicVerifyActionSchema = z.object({
+  remarks: z.string().optional()
+});
+
+export const academicBulkReviewSchema = z.object({
+  academicYearBs: z.string().optional().default(""),
+  remarks: z.string().optional().default("")
+});
+
+export const syllabusCompletionSourceSchema = z.enum(["TEACHER", "ADMINISTRATION"]);
+
+/**
+ * Admin / Super Admin bulk-complete of syllabus units or sub-units.
+ * TEACHER → log book + salary. ADMINISTRATION → syllabus + log book, not salary.
+ */
+export const academicSyllabusOversightCompleteSchema = z
+  .object({
+    source: syllabusCompletionSourceSchema,
+    /** Required when source is TEACHER. Log-book owner when ADMINISTRATION. */
+    teacherId: z.preprocess((v) => {
+      if (v === null || v === undefined) return "";
+      return String(v).trim();
+    }, z.string().default("")),
+    deliveredByName: z.string().optional().default(""),
+    dateBs: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD BS"),
+    note: z.string().optional().default(""),
+    subUnitIds: z.array(z.string()).optional().default([]),
+    unitIds: z.array(z.string()).optional().default([]),
+    theoryPractical: z.enum(["THEORY", "PRACTICAL", "BOTH"]).optional().default("THEORY")
+  })
+  .superRefine((data, ctx) => {
+    if (data.source === "TEACHER" && !data.teacherId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select the subject teacher to attribute this completion (counts toward salary)",
+        path: ["teacherId"]
+      });
+    }
+    if ((data.subUnitIds?.length ?? 0) === 0 && (data.unitIds?.length ?? 0) === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select at least one unit or sub-unit to mark complete",
+        path: ["subUnitIds"]
+      });
+    }
+  });
+
+export type AcademicSyllabusOversightCompleteInput = z.infer<
+  typeof academicSyllabusOversightCompleteSchema
+>;
 
 export type AcademicSyllabusInput = z.infer<typeof academicSyllabusSchema>;
 export type AcademicSyllabusChapterInput = z.infer<typeof academicSyllabusChapterSchema>;

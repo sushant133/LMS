@@ -1,12 +1,15 @@
 import { Router } from "express";
 import {
   addComment,
+  approveAllVerifiedAcademic,
   approveLessonPlan,
+  approveLogBookEntry,
   approveSessionPlan,
   approveSyllabus,
   createLessonPlan,
   createLogBookEntry,
   createSessionPlan,
+  completeSyllabusOversightRecord,
   createSyllabus,
   deleteLessonPlan,
   deleteLogBookEntry,
@@ -19,6 +22,8 @@ import {
   getSessionPlan,
   getSyllabus,
   getSyllabusCoverage,
+  getSyllabusOversightRecord,
+  listSyllabusOversightRecords,
   getTodayTimetableSlots,
   listComments,
   listLessonPlans,
@@ -41,7 +46,10 @@ import {
   updateSessionPlan,
   updateSyllabus,
   updateSyllabusSubUnitProgress,
-  reorderSyllabusHierarchy
+  reorderSyllabusHierarchy,
+  verifyLessonPlan,
+  verifyLogBookEntry,
+  verifySessionPlan
 } from "../controllers/academicManagementController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
@@ -61,6 +69,22 @@ router.get(
     "COLLEGE_STAFF"
   ),
   getAcademicDashboard
+);
+
+router.get(
+  "/syllabus-oversight",
+  authorizeInstitutionAdmin,
+  listSyllabusOversightRecords
+);
+router.get(
+  "/syllabus-oversight/:id",
+  authorizeInstitutionAdmin,
+  getSyllabusOversightRecord
+);
+router.post(
+  "/syllabus-oversight/:id/complete",
+  authorizeInstitutionAdmin,
+  completeSyllabusOversightRecord
 );
 
 router.get("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), listSyllabi);
@@ -90,6 +114,7 @@ router.post("/session-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER
 router.put("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), updateSessionPlan);
 router.delete("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), deleteSessionPlan);
 router.post("/session-plans/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), submitSessionPlan);
+router.post("/session-plans/:id/verify", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), verifySessionPlan);
 router.post("/session-plans/:id/approve", authorizeInstitutionAdmin, approveSessionPlan);
 router.post("/session-plans/:id/reject", authorizeInstitutionAdmin, rejectSessionPlan);
 router.post("/session-plans/:id/unlock", authorizeInstitutionAdmin, unlockSessionPlan);
@@ -106,6 +131,7 @@ router.post("/lesson-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"
 router.put("/lesson-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), updateLessonPlan);
 router.delete("/lesson-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), deleteLessonPlan);
 router.post("/lesson-plans/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), submitLessonPlan);
+router.post("/lesson-plans/:id/verify", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), verifyLessonPlan);
 router.post("/lesson-plans/:id/approve", authorizeInstitutionAdmin, approveLessonPlan);
 router.post("/lesson-plans/:id/reject", authorizeInstitutionAdmin, rejectLessonPlan);
 
@@ -113,7 +139,10 @@ router.get("/log-book-entries", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLE
 router.post("/log-book-entries", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), createLogBookEntry);
 router.put("/log-book-entries/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), updateLogBookEntry);
 router.delete("/log-book-entries/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "COLLEGE_STAFF"), deleteLogBookEntry);
-router.post("/log-book-entries/:id/review", authorizeInstitutionAdmin, reviewLogBookEntry);
+router.post("/log-book-entries/:id/review", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), reviewLogBookEntry);
+router.post("/log-book-entries/:id/verify", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), verifyLogBookEntry);
+router.post("/log-book-entries/:id/approve", authorizeInstitutionAdmin, approveLogBookEntry);
+router.post("/approvals/approve-all", authorizeInstitutionAdmin, approveAllVerifiedAcademic);
 
 router.get("/timetable/today", authorize("TEACHER"), getTodayTimetableSlots);
 router.get("/attendance/summary", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), getSessionAttendance);

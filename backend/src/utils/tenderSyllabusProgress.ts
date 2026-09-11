@@ -5,6 +5,7 @@ import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { Subject } from "../models/Subject.js";
 import { SubjectAssignment } from "../models/SubjectAssignment.js";
+import { leafCountsTowardTeacherSalary } from "./syllabusCompletionAttribution.js";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -147,6 +148,9 @@ type Leaf = {
   leafId: string;
   completed: boolean;
   practicalRequired?: boolean;
+  completionSource?: string;
+  countsTowardSalary?: boolean;
+  completedByTeacherId?: string;
 };
 
 export type TenderSyllabusProgress = {
@@ -160,6 +164,12 @@ export type TenderSyllabusProgress = {
   subjectFamilyById: Map<string, string[]>;
   /** subjectId → display name */
   subjectNameById: Map<string, string>;
+  /**
+   * teacherId:subjectId → official syllabus leaves were found for this allotment.
+   * When true, salary must use percentByTeacherSubject even if 0 (admin extra
+   * lectures) instead of falling back to session-plan progress.
+   */
+  hasAllottedLeavesByTeacherSubject: Map<string, boolean>;
 };
 
 const assignmentDetail = (asg: AssignmentLean): string => {
@@ -273,7 +283,8 @@ export const loadTenderSyllabusProgress = async (opts: {
     detailByTeacherSubject: new Map(),
     assignedSubjectsByTeacher: new Map(),
     subjectFamilyById: new Map(),
-    subjectNameById: new Map()
+    subjectNameById: new Map(),
+    hasAllottedLeavesByTeacherSubject: new Map()
   };
   if (opts.teacherIds.length === 0) return empty;
 
@@ -367,7 +378,9 @@ export const loadTenderSyllabusProgress = async (opts: {
         .select("_id syllabusId unitNo practicalRequired")
         .lean(),
       AcademicSyllabusSubUnit.find({ syllabusId: { $in: syllabusIds } })
-        .select("_id syllabusId unitId parentSubUnitId status practicalRequired")
+        .select(
+          "_id syllabusId unitId parentSubUnitId status practicalRequired completionSource countsTowardSalary completedByTeacherId"
+        )
         .lean(),
       AcademicSyllabusUnit.find({ syllabusId: { $in: syllabusIds } })
         .select("_id syllabusId unitNo status practicalRequired")
@@ -409,7 +422,10 @@ export const loadTenderSyllabusProgress = async (opts: {
         completed: subUnitDone(String(sub.status || "")),
         practicalRequired:
           Boolean(sub.practicalRequired) ||
-          Boolean(topicPracticalById.get(String(sub.unitId)))
+          Boolean(topicPracticalById.get(String(sub.unitId))),
+        completionSource: String((sub as { completionSource?: string }).completionSource || ""),
+        countsTowardSalary: (sub as { countsTowardSalary?: boolean }).countsTowardSalary,
+        completedByTeacherId: idStr((sub as { completedByTeacherId?: unknown }).completedByTeacherId)
       });
       leavesBySyllabus.set(sid, list);
     }
@@ -474,9 +490,12 @@ export const loadTenderSyllabusProgress = async (opts: {
   const baselineByKey = new Map<string, number>();
   const assignedPctByKey = new Map<string, number | "mixed">();
 
+  const hasAllottedLeavesByTeacherSubject = new Map<string, boolean>();
+
   const addLeaves = (teacherId: string, subjectId: string, leaves: Leaf[], detail: string) => {
     if (!teacherId || !subjectId || leaves.length === 0) return;
     const key = `${teacherId}:${subjectId}`;
+    hasAllottedLeavesByTeacherSubject.set(key, true);
     const bucket = buckets.get(key) ?? {
       leafIds: new Set<string>(),
       completed: 0,
@@ -486,7 +505,7 @@ export const loadTenderSyllabusProgress = async (opts: {
       const lid = `${leaf.syllabusId}:${leaf.leafId}`;
       if (bucket.leafIds.has(lid)) continue;
       bucket.leafIds.add(lid);
-      if (leaf.completed) bucket.completed += 1;
+      if (leafCountsTowardTeacherSalary(leaf, teacherId)) bucket.completed += 1;
     }
     if (detail) bucket.details.add(detail);
     buckets.set(key, bucket);
@@ -592,6 +611,7 @@ export const loadTenderSyllabusProgress = async (opts: {
     detailByTeacherSubject,
     assignedSubjectsByTeacher,
     subjectFamilyById,
-    subjectNameById
+    subjectNameById,
+    hasAllottedLeavesByTeacherSubject
   };
 };

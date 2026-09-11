@@ -6,13 +6,20 @@ import type {
   AcademicSyllabusSubUnitRecord,
   AcademicSyllabusTopicRecord,
   AcademicSyllabusUnitRecord,
+  SyllabusCompletionAttribution,
+  SyllabusCompletionSource,
   SyllabusSubUnitStatus
 } from "@phit-erp/shared";
+import {
+  snapshotSubUnitAttribution,
+  type AttributionSnapshot
+} from "./syllabusCompletionAttribution.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { AcademicSyllabusChapter } from "../models/AcademicSyllabusChapter.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
+import { Teacher } from "../models/Teacher.js";
 
 /**
  * Preserve existing Mongo ids from form clientKey when re-saving hierarchy.
@@ -467,11 +474,13 @@ const insertSubUnitTree = async (
     unitId: Types.ObjectId;
     parentSubUnitId: Types.ObjectId | null;
     subUnits: SubUnitInput[];
+    attributionById?: Map<string, AttributionSnapshot>;
   },
   session?: ClientSession
 ) => {
   const opts = session ? { session } : {};
-  const { schoolId, syllabusId, chapterId, unitId, parentSubUnitId, subUnits } = params;
+  const { schoolId, syllabusId, chapterId, unitId, parentSubUnitId, subUnits, attributionById } =
+    params;
 
   for (let sIndex = 0; sIndex < subUnits.length; sIndex++) {
     const sub = subUnits[sIndex]!;
@@ -513,6 +522,21 @@ const insertSubUnitTree = async (
       todaysCoverage: sub.todaysCoverage || "",
       sortOrder: sIndex
     };
+    if (forcedId && attributionById?.size) {
+      const snap = attributionById.get(String(forcedId));
+      if (snap) {
+        const source = String(snap.completionSource || "").toUpperCase();
+        if (source === "TEACHER" || source === "ADMINISTRATION") {
+          subPayload.completionSource = source;
+        }
+        if (snap.completedByTeacherId) subPayload.completedByTeacherId = snap.completedByTeacherId;
+        if (snap.completedByUserId) subPayload.completedByUserId = snap.completedByUserId;
+        if (snap.completedAt) subPayload.completedAt = snap.completedAt;
+        subPayload.completionNote = snap.completionNote || "";
+        subPayload.countsTowardSalary = snap.countsTowardSalary !== false;
+        subPayload.deliveredByName = snap.deliveredByName || "";
+      }
+    }
     const subDoc = await createWithOptionalId(
       AcademicSyllabusSubUnit as never,
       subPayload,
@@ -530,7 +554,8 @@ const insertSubUnitTree = async (
           chapterId,
           unitId,
           parentSubUnitId: (subDoc as { _id: Types.ObjectId })._id,
-          subUnits: children
+          subUnits: children,
+          attributionById
         },
         session
       );
@@ -579,6 +604,7 @@ export const saveSyllabusHierarchy = async (
     subUnits: subUnits as never[],
     legacy: legacy as never[]
   };
+  const attributionById = snapshotSubUnitAttribution(subUnits as AttributionSnapshot[]);
 
   // ── SAFETY (scoped to THIS syllabusId only — never other subjects) ──
   // Refuse wipe when client sends an empty shell while DB already has structure.
@@ -710,7 +736,8 @@ export const saveSyllabusHierarchy = async (
             chapterId,
             unitId: (unitDoc as { _id: Types.ObjectId })._id,
             parentSubUnitId: null,
-            subUnits
+            subUnits,
+            attributionById
           },
           session
         );
@@ -827,6 +854,52 @@ type LeanSub = {
   teacherAttachments?: AcademicSyllabusSubUnitRecord["teacherAttachments"];
   todaysCoverage?: string;
   sortOrder?: number;
+  completionSource?: string | null;
+  completedByTeacherId?: { toString(): string } | string | null;
+  completedByUserId?: { toString(): string } | string | null;
+  completedAt?: Date | string | null;
+  completionNote?: string;
+  countsTowardSalary?: boolean;
+  deliveredByName?: string;
+};
+
+const toAttribution = (
+  sub: LeanSub,
+  teacherNameById?: Map<string, string>
+): SyllabusCompletionAttribution | undefined => {
+  const sourceRaw = String(sub.completionSource || "").toUpperCase();
+  const source: SyllabusCompletionSource | undefined =
+    sourceRaw === "TEACHER" || sourceRaw === "ADMINISTRATION"
+      ? sourceRaw
+      : undefined;
+  const teacherId =
+    sub.completedByTeacherId == null ? "" : String(sub.completedByTeacherId);
+  const userId = sub.completedByUserId == null ? "" : String(sub.completedByUserId);
+  const completedAt =
+    sub.completedAt instanceof Date
+      ? sub.completedAt.toISOString()
+      : sub.completedAt
+        ? String(sub.completedAt)
+        : undefined;
+  if (
+    !source &&
+    !teacherId &&
+    sub.countsTowardSalary !== false &&
+    !(sub.deliveredByName || "").trim() &&
+    !completedAt
+  ) {
+    return undefined;
+  }
+  return {
+    source,
+    completedByTeacherId: teacherId || undefined,
+    completedByTeacherName: teacherId ? teacherNameById?.get(teacherId) : undefined,
+    completedByUserId: userId || undefined,
+    completedAt,
+    completionNote: sub.completionNote || "",
+    countsTowardSalary: sub.countsTowardSalary !== false && source !== "ADMINISTRATION",
+    deliveredByName: sub.deliveredByName || ""
+  };
 };
 
 const buildSubUnitTree = (
@@ -834,7 +907,8 @@ const buildSubUnitTree = (
   unitNo: number,
   parentId: string | null = null,
   prefix = String(unitNo),
-  depth = 0
+  depth = 0,
+  teacherNameById?: Map<string, string>
 ): AcademicSyllabusSubUnitRecord[] => {
   const siblings = flatSubs
     .filter((s) => {
@@ -852,7 +926,8 @@ const buildSubUnitTree = (
       unitNo,
       sub._id.toString(),
       displayNo,
-      depth + 1
+      depth + 1,
+      teacherNameById
     );
 
     // Aggregate completion from leaves
@@ -904,6 +979,7 @@ const buildSubUnitTree = (
         (sub.teacherAttachments as AcademicSyllabusSubUnitRecord["teacherAttachments"]) ?? [],
       todaysCoverage: sub.todaysCoverage || "",
       completedPercent,
+      attribution: toAttribution(sub, teacherNameById),
       children
     };
   });
@@ -951,6 +1027,30 @@ export const loadSyllabusHierarchy = async (
         .lean()
     : [];
 
+  const teacherIds = [
+    ...new Set(
+      subUnits
+        .map((row) =>
+          (row as { completedByTeacherId?: unknown }).completedByTeacherId
+            ? String((row as { completedByTeacherId: unknown }).completedByTeacherId)
+            : ""
+        )
+        .filter(Boolean)
+    )
+  ];
+  const teacherNameById = new Map<string, string>();
+  if (teacherIds.length > 0) {
+    const teachers = await Teacher.find({ _id: { $in: teacherIds } })
+      .populate("user", "fullName")
+      .select("user")
+      .lean();
+    for (const teacher of teachers) {
+      const name =
+        (teacher.user as { fullName?: string } | undefined)?.fullName?.trim() || "Teacher";
+      teacherNameById.set(String(teacher._id), name);
+    }
+  }
+
   const subsByUnit = new Map<string, LeanSub[]>();
   for (const sub of subUnits) {
     const key = sub.unitId.toString();
@@ -971,7 +1071,7 @@ export const loadSyllabusHierarchy = async (
     const chapterTopics = topicsByChapter.get(chapter._id.toString()) ?? [];
     const units: AcademicSyllabusTopicRecord[] = chapterTopics.map((topic) => {
       const topicSubs = subsByUnit.get(topic._id.toString()) ?? [];
-      const subRecords = buildSubUnitTree(topicSubs, topic.unitNo);
+      const subRecords = buildSubUnitTree(topicSubs, topic.unitNo, null, String(topic.unitNo), 0, teacherNameById);
       const { total: totalSubUnits, completed: completedSubUnits } =
         countSubUnitsInTree(subRecords);
       const completedPercent =

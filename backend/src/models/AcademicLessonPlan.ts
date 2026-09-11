@@ -10,7 +10,9 @@ const auditSchema = new Schema(
     rejectedAt: { type: Date },
     rejectionReason: { type: String },
     deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
-    deletedAt: { type: Date }
+    deletedAt: { type: Date },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    verifiedAt: { type: Date }
   },
   { _id: false }
 );
@@ -40,7 +42,7 @@ const lessonPlanSchema = new Schema(
     monthlyDescription: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "REJECTED"],
+      enum: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "VERIFIED", "APPROVED", "REJECTED"],
       default: "DRAFT",
       index: true
     },

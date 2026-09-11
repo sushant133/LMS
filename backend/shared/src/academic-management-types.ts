@@ -1,8 +1,32 @@
-export type AcademicPlanStatus = "DRAFT" | "SUBMITTED" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
+export type AcademicPlanStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "PENDING_APPROVAL"
+  | "VERIFIED"
+  | "APPROVED"
+  | "REJECTED";
 
 export type LessonPlanItemStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "DELAYED";
 
-export type LogBookReviewStatus = "PENDING" | "REVIEWED" | "APPROVED" | "NEEDS_IMPROVEMENT";
+export type LogBookReviewStatus =
+  | "PENDING"
+  | "REVIEWED"
+  | "VERIFIED"
+  | "APPROVED"
+  | "NEEDS_IMPROVEMENT";
+
+/** Submitted and waiting for a granted reviewer to verify. */
+export const isPlanAwaitingVerification = (status?: string): boolean =>
+  status === "SUBMITTED" || status === "PENDING_APPROVAL";
+
+/** Verified by a granted reviewer; waiting for Administrator / Super Admin approval. */
+export const isPlanVerified = (status?: string): boolean => status === "VERIFIED";
+
+export const isLogAwaitingVerification = (status?: string): boolean => status === "PENDING";
+
+/** VERIFIED is current; REVIEWED is the legacy verified value. */
+export const isLogVerified = (status?: string): boolean =>
+  status === "VERIFIED" || status === "REVIEWED";
 
 export type AcademicManagementTab =
   | "dashboard"
@@ -10,7 +34,11 @@ export type AcademicManagementTab =
   | "session-plan"
   | "lesson-plan"
   | "log-book"
+  | "syllabus-oversight"
   | "reports";
+
+/** Who taught / recorded a completed syllabus leaf. */
+export type SyllabusCompletionSource = "TEACHER" | "ADMINISTRATION";
 
 export type AcademicReportType =
   | "session-plan"
@@ -66,6 +94,8 @@ export interface AcademicAuditTrail {
   rejectionReason?: string;
   deletedBy?: string;
   deletedAt?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
 }
 
 export type SyllabusUnitPlanningStatus = "UNPLANNED" | "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "DELAYED";
@@ -153,6 +183,20 @@ export type SyllabusSubUnitStatus =
   | "SKIPPED"
   | "REVISION_REQUIRED";
 
+/** Who completed a syllabus leaf and whether it counts toward teacher pay. */
+export interface SyllabusCompletionAttribution {
+  source?: SyllabusCompletionSource;
+  completedByTeacherId?: string;
+  completedByTeacherName?: string;
+  completedByUserId?: string;
+  completedAt?: string;
+  completionNote?: string;
+  /** False when extra lectures / administration completed the leaf. */
+  countsTowardSalary: boolean;
+  /** Guest / extra-lecture instructor name when source is ADMINISTRATION. */
+  deliveredByName?: string;
+}
+
 export interface SyllabusAttachmentRecord {
   url: string;
   name: string;
@@ -199,6 +243,8 @@ export interface AcademicSyllabusSubUnitRecord {
   teacherAttachments: SyllabusAttachmentRecord[];
   todaysCoverage: string;
   completedPercent: number;
+  /** Present when the leaf has been marked complete (teacher or administration). */
+  attribution?: SyllabusCompletionAttribution;
   /** Nested child sub-units (unlimited depth). */
   children: AcademicSyllabusSubUnitRecord[];
 }
@@ -328,6 +374,7 @@ export interface AcademicSessionPlanRecord extends AcademicManagementScope {
   status: AcademicPlanStatus;
   adminRemarks?: string;
   attachmentUrl?: string;
+  verifiedByName?: string;
   units: AcademicSessionPlanUnitRecord[];
   completedPercent: number;
   remainingPercent: number;
@@ -426,6 +473,7 @@ export interface AcademicLessonPlanRecord extends AcademicManagementScope {
   status: AcademicPlanStatus;
   preparedBy?: string;
   checkedBy?: string;
+  verifiedByName?: string;
   approvedByName?: string;
   approvalDate?: string;
   adminRemarks?: string;
@@ -494,9 +542,122 @@ export interface AcademicLogBookEntryRecord extends AcademicManagementScope {
   teacherSignature?: string;
   adminSignature?: string;
   adminRemarks?: string;
+  verifiedByName?: string;
+  /** TEACHER (default) or ADMINISTRATION extra lectures. */
+  completionSource?: SyllabusCompletionSource;
+  /** False for administration extra lectures — excluded from teacher pay. */
+  countsTowardSalary?: boolean;
+  deliveredByName?: string;
   audit: AcademicAuditTrail;
   subject?: { _id: string; name: string; code: string };
   teacher?: { _id: string; teacherCode: string; user?: { fullName: string } };
+}
+
+export interface SyllabusOversightAssignedTeacher {
+  teacherId: string;
+  teacherName: string;
+  assignmentType: string;
+  unitFrom?: number | null;
+  unitTo?: number | null;
+  assignedPercentage?: number | null;
+  handoverBaselinePercent?: number | null;
+  /** Completion of this teacher's allotted leaves that count toward salary. */
+  salaryPercent: number;
+  completedLeaves: number;
+  allottedLeaves: number;
+  administrationLeaves: number;
+}
+
+export interface SyllabusOversightLeafRow {
+  subUnitId: string;
+  displayNo: string;
+  heading: string;
+  unitId: string;
+  unitNo: number;
+  unitTitle: string;
+  chapterTitle?: string;
+  status: SyllabusSubUnitStatus;
+  teachingHours: number;
+  attribution?: SyllabusCompletionAttribution;
+}
+
+export interface SyllabusOversightRelatedDetails {
+  sessionPlans: Array<{
+    _id: string;
+    teacherId: string;
+    teacherName: string;
+    status: AcademicPlanStatus;
+    completedPercent: number;
+    remainingPercent: number;
+  }>;
+  lessonPlanCount: number;
+  logBookTeacherEntries: number;
+  logBookAdministrationEntries: number;
+  lastLogBookDateBs?: string;
+}
+
+export interface SyllabusOversightListRow {
+  _id: string;
+  academicYearBs: string;
+  subjectId: string;
+  subjectName: string;
+  subjectCode: string;
+  yearId?: string;
+  yearLabel?: string;
+  classId?: string;
+  className?: string;
+  faculty?: string;
+  status: AcademicPlanStatus;
+  totalLeaves: number;
+  completedLeaves: number;
+  teacherLeaves: number;
+  administrationLeaves: number;
+  remainingLeaves: number;
+  completedPercent: number;
+  teacherPercent: number;
+  administrationPercent: number;
+  remainingPercent: number;
+  assignedTeachers: Array<{
+    teacherId: string;
+    teacherName: string;
+    assignmentType: string;
+    unitFrom?: number | null;
+    unitTo?: number | null;
+  }>;
+}
+
+export interface SyllabusOversightDetail {
+  syllabus: AcademicSyllabusRecord;
+  assignedTeachers: SyllabusOversightAssignedTeacher[];
+  leaves: SyllabusOversightLeafRow[];
+  related: SyllabusOversightRelatedDetails;
+  summary: {
+    totalLeaves: number;
+    completedLeaves: number;
+    teacherLeaves: number;
+    administrationLeaves: number;
+    completedPercent: number;
+    teacherPercent: number;
+    administrationPercent: number;
+    remainingPercent: number;
+  };
+}
+
+export interface AcademicApprovalQueueCounts {
+  sessionPlans: number;
+  lessonPlans: number;
+  logBooks: number;
+}
+
+export interface AcademicApprovalQueue {
+  awaitingVerification: AcademicApprovalQueueCounts;
+  awaitingApproval: AcademicApprovalQueueCounts;
+}
+
+export interface AcademicBulkReviewResult {
+  sessionPlans: number;
+  lessonPlans: number;
+  logBooks: number;
 }
 
 export interface AcademicCommentRecord {

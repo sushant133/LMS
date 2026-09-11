@@ -1,4 +1,4 @@
-import type { AcademicManagementFilters } from "@phit-erp/shared";
+import type { AcademicManagementFilters, AcademicManagementTab } from "@phit-erp/shared";
 import { FileDown, Printer, RotateCcw, Search } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "components/ui/button";
@@ -37,13 +37,7 @@ interface AcademicManagementFilterBarProps {
   onExportExcel: () => void;
   onExportPdf: () => void;
   onPrint: () => void;
-  activeTab:
-    | "dashboard"
-    | "syllabus"
-    | "session-plan"
-    | "lesson-plan"
-    | "log-book"
-    | "reports";
+  activeTab: AcademicManagementTab;
   classes: Option[];
   sections: Option[];
   batches: Option[];
@@ -241,7 +235,9 @@ export const AcademicManagementFilterBar = ({
             </Select>
           </label>
         ) : null}
-        {activeTab !== "session-plan" && activeTab !== "syllabus" ? (
+        {activeTab !== "session-plan" &&
+        activeTab !== "syllabus" &&
+        activeTab !== "syllabus-oversight" ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium text-slate-700">Month</span>
             <Select

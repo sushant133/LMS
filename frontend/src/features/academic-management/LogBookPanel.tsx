@@ -622,7 +622,7 @@ export const LogBookPanel = ({
       reviewStatus,
     }: {
       id: string;
-      reviewStatus: "REVIEWED" | "APPROVED" | "NEEDS_IMPROVEMENT";
+      reviewStatus: "NEEDS_IMPROVEMENT";
     }) =>
       unwrap(
         api.post(`/academic-management/log-book-entries/${id}/review`, {
@@ -631,6 +631,26 @@ export const LogBookPanel = ({
       ),
     onSuccess: () => {
       toast.success("Log book entry reviewed");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/academic-management/log-book-entries/${id}/verify`, {})),
+    onSuccess: () => {
+      toast.success("Log book entry verified");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/academic-management/log-book-entries/${id}/approve`, {})),
+    onSuccess: () => {
+      toast.success("Log book entry approved");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -1017,46 +1037,51 @@ export const LogBookPanel = ({
       </Button>
       {isAdmin && canMutate ? (
         <>
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-emerald-700"
-            title={
-              canPerformApprove
-                ? "Approve this log book entry"
-                : APPROVE_ADMIN_ONLY_MESSAGE
-            }
-            disabled={!canPerformApprove || reviewMutation.isPending}
-            onClick={() =>
-              reviewMutation.mutate({
-                id: entry._id,
-                reviewStatus: "APPROVED",
-              })
-            }
-          >
-            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-            Approve
-          </Button>
-          <Button
+          {entry.reviewStatus === "PENDING" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-sky-700"
+              disabled={verifyMutation.isPending}
+              onClick={() => verifyMutation.mutate(entry._id)}
+            >
+              Verify
+            </Button>
+          ) : null}
+          {String(entry.reviewStatus) === "VERIFIED" || entry.reviewStatus === "REVIEWED" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-emerald-700"
+              title={
+                canPerformApprove
+                  ? "Approve this verified log book entry"
+                  : APPROVE_ADMIN_ONLY_MESSAGE
+              }
+              disabled={!canPerformApprove || approveMutation.isPending}
+              onClick={() => approveMutation.mutate(entry._id)}
+            >
+              <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+              Approve
+            </Button>
+          ) : null}
+          {entry.reviewStatus === "PENDING" ? (
+            <Button
             size="sm"
             variant="outline"
             className="text-amber-700"
-            title={
-              canPerformApprove
-                ? "Mark as needs improvement"
-                : APPROVE_ADMIN_ONLY_MESSAGE
-            }
-            disabled={!canPerformApprove || reviewMutation.isPending}
+            title="Mark as needs improvement"
+            disabled={reviewMutation.isPending}
             onClick={() =>
               reviewMutation.mutate({
                 id: entry._id,
-                reviewStatus:
-                  "NEEDS_IMPROVEMENT",
+                reviewStatus: "NEEDS_IMPROVEMENT",
               })
             }
           >
             Needs improvement
           </Button>
+          ) : null}
         </>
       ) : null}
       {canEditDelete &&
@@ -1672,14 +1697,25 @@ export const LogBookPanel = ({
                                     {cleanDuplicatedUnitLabel(entry.unit) || "—"}
                                   </p>
                                 </div>
-                                <Badge
-                                  className={cn(
-                                    statusBadgeClass(entry.reviewStatus),
-                                    "no-print shrink-0",
-                                  )}
-                                >
-                                  {entry.reviewStatus}
-                                </Badge>
+                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                  <Badge
+                                    className={cn(
+                                      statusBadgeClass(entry.reviewStatus),
+                                      "no-print",
+                                    )}
+                                  >
+                                    {entry.reviewStatus}
+                                  </Badge>
+                                  {entry.completionSource === "ADMINISTRATION" ||
+                                  entry.countsTowardSalary === false ? (
+                                    <Badge className="bg-violet-100 text-violet-800">
+                                      Administration
+                                      {entry.deliveredByName
+                                        ? ` · ${entry.deliveredByName}`
+                                        : ""}
+                                    </Badge>
+                                  ) : null}
+                                </div>
                               </div>
                               {subs.length > 0 ? (
                                 <ul className="mt-2 list-disc pl-4 text-sm text-slate-700">
@@ -1799,13 +1835,22 @@ export const LogBookPanel = ({
                                         "—"}
                                     </Td>
                                     <Td className="no-print">
-                                      <Badge
-                                        className={statusBadgeClass(
-                                          entry.reviewStatus,
-                                        )}
-                                      >
-                                        {entry.reviewStatus}
-                                      </Badge>
+                                      <div className="flex flex-col items-start gap-1">
+                                        <Badge
+                                          className={statusBadgeClass(
+                                            entry.reviewStatus,
+                                          )}
+                                        >
+                                          {entry.reviewStatus}
+                                        </Badge>
+                                        {entry.completionSource ===
+                                          "ADMINISTRATION" ||
+                                        entry.countsTowardSalary === false ? (
+                                          <Badge className="bg-violet-100 text-violet-800">
+                                            Administration
+                                          </Badge>
+                                        ) : null}
+                                      </div>
                                     </Td>
                                     <Td className={cn("no-print", stickyActionsTd)}>
                                       {renderEntryActions(entry)}

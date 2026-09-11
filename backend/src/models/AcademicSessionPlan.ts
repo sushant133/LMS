@@ -10,7 +10,9 @@ const auditSchema = new Schema(
     rejectedAt: { type: Date },
     rejectionReason: { type: String },
     deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
-    deletedAt: { type: Date }
+    deletedAt: { type: Date },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    verifiedAt: { type: Date }
   },
   { _id: false }
 );
@@ -30,11 +32,12 @@ const sessionPlanSchema = new Schema(
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true, index: true },
     status: {
       type: String,
-      enum: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "REJECTED"],
+      enum: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "VERIFIED", "APPROVED", "REJECTED"],
       default: "DRAFT",
       index: true
     },
     adminRemarks: { type: String },
+    verifiedByName: { type: String },
     attachmentUrl: { type: String },
     audit: { type: auditSchema, required: true },
     isDeleted: { type: Boolean, default: false, index: true }

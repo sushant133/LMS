@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type AcademicLessonPlanRecord,
   type AcademicLogBookEntryRecord,
@@ -18,6 +18,7 @@ import {
   BookMarked,
   BookOpen,
   CalendarDays,
+  ClipboardCheck,
   ClipboardList,
   FileBarChart,
   LayoutDashboard,
@@ -29,12 +30,12 @@ import { Button } from "components/ui/button";
 import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useIsGrantedAdmin, useModuleAccess } from "hooks/useModuleAccess";
+import { useCanApproveRecords, useIsGrantedAdmin, useModuleAccess } from "hooks/useModuleAccess";
 import { getCollegeDisplayName } from "lib/auth";
 import { useWorkspaceMode } from "lib/workspace";
 import { api, unwrap } from "lib/api";
 import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
-import { cn } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 import { toast } from "sonner";
 import { AcademicManagementDashboardPanel } from "./AcademicManagementDashboard";
 import { AcademicManagementFilterBar } from "./AcademicManagementFilterBar";
@@ -42,7 +43,9 @@ import { LessonPlanPanel } from "./LessonPlanPanel";
 import { LogBookPanel } from "./LogBookPanel";
 import { AcademicReportsPanel } from "./AcademicReportsPanel";
 import { SessionPlanPanel } from "./SessionPlanPanel";
+import { SyllabusOversightPanel } from "./SyllabusOversightPanel";
 import { SyllabusPanel } from "./SyllabusPanel";
+import { isInstitutionAdmin, isSystemAdministrator } from "lib/roles";
 import {
   academicListApiParams,
   defaultAcademicFilters,
@@ -58,14 +61,16 @@ type Tab =
   | "session-plan"
   | "lesson-plan"
   | "log-book"
+  | "syllabus-oversight"
   | "reports";
 
-const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
+const allTabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminOnly?: boolean }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "syllabus", label: "Syllabus", icon: BookMarked },
   { id: "session-plan", label: "Session Plan", icon: BookOpen },
   { id: "lesson-plan", label: "Lesson Plan", icon: CalendarDays },
   { id: "log-book", label: "Log Book", icon: ClipboardList },
+  { id: "syllabus-oversight", label: "Syllabus Completion", icon: ClipboardCheck, adminOnly: true },
   { id: "reports", label: "Reports", icon: FileBarChart },
 ];
 
@@ -79,6 +84,8 @@ const printAreaIdForTab = (tab: Tab): string | null => {
       return "lesson-plan-print-area";
     case "log-book":
       return "log-book-print-area";
+    case "syllabus-oversight":
+      return "syllabus-oversight-print-area";
     default:
       return null;
   }
@@ -86,6 +93,7 @@ const printAreaIdForTab = (tab: Tab): string | null => {
 
 export const AcademicManagementHub = () => {
   const { user, availableSchools } = useAuth();
+  const queryClient = useQueryClient();
   const isCollege = useIsCollege();
   const workspace = useWorkspaceMode();
   /** Administration hub: all teachers' plans / approvals. My Work: own subjects only. */
@@ -98,6 +106,11 @@ export const AcademicManagementHub = () => {
   const institutionName = getCollegeDisplayName(availableSchools, user);
   const { canWrite: canWriteAcademic, isReadOnly: academicReadOnly } =
     useModuleAccess("academic-management");
+  const canPerformApprove = useCanApproveRecords();
+  const canSyllabusOversight =
+    isAdminWorkspace &&
+    (isInstitutionAdmin(user?.role ?? "") || isSystemAdministrator(user?.role ?? ""));
+  const tabs = allTabs.filter((tab) => !tab.adminOnly || canSyllabusOversight);
 
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [draftFilters, setDraftFilters] = useState<AcademicManagementFilters>(
@@ -196,6 +209,31 @@ export const AcademicManagementHub = () => {
       }),
     [appliedFilters, isCollege, isAdminWorkspace],
   );
+
+  const approveAllMutation = useMutation({
+    mutationFn: () =>
+      unwrap<{
+        sessionPlans: number;
+        lessonPlans: number;
+        logBooks: number;
+      }>(
+        api.post(
+          "/academic-management/approvals/approve-all",
+          { academicYearBs: appliedFilters.academicYearBs },
+          { params: academicListParams },
+        ),
+      ),
+    onSuccess: (result) => {
+      const total = result.sessionPlans + result.lessonPlans + result.logBooks;
+      toast.success(
+        total > 0
+          ? `${total} verified academic record${total === 1 ? "" : "s"} approved`
+          : "No verified academic records match the current filters",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
 
   useEffect(() => {
     if (!isAdminWorkspace) return;
@@ -448,7 +486,7 @@ export const AcademicManagementHub = () => {
   const handleExportPdf = () => {
     const printId = printAreaIdForTab(activeTab);
     if (!printId) {
-      toast.message("Switch to Syllabus, Session Plan, Lesson Plan, or Log Book to export PDF");
+      toast.message("Switch to Syllabus, Session Plan, Lesson Plan, Log Book, or Syllabus Completion to export PDF");
       return;
     }
     void downloadPdfFromElementById(
@@ -463,7 +501,7 @@ export const AcademicManagementHub = () => {
   const handlePrint = () => {
     const printId = printAreaIdForTab(activeTab);
     if (!printId) {
-      toast.message("Switch to Syllabus, Session Plan, Lesson Plan, or Log Book to print");
+      toast.message("Switch to Syllabus, Session Plan, Lesson Plan, Log Book, or Syllabus Completion to print");
       return;
     }
     void printElementById(printId, `${activeTab}-print`);
@@ -558,6 +596,26 @@ export const AcademicManagementHub = () => {
         showTeacherFilter={isAdmin}
       />
 
+      {isAdminWorkspace && canPerformApprove ? (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            disabled={approveAllMutation.isPending}
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Approve every verified session plan, lesson plan, and log book entry matching the current filters?",
+                )
+              ) {
+                approveAllMutation.mutate();
+              }
+            }}
+          >
+            {approveAllMutation.isPending ? "Approving verified records…" : "Approve all verified"}
+          </Button>
+        </div>
+      ) : null}
+
       <div className={cn(activeTab === "dashboard" ? "block" : "hidden")}>
         <AcademicManagementDashboardPanel
           data={dashboardQuery.data}
@@ -609,6 +667,15 @@ export const AcademicManagementHub = () => {
           {...hierarchyProps}
         />
       </div>
+      {canSyllabusOversight && activeTab === "syllabus-oversight" ? (
+        <SyllabusOversightPanel
+          filters={appliedFilters}
+          subjects={subjects}
+          teachers={teachersQuery.data ?? []}
+          writeAccess={canWriteAcademic}
+          {...hierarchyProps}
+        />
+      ) : null}
       <div className={cn(activeTab === "reports" ? "block" : "hidden")}>
         <AcademicReportsPanel filters={appliedFilters} />
       </div>

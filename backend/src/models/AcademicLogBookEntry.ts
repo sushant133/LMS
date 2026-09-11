@@ -10,7 +10,9 @@ const auditSchema = new Schema(
     rejectedAt: { type: Date },
     rejectionReason: { type: String },
     deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
-    deletedAt: { type: Date }
+    deletedAt: { type: Date },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    verifiedAt: { type: Date }
   },
   { _id: false }
 );
@@ -65,13 +67,26 @@ const entrySchema = new Schema(
     attachmentUrl: { type: String },
     reviewStatus: {
       type: String,
-      enum: ["PENDING", "REVIEWED", "APPROVED", "NEEDS_IMPROVEMENT"],
+      enum: ["PENDING", "REVIEWED", "VERIFIED", "APPROVED", "NEEDS_IMPROVEMENT"],
       default: "PENDING",
       index: true
     },
     teacherSignature: { type: String },
     adminSignature: { type: String },
     adminRemarks: { type: String },
+    verifiedByName: { type: String },
+    /**
+     * TEACHER (default) — taught by the named teacher, salary eligible.
+     * ADMINISTRATION — extra lectures filed by admin; syllabus complete, not pay.
+     */
+    completionSource: {
+      type: String,
+      enum: ["TEACHER", "ADMINISTRATION"],
+      default: "TEACHER",
+      index: true
+    },
+    countsTowardSalary: { type: Boolean, default: true, index: true },
+    deliveredByName: { type: String, default: "" },
     audit: { type: auditSchema, required: true },
     isDeleted: { type: Boolean, default: false, index: true }
   },

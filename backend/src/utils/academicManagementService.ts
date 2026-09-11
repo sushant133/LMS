@@ -43,11 +43,16 @@ import {
   collectLeftoverChainTeacherIds,
   type LeftoverAssignmentLink
 } from "./logBookContinuation.js";
+import {
+  clearSubUnitAttributionSet,
+  clearSubUnitAttributionUnset
+} from "./syllabusCompletionAttribution.js";
 import { recordAudit } from "./audit.js";
 import { getInstitutionType, isCollege } from "./institution.js";
 import { compareBsDates, getDayOfWeekFromBs, getOffsetFromBsDate, getTodayBs } from "./nepaliDate.js";
 import { sendNotification, getSchoolIdFromRequest } from "./notificationService.js";
 import { getTeacherScope, requireTeacherScope } from "./teacherScope.js";
+import { getUserSecondaryRoles } from "./moduleAccessService.js";
 import { tenantObjectId } from "./tenant.js";
 import { actorCanAdministerModule, actorMayUseAdminWorkspaceScope } from "./workspaceScope.js";
 
@@ -208,10 +213,29 @@ export const isDeadlineOverdue = (
 
 const APPROVED_STATUSES: AcademicPlanStatus[] = ["APPROVED"];
 /** Statuses locked for teacher edit until admin unlocks (or rejects). */
-const LOCKED_EDIT_STATUSES: AcademicPlanStatus[] = ["APPROVED", "SUBMITTED", "PENDING_APPROVAL"];
-const APPROVABLE_STATUSES: AcademicPlanStatus[] = ["SUBMITTED", "PENDING_APPROVAL"];
+const LOCKED_EDIT_STATUSES: AcademicPlanStatus[] = [
+  "APPROVED",
+  "SUBMITTED",
+  "PENDING_APPROVAL",
+  "VERIFIED"
+];
+const APPROVABLE_STATUSES: AcademicPlanStatus[] = ["VERIFIED"];
+const VERIFIABLE_PLAN_STATUSES: AcademicPlanStatus[] = ["SUBMITTED", "PENDING_APPROVAL"];
+const REJECTABLE_PLAN_STATUSES: AcademicPlanStatus[] = [
+  "SUBMITTED",
+  "PENDING_APPROVAL",
+  "VERIFIED"
+];
 
 export const isAcademicAdmin = (role: string): boolean => canManageInstitution(role);
+
+/** Administrator or Super Admin (primary or secondary role) — the only people who may approve. */
+export const actorIsInstitutionApprover = async (req: Request): Promise<boolean> => {
+  if (!req.user) return false;
+  if (canManageInstitution(req.user.role)) return true;
+  const secondary = await getUserSecondaryRoles(req.user.userId);
+  return secondary.some((role) => canManageInstitution(role));
+};
 
 /**
  * Expand a subject instance id to all curriculum siblings in the same school
@@ -799,7 +823,24 @@ export const assertEditableStatus = (status: AcademicPlanStatus): void => {
 
 export const assertApprovableStatus = (status: AcademicPlanStatus): void => {
   if (!APPROVABLE_STATUSES.includes(status)) {
-    throw new ApiError(400, "Only submitted plans can be approved or rejected.");
+    throw new ApiError(
+      400,
+      status === "SUBMITTED" || status === "PENDING_APPROVAL"
+        ? "This plan must be verified before an Administrator or Super Admin can approve it."
+        : "Only verified plans can be approved."
+    );
+  }
+};
+
+export const assertVerifiablePlanStatus = (status: AcademicPlanStatus): void => {
+  if (!VERIFIABLE_PLAN_STATUSES.includes(status)) {
+    throw new ApiError(400, "Only submitted plans can be verified.");
+  }
+};
+
+export const assertRejectablePlanStatus = (status: AcademicPlanStatus): void => {
+  if (!REJECTABLE_PLAN_STATUSES.includes(status)) {
+    throw new ApiError(400, "Only submitted or verified plans can be rejected.");
   }
 };
 
@@ -820,7 +861,7 @@ export const recordApproval = async (
   req: Request,
   entityType: "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY",
   entityId: string,
-  action: "SUBMITTED" | "APPROVED" | "REJECTED" | "UNLOCKED",
+  action: "SUBMITTED" | "VERIFIED" | "APPROVED" | "REJECTED" | "UNLOCKED",
   remarks?: string
 ): Promise<void> => {
   if (!req.user) return;
@@ -930,7 +971,7 @@ export const academicAdminPendingCopy = (
 
 export const academicTeacherDecisionCopy = (
   kind: AcademicNotifyKind,
-  action: "APPROVED" | "REJECTED" | "UNLOCKED" | "REVIEWED" | "COMMENT",
+  action: "APPROVED" | "REJECTED" | "UNLOCKED" | "REVIEWED" | "VERIFIED" | "COMMENT",
   subjectName: string,
   extra?: string,
   remarks?: string
@@ -959,6 +1000,13 @@ export const academicTeacherDecisionCopy = (
       return {
         title: "Log book reviewed",
         message: note ? `Your ${item} was reviewed. Remarks: ${note}` : `Your ${item} was reviewed.`
+      };
+    case "VERIFIED":
+      return {
+        title: `${ACADEMIC_KIND_TITLE[kind]} verified`,
+        message: note
+          ? `Your ${item} has been verified and is waiting for administrator approval. Remarks: ${note}`
+          : `Your ${item} has been verified and is waiting for administrator approval.`
       };
     case "COMMENT":
       return {
@@ -1002,7 +1050,7 @@ export const notifyTeacherOfAcademicDecision = async (
     teacherId: string;
     subjectId?: string | null;
     extra?: string;
-    action: "APPROVED" | "REJECTED" | "UNLOCKED" | "REVIEWED" | "COMMENT";
+    action: "APPROVED" | "REJECTED" | "UNLOCKED" | "REVIEWED" | "VERIFIED" | "COMMENT";
     remarks?: string;
     entityId: string;
   }
@@ -1747,20 +1795,33 @@ export const syncSyllabusCompletionFromLogBook = async (
     subjectId
   );
   const taughtList = [...taught];
+  /**
+   * Administration extra lectures are stamped on the leaf. Teacher log-book
+   * sync must not wipe those — otherwise a later class save would erase
+   * units already completed by extra lectures and reopen them for salary.
+   */
+  const resettable: Record<string, unknown> = {
+    syllabusId,
+    status: "COMPLETED",
+    completionSource: { $nin: ["ADMINISTRATION"] },
+    countsTowardSalary: { $ne: false }
+  };
   if (taughtList.length === 0) {
-    await AcademicSyllabusSubUnit.updateMany(
-      { syllabusId, status: "COMPLETED" },
-      { $set: { status: "NOT_STARTED" } }
-    );
+    await AcademicSyllabusSubUnit.updateMany(resettable, {
+      $set: { status: "NOT_STARTED", ...clearSubUnitAttributionSet() },
+      $unset: clearSubUnitAttributionUnset()
+    });
     return taught;
   }
   await AcademicSyllabusSubUnit.updateMany(
     {
-      syllabusId,
-      status: "COMPLETED",
+      ...resettable,
       _id: { $nin: taughtList }
     },
-    { $set: { status: "NOT_STARTED" } }
+    {
+      $set: { status: "NOT_STARTED", ...clearSubUnitAttributionSet() },
+      $unset: clearSubUnitAttributionUnset()
+    }
   );
   await AcademicSyllabusSubUnit.updateMany(
     { syllabusId, _id: { $in: taughtList } },
@@ -2398,7 +2459,9 @@ const formatAudit = (doc: { audit: Record<string, unknown>; createdAt?: Date; up
   rejectedAt: doc.audit.rejectedAt ? new Date(doc.audit.rejectedAt as Date).toISOString() : undefined,
   rejectionReason: doc.audit.rejectionReason as string | undefined,
   deletedBy: doc.audit.deletedBy ? String(doc.audit.deletedBy) : undefined,
-  deletedAt: doc.audit.deletedAt ? new Date(doc.audit.deletedAt as Date).toISOString() : undefined
+  deletedAt: doc.audit.deletedAt ? new Date(doc.audit.deletedAt as Date).toISOString() : undefined,
+  verifiedBy: doc.audit.verifiedBy ? String(doc.audit.verifiedBy) : undefined,
+  verifiedAt: doc.audit.verifiedAt ? new Date(doc.audit.verifiedAt as Date).toISOString() : undefined
 });
 
 export const serializeSessionPlan = async (planId: string) => {
@@ -2433,6 +2496,7 @@ export const serializeSessionPlan = async (planId: string) => {
     status: plan.status,
     adminRemarks: plan.adminRemarks,
     attachmentUrl: plan.attachmentUrl,
+    verifiedByName: (plan as { verifiedByName?: string }).verifiedByName || "",
     units: displayUnits.map((unit) => ({
       _id: unit._id.toString(),
       sessionPlanId: unit.sessionPlanId.toString(),
@@ -2746,6 +2810,8 @@ export const serializeLessonPlan = async (planId: string) => {
     status: plan.status,
     preparedBy: plan.preparedBy,
     checkedBy: plan.checkedBy,
+    verifiedByName:
+      (plan as { verifiedByName?: string }).verifiedByName || plan.checkedBy || "",
     approvedByName: plan.approvedByName,
     approvalDate: plan.approvalDate,
     adminRemarks: plan.adminRemarks,
@@ -2843,6 +2909,14 @@ export const serializeLogBookEntry = async (entryId: string) => {
     teacherSignature: entry.teacherSignature,
     adminSignature: entry.adminSignature,
     adminRemarks: entry.adminRemarks,
+    verifiedByName: String((entry as { verifiedByName?: string }).verifiedByName || ""),
+    completionSource:
+      String((entry as { completionSource?: string }).completionSource || "").toUpperCase() ===
+      "ADMINISTRATION"
+        ? "ADMINISTRATION"
+        : "TEACHER",
+    countsTowardSalary: (entry as { countsTowardSalary?: boolean }).countsTowardSalary !== false,
+    deliveredByName: String((entry as { deliveredByName?: string }).deliveredByName || ""),
     audit: formatAudit(entry),
     subject: entry.subjectId as unknown as { _id: string; name: string; code: string } | undefined,
     teacher: entry.teacherId as unknown as { _id: string; teacherCode: string; user?: { fullName: string } } | undefined
@@ -3148,8 +3222,14 @@ const buildDashboardInner = async (
   ]);
 
   const [pendingLessonApprovals, pendingSessionApprovals] = await Promise.all([
-    AcademicLessonPlan.countDocuments({ ...officialFilter, status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] } }),
-    AcademicSessionPlan.countDocuments({ ...officialFilter, status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] } })
+    AcademicLessonPlan.countDocuments({
+      ...officialFilter,
+      status: { $in: ["SUBMITTED", "PENDING_APPROVAL", "VERIFIED"] }
+    }),
+    AcademicSessionPlan.countDocuments({
+      ...officialFilter,
+      status: { $in: ["SUBMITTED", "PENDING_APPROVAL", "VERIFIED"] }
+    })
   ]);
   const pendingApprovals = pendingLessonApprovals + pendingSessionApprovals;
   const approvedPlans = await AcademicLessonPlan.countDocuments({ ...officialFilter, status: "APPROVED" });

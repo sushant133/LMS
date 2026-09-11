@@ -8,6 +8,8 @@ import {
   subjectFamilyStem
 } from "./tenderSyllabusProgress.js";
 
+import { leafCountsTowardTeacherSalary } from "./syllabusCompletionAttribution.js";
+
 describe("subject family matching", () => {
   it("pairs Botany with Botany Practical", () => {
     assert.equal(subjectFamilyStem("Botany"), "botany");
@@ -48,3 +50,22 @@ describe("subject family matching", () => {
     assert.equal(theory[0]?.leafId, "a");
   });
 });
+
+describe("teacher salary vs administration extra lectures", () => {
+  it("does not credit administration-completed leaves to the assigned teacher", () => {
+    const adminLeaf = {
+      completed: true,
+      completionSource: "ADMINISTRATION",
+      countsTowardSalary: false
+    };
+    const teacherLeaf = {
+      completed: true,
+      completionSource: "TEACHER",
+      countsTowardSalary: true,
+      completedByTeacherId: "physics-teacher"
+    };
+    assert.equal(leafCountsTowardTeacherSalary(adminLeaf, "physics-teacher"), false);
+    assert.equal(leafCountsTowardTeacherSalary(teacherLeaf, "physics-teacher"), true);
+  });
+});
+

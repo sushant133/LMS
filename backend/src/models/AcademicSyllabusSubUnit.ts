@@ -66,6 +66,22 @@ const subUnitSchema = new Schema(
     teachingNotes: { type: String, default: "" },
     teacherAttachments: { type: [attachmentSchema], default: [] },
     todaysCoverage: { type: String, default: "" },
+    /**
+     * TEACHER = assigned (or named) teacher taught it — salary eligible.
+     * ADMINISTRATION = extra lectures / other person — syllabus only, not salary.
+     */
+    completionSource: {
+      type: String,
+      enum: ["TEACHER", "ADMINISTRATION"],
+      index: true
+    },
+    completedByTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", index: true },
+    completedByUserId: { type: Schema.Types.ObjectId, ref: "User" },
+    completedAt: { type: Date },
+    completionNote: { type: String, default: "" },
+    /** Default true so legacy completed leaves still count toward tender pay. */
+    countsTowardSalary: { type: Boolean, default: true, index: true },
+    deliveredByName: { type: String, default: "" },
     sortOrder: { type: Number, default: 0, min: 0 }
   },
   { timestamps: true }

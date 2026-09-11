@@ -104,7 +104,10 @@ const loadTeacherPayFacts = async (
           schoolId,
           teacherId: { $in: teacherIds },
           isDeleted: false,
-          dateBs: { $regex: `^${monthBs}` }
+          dateBs: { $regex: `^${monthBs}` },
+          // Administration extra lectures stay on the log book but are not paid periods.
+          countsTowardSalary: { $ne: false },
+          completionSource: { $ne: "ADMINISTRATION" }
         }
       },
       { $group: { _id: "$teacherId", periods: { $sum: 1 } } }
@@ -179,9 +182,13 @@ const loadTeacherPayFacts = async (
     const avg = values.reduce((sum, n) => sum + n, 0) / Math.max(1, values.length);
     progressByTeacherSubject.set(key, round2(avg));
   }
-  // Official syllabus wins when it reflects taught work. Keep session-plan %
-  // when syllabus leaves are unmarked so Academic Management completion is paid.
+  // Official syllabus is the pay source when allotted leaves exist — including
+  // 0% after administration extra lectures, which must not inherit session-plan %.
   for (const [key, percent] of syllabusProgress.percentByTeacherSubject) {
+    if (syllabusProgress.hasAllottedLeavesByTeacherSubject.get(key)) {
+      progressByTeacherSubject.set(key, round2(percent));
+      continue;
+    }
     const existing = progressByTeacherSubject.get(key) ?? 0;
     progressByTeacherSubject.set(key, round2(Math.max(percent, existing)));
   }

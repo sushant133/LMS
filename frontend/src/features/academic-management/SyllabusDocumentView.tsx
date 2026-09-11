@@ -17,6 +17,12 @@ type SubUnitLike = {
   description?: string;
   teachingHours?: number;
   status?: string;
+  attribution?: {
+    source?: string;
+    countsTowardSalary?: boolean;
+    deliveredByName?: string;
+    completedByTeacherName?: string;
+  };
   children?: SubUnitLike[];
 };
 
@@ -44,6 +50,20 @@ const renderSubUnits = (
           </span>
           {sub.teachingHours ? (
             <span className="text-slate-600"> · {sub.teachingHours}h</span>
+          ) : null}
+          {sub.status === "COMPLETED" || sub.status === "SKIPPED" ? (
+            <span className="ml-1 text-xs text-slate-500">
+              {sub.attribution?.source === "ADMINISTRATION" ||
+              sub.attribution?.countsTowardSalary === false
+                ? `(administration${
+                    sub.attribution?.deliveredByName
+                      ? `: ${sub.attribution.deliveredByName}`
+                      : ""
+                  } · not salary)`
+                : sub.attribution?.completedByTeacherName
+                  ? `(${sub.attribution.completedByTeacherName})`
+                  : " (completed)"}
+            </span>
           ) : null}
           {sub.description?.trim() ? (
             <p className="mt-0.5 text-xs text-slate-600">{sub.description}</p>

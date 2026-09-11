@@ -607,6 +607,16 @@ export const SessionPlanPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const verifyMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/academic-management/session-plans/${id}/verify`, {})),
+    onSuccess: () => {
+      toast.success("Session plan verified");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const rejectMutation = useMutation({
     mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
       unwrap(
@@ -866,6 +876,17 @@ export const SessionPlanPanel = ({
             {isAdmin &&
             (plan.status === "SUBMITTED" ||
               plan.status === "PENDING_APPROVAL") ? (
+              <>
+                <Button
+                  size="sm"
+                  disabled={verifyMutation.isPending}
+                  onClick={() => verifyMutation.mutate(plan._id)}
+                >
+                  Verify
+                </Button>
+              </>
+            ) : null}
+            {isAdmin && String(plan.status) === "VERIFIED" ? (
               <>
                 <Button
                   size="sm"

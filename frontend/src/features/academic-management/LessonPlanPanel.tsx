@@ -1424,6 +1424,16 @@ export const LessonPlanPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const verifyMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/academic-management/lesson-plans/${id}/verify`, {})),
+    onSuccess: () => {
+      toast.success("Lesson plan verified");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const unlockMutation = useMutation({
     mutationFn: (id: string) =>
       unwrap(api.post(`/academic-management/lesson-plans/${id}/unlock`)),
@@ -2384,7 +2394,7 @@ export const LessonPlanPanel = ({
                           <p className="text-sm font-semibold text-amber-950">
                             {pendingPlans.length} lesson plan
                             {pendingPlans.length === 1 ? "" : "s"} waiting for
-                            approval
+                            verification
                           </p>
                           {pendingPlans
                             .slice()
@@ -2408,7 +2418,7 @@ export const LessonPlanPanel = ({
                                   <p className="text-xs text-slate-500">
                                     {plan.teacher?.user?.fullName ||
                                       group.teacherName}{" "}
-                                    · submitted, needs admin approval
+                                    · submitted, waiting for verification
                                   </p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
@@ -2417,47 +2427,39 @@ export const LessonPlanPanel = ({
                                       ? "PENDING APPROVAL"
                                       : plan.status}
                                   </Badge>
-                                  <Button
-                                    size="sm"
-                                    onClick={() =>
-                                      approveMutation.mutate(plan._id)
-                                    }
-                                    disabled={
-                                      !canPerformApprove ||
-                                      approveMutation.isPending
-                                    }
-                                    title={
-                                      canPerformApprove
-                                        ? undefined
-                                        : APPROVE_ADMIN_ONLY_MESSAGE
-                                    }
-                                  >
-                                    Approve
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      const remarks =
-                                        window.prompt("Rejection remarks");
-                                      if (remarks)
-                                        rejectMutation.mutate({
-                                          id: plan._id,
-                                          remarks,
-                                        });
-                                    }}
-                                    disabled={
-                                      !canPerformApprove ||
-                                      rejectMutation.isPending
-                                    }
-                                    title={
-                                      canPerformApprove
-                                        ? undefined
-                                        : APPROVE_ADMIN_ONLY_MESSAGE
-                                    }
-                                  >
-                                    Reject
-                                  </Button>
+                                  {isLessonPlanPending(plan.status) ? (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => verifyMutation.mutate(plan._id)}
+                                      disabled={verifyMutation.isPending}
+                                    >
+                                      Verify
+                                    </Button>
+                                  ) : null}
+                                  {String(plan.status) === "VERIFIED" ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        onClick={() => approveMutation.mutate(plan._id)}
+                                        disabled={!canPerformApprove || approveMutation.isPending}
+                                        title={canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE}
+                                      >
+                                        Approve
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          const remarks = window.prompt("Rejection remarks");
+                                          if (remarks) rejectMutation.mutate({ id: plan._id, remarks });
+                                        }}
+                                        disabled={!canPerformApprove || rejectMutation.isPending}
+                                        title={canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE}
+                                      >
+                                        Reject
+                                      </Button>
+                                    </>
+                                  ) : null}
                                 </div>
                               </div>
                             ))}
@@ -2596,18 +2598,20 @@ export const LessonPlanPanel = ({
                                             <>
                                               <Button
                                                 size="sm"
-                                                disabled={
-                                                  !canPerformApprove ||
-                                                  approveMutation.isPending
-                                                }
-                                                title={
-                                                  canPerformApprove
-                                                    ? undefined
-                                                    : APPROVE_ADMIN_ONLY_MESSAGE
-                                                }
-                                                onClick={() =>
-                                                  approveMutation.mutate(plan._id)
-                                                }
+                                                disabled={verifyMutation.isPending}
+                                                onClick={() => verifyMutation.mutate(plan._id)}
+                                              >
+                                                Verify
+                                              </Button>
+                                            </>
+                                          ) : null}
+                                          {isAdmin && String(plan.status) === "VERIFIED" ? (
+                                            <>
+                                              <Button
+                                                size="sm"
+                                                disabled={!canPerformApprove || approveMutation.isPending}
+                                                title={canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE}
+                                                onClick={() => approveMutation.mutate(plan._id)}
                                               >
                                                 Approve
                                               </Button>
