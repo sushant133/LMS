@@ -51,6 +51,7 @@ import {
   formatPrintAddress,
   setPrintInstitutionBranding,
 } from "lib/printBranding";
+import { registerBackHandler } from "lib/nativeBackButton";
 import { setNativeSystemBarStyle } from "lib/platform";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
@@ -528,6 +529,15 @@ export const AppLayout = () => {
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
+
+  // Android back closes the drawer before it leaves the page.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    return registerBackHandler(() => {
+      setMobileNavOpen(false);
+      return true;
+    });
+  }, [mobileNavOpen]);
 
   const isTeacherUser =
     Boolean(user) &&

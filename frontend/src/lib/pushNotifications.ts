@@ -1,11 +1,13 @@
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { api } from "lib/api";
+import { openNotificationPath } from "lib/notificationRouting";
 
 const STORAGE_KEY = "phit_fcm_device_token";
 const ANDROID_CHANNEL_ID = "lms_default";
 
 let listenersAttached = false;
+let actionListenerAttached = false;
 let initInFlight: Promise<void> | null = null;
 /** Bumped on logout so an in-flight register cannot re-bind the old user. */
 let registrationEpoch = 0;
@@ -37,7 +39,31 @@ const postDeviceToken = async (token: string): Promise<void> => {
   });
 };
 
+/**
+ * Only the tap handler. Safe to call at app start: it asks for nothing and shows
+ * nothing, it just makes sure a notification tap is routed as soon as it arrives
+ * (Capacitor retains the event until a listener exists, so a tap that launched the
+ * app used to sit unhandled until the session had resolved).
+ */
+export const attachPushNavigationListener = (): void => {
+  if (actionListenerAttached) return;
+  if (!Capacitor.isNativePlatform()) return;
+  actionListenerAttached = true;
+
+  void PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+    const rawPath = action.notification?.data?.path;
+    const path =
+      typeof rawPath === "string" && rawPath.startsWith("/") && !rawPath.startsWith("//")
+        ? rawPath
+        : "/notifications";
+    // In-app navigation — a full page load here meant a blank screen while the
+    // remote site was re-downloaded.
+    openNotificationPath(path);
+  });
+};
+
 const attachListenersOnce = (): void => {
+  attachPushNavigationListener();
   if (listenersAttached) return;
   listenersAttached = true;
 
@@ -59,17 +85,6 @@ const attachListenersOnce = (): void => {
 
   void PushNotifications.addListener("registrationError", (error) => {
     console.error("[push] Registration error", error);
-  });
-
-  void PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-    const rawPath = action.notification?.data?.path;
-    const path =
-      typeof rawPath === "string" && rawPath.startsWith("/") && !rawPath.startsWith("//")
-        ? rawPath
-        : "/notifications";
-    if (typeof window !== "undefined" && window.location.pathname !== path) {
-      window.location.assign(path);
-    }
   });
 };
 

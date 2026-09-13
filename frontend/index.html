@@ -12,9 +12,75 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Noto+Sans+Devanagari:ital,wght@0,100..900;1,100..900&display=swap"
       rel="stylesheet"
     />
+    <!--
+      App-shell loader. The WebView points at the remote site (capacitor.config.ts
+      server.url), so every full page load spent the whole network round trip on an
+      empty <body> — that was the blank white screen after tapping a notification.
+      This paints with the first byte of HTML and main.tsx removes it once React
+      has rendered.
+    -->
+    <style>
+      #app-boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #ffffff;
+        font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      #app-boot-loader img {
+        width: clamp(4.5rem, 22vmin, 7rem);
+        height: clamp(4.5rem, 22vmin, 7rem);
+        max-width: 36vw;
+        max-height: 36vh;
+        object-fit: contain;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #app-boot-loader .app-boot-spinner {
+        width: 34px;
+        height: 34px;
+        border-radius: 9999px;
+        border: 3px solid #dbe4f3;
+        border-top-color: #1d4ed8;
+        animation: app-boot-spin 0.8s linear infinite;
+      }
+      #app-boot-loader p {
+        margin: 0;
+        font-size: 0.8125rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+      }
+      html.app-booted #app-boot-loader {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.25s ease, visibility 0.25s ease;
+      }
+      @keyframes app-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #app-boot-loader .app-boot-spinner {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="app-boot-loader" role="status" aria-live="polite">
+      <img src="/college-logo.png" alt="PHIT COLLEGE" decoding="sync" />
+      <div class="app-boot-spinner" aria-hidden="true"></div>
+      <p>Loading</p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
