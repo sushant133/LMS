@@ -973,7 +973,7 @@ const HospitalsManager = ({
                   hospitals.map((h) => (
                     <tr key={h._id}>
                       <Td className="font-medium">{h.name}</Td>
-                      <Td>{h.address || "—"}</Td>
+                      <Td className="cell-wrap">{h.address || "—"}</Td>
                       <Td>{h.contact || "—"}</Td>
                       <Td>{h.coordinatorName || "—"}</Td>
                       <Td>

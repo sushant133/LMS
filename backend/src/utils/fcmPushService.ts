@@ -94,6 +94,12 @@ export interface DeliverPushInput {
   type: NotificationType | string;
   notificationId?: string;
   metadata?: Record<string, string>;
+  /**
+   * Android notification tag / FCM collapse key. Devices REPLACE an existing
+   * tray entry carrying the same tag instead of stacking another copy, so a
+   * recurring digest shows as one notification rather than one per run.
+   */
+  collapseKey?: string;
 }
 
 /**
@@ -137,6 +143,10 @@ export const deliverPushToUser = async (input: DeliverPushInput): Promise<void> 
 
     const title = input.title.slice(0, 120);
     const body = input.message.slice(0, 240);
+    // FCM rejects long/odd collapse keys; keep it short and safe.
+    const collapseTag = input.collapseKey
+      ? input.collapseKey.replace(/[^A-Za-z0-9_:-]/g, "_").slice(0, 64)
+      : "";
 
     const response = await messaging.sendEachForMulticast({
       tokens,
@@ -147,12 +157,16 @@ export const deliverPushToUser = async (input: DeliverPushInput): Promise<void> 
       data,
       android: {
         priority: "high",
+        ...(collapseTag ? { collapseKey: collapseTag } : {}),
         notification: {
           channelId: "lms_default",
           sound: "default",
           priority: "high",
           defaultSound: true,
-          defaultVibrateTimings: true
+          defaultVibrateTimings: true,
+          // Same tag => the device replaces the old tray entry instead of
+          // adding a third identical "Pending academic reviews".
+          ...(collapseTag ? { tag: collapseTag } : {})
         }
       }
     });

@@ -16,6 +16,8 @@ import {
   isDeadlineApproaching,
   type AcademicNotifyKind
 } from "./academicManagementService.js";
+import { notifyDayAheadDigest } from "./academicCalendarNotifications.js";
+import { notifyAdminDailyDigest } from "./adminDailyDigest.js";
 import { getDayOfWeekFromBs, getTodayBs } from "./nepaliDate.js";
 import { sendNotification } from "./notificationService.js";
 
@@ -36,7 +38,8 @@ const notifySchoolAdmins = async (
   schoolId: string,
   title: string,
   message: string,
-  metadata?: Record<string, string>
+  metadata?: Record<string, string>,
+  dedupe?: { dedupeKey: string; renotifyAfterHours?: number }
 ) => {
   const admins = await User.find({
     schoolId,
@@ -52,7 +55,9 @@ const notifySchoolAdmins = async (
         title,
         message,
         type: "ACADEMIC_MANAGEMENT",
-        metadata
+        metadata,
+        dedupeKey: dedupe?.dedupeKey,
+        renotifyAfterHours: dedupe?.renotifyAfterHours
       })
     )
   );
@@ -63,7 +68,8 @@ const notifyTeacherUser = async (
   teacherId: string,
   title: string,
   message: string,
-  metadata?: Record<string, string>
+  metadata?: Record<string, string>,
+  dedupeKey?: string
 ) => {
   const teacher = await Teacher.findById(teacherId).select("user").lean();
   if (!teacher?.user) return;
@@ -73,7 +79,8 @@ const notifyTeacherUser = async (
     title,
     message,
     type: "ACADEMIC_MANAGEMENT",
-    metadata
+    metadata,
+    dedupeKey
   });
 };
 
@@ -217,8 +224,22 @@ const notifyPendingAcademicReviews = async (schoolId: string, todayBs: string): 
 
   if (pending.length === 0) return;
 
-  const key = cacheKey(["admin-pending", schoolId, todayBs, String(pending.length)]);
-  if (!shouldNotify(key)) return;
+  /**
+   * Identity is the backlog itself, NOT today's date or the item count.
+   *
+   * Keying on todayBs meant a completely unchanged backlog produced a fresh
+   * "217 academic items are waiting" notification every Nepali day, forever,
+   * even though no teacher had touched anything — the notification is about
+   * work the ADMIN has not done, so it never cleared itself.
+   */
+  const dedupeKey = `admin-pending:${schoolId}`;
+
+  // Deterministic order: the digest text feeds the content hash, so an
+  // unstable Mongo ordering would look like "the backlog changed" and
+  // re-notify on every run.
+  pending.sort((a, b) =>
+    a.kind === b.kind ? a.entityId.localeCompare(b.entityId) : a.kind.localeCompare(b.kind)
+  );
 
   const { teacherNameById, subjectNameById } = await loadNameMaps(
     pending.map((row) => row.teacherId),
@@ -233,11 +254,16 @@ const notifyPendingAcademicReviews = async (schoolId: string, todayBs: string): 
       subjectNameById.get(item.subjectId) || "a subject",
       item.extra
     );
-    await notifySchoolAdmins(schoolId, copy.title, copy.message, {
-      dateBs: todayBs,
-      kind: item.kind,
-      entityId: item.entityId
-    });
+    await notifySchoolAdmins(
+      schoolId,
+      copy.title,
+      copy.message,
+      {
+        kind: item.kind,
+        entityId: item.entityId
+      },
+      { dedupeKey }
+    );
     return;
   }
 
@@ -253,10 +279,15 @@ const notifyPendingAcademicReviews = async (schoolId: string, todayBs: string): 
     .filter(Boolean)
     .join(" ");
 
-  await notifySchoolAdmins(schoolId, "Pending academic reviews", message, {
-    dateBs: todayBs,
-    count: String(pending.length)
-  });
+  await notifySchoolAdmins(
+    schoolId,
+    "Pending academic reviews",
+    message,
+    { count: String(pending.length) },
+    // No renotifyAfterHours: say it once, and again only when the backlog
+    // actually changes. The content hash covers the count and the listed items.
+    { dedupeKey }
+  );
 };
 
 export const runAcademicManagementNotifications = async (): Promise<void> => {
@@ -269,6 +300,12 @@ export const runAcademicManagementNotifications = async (): Promise<void> => {
 
     await refreshLessonPlanItemStatuses(schoolId, todayBs);
     await notifyPendingAcademicReviews(schoolId, todayBs);
+    // Evening "what's on tomorrow" notice. Self-gates to the 16:00-22:00 Nepal
+    // window and stays silent when tomorrow holds nothing worth a push.
+    await notifyDayAheadDigest(schoolId, todayBs);
+    // Evening roll-up so administrators see the whole school's day in one
+    // message instead of being copied on every individual notification.
+    await notifyAdminDailyDigest(schoolId, todayBs);
 
     // Incomplete lesson plan items — batch-load plans (avoid N+1)
     const incompleteItems = await AcademicLessonPlanItem.find({
@@ -326,7 +363,8 @@ export const runAcademicManagementNotifications = async (): Promise<void> => {
           teacherId,
           "Lesson plan overdue",
           `Your ${subjectName} lesson plan${when ? ` (${when})` : ""} is overdue: "${topic}" still has ${remainingPercent}% remaining (${item.completedClasses}/${item.estimatedClasses} classes). Please complete it and update the log book.`,
-          meta
+          meta,
+          key
         );
       } else if (
         isDeadlineApproaching(item.deadline, item.estimatedClasses, item.completedClasses, 3, todayBs)
@@ -338,7 +376,8 @@ export const runAcademicManagementNotifications = async (): Promise<void> => {
           teacherId,
           "Lesson plan deadline approaching",
           `Your ${subjectName} lesson plan topic "${topic}" is due ${item.deadline || "soon"}. ${remainingPercent}% remaining — finish on time and record it in the log book.`,
-          meta
+          meta,
+          key
         );
       }
     }
@@ -393,7 +432,8 @@ export const runAcademicManagementNotifications = async (): Promise<void> => {
         tid,
         "Log book not submitted",
         `You have a class scheduled today${subjectBit} (${todayBs}) but have not submitted the teaching log book. Please submit it so lesson plan and syllabus progress stay up to date.`,
-        { dateBs: todayBs }
+        { dateBs: todayBs },
+        key
       );
     }
   }

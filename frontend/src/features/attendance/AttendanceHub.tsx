@@ -257,7 +257,8 @@ export const AttendanceHub = () => {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
+      {/* tab-strip: one swipeable row on a phone, plain flex-wrap from md up. */}
+      <div className="tab-strip flex flex-wrap gap-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (

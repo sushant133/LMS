@@ -180,7 +180,9 @@ export const updateComplaintStatus = asyncHandler(async (req: Request, res: Resp
     recipientUserId: complaint.submittedBy.toString(),
     title: "Complaint status updated",
     message: `Your complaint "${complaint.subject}" is now ${payload.status.replace(/_/g, " ").toLowerCase()}.`,
-    type: "COMPLAINT"
+    type: "COMPLAINT",
+    // A human decision: the same status can legitimately be set again.
+    dedupeHours: 0
   });
 
   const [enriched] = await enrichComplaints([complaint as ComplaintLean], true);

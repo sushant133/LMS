@@ -78,6 +78,12 @@ const subUnitSchema = new Schema(
     completedByTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", index: true },
     completedByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     completedAt: { type: Date },
+    /**
+     * The BS date the topic was actually taught, as entered on the completion
+     * form. `completedAt` is only when the record was saved, which is often a
+     * different day, so oversight needs this to report "taught on".
+     */
+    taughtDateBs: { type: String, default: "" },
     completionNote: { type: String, default: "" },
     /** Default true so legacy completed leaves still count toward tender pay. */
     countsTowardSalary: { type: Boolean, default: true, index: true },

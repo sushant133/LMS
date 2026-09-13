@@ -228,7 +228,7 @@ export const BankReconciliationPanel = ({ canWrite }: { canWrite: boolean }) => 
                           </Td>
                           <Td>{item.dateBs}</Td>
                           <Td className="font-mono text-xs">{item.voucherNumber}</Td>
-                          <Td>{item.narration}</Td>
+                          <Td className="cell-wrap">{item.narration}</Td>
                           <Td className="text-right">
                             {item.debitNpr > 0 ? npr(item.debitNpr) : "—"}
                           </Td>

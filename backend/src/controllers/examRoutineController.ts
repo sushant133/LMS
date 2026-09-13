@@ -538,7 +538,10 @@ const notifyExamAudience = async (
         message,
         type: "EXAM",
         channel: "IN_APP",
-        metadata: { examId: String(exam._id) }
+        metadata: { examId: String(exam._id) },
+        // Republishing a corrected routine repeats the same wording — students
+        // must still be told.
+        dedupeHours: 0
       })
     )
   );

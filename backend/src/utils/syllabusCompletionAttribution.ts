@@ -54,6 +54,8 @@ type MarkParams = {
   note?: string;
   deliveredByName?: string;
   todaysCoverage?: string;
+  /** BS date the topic was actually taught (not when the record was saved). */
+  taughtDateBs?: string;
   /** Admin oversight overwrites prior attribution. Teacher log book does not steal admin leaves. */
   overwriteAttribution?: boolean;
 };
@@ -89,6 +91,7 @@ export const markSubUnitsCompleted = async (params: MarkParams): Promise<string[
     completedByTeacherId: countsTowardSalary ? teacherOid : undefined,
     completedByUserId: userOid,
     completedAt: new Date(),
+    taughtDateBs: (params.taughtDateBs || "").trim(),
     completionNote: (params.note || "").trim(),
     countsTowardSalary,
     deliveredByName: (params.deliveredByName || "").trim()
@@ -110,7 +113,8 @@ export const markSubUnitsCompleted = async (params: MarkParams): Promise<string[
       {
         $set: {
           status: "COMPLETED",
-          todaysCoverage: params.todaysCoverage || ""
+          todaysCoverage: params.todaysCoverage || "",
+          ...(params.taughtDateBs ? { taughtDateBs: params.taughtDateBs.trim() } : {})
         }
       }
     );
@@ -178,6 +182,7 @@ export type AttributionSnapshot = {
   completedByTeacherId?: unknown;
   completedByUserId?: unknown;
   completedAt?: Date | null;
+  taughtDateBs?: string;
   completionNote?: string;
   countsTowardSalary?: boolean;
   deliveredByName?: string;
@@ -194,7 +199,8 @@ export const snapshotSubUnitAttribution = (
       !row.completionSource &&
       !row.completedByTeacherId &&
       row.countsTowardSalary !== false &&
-      !row.deliveredByName
+      !row.deliveredByName &&
+      !row.taughtDateBs
     ) {
       continue;
     }
@@ -203,6 +209,7 @@ export const snapshotSubUnitAttribution = (
       completedByTeacherId: row.completedByTeacherId ?? null,
       completedByUserId: row.completedByUserId ?? null,
       completedAt: row.completedAt ?? null,
+      taughtDateBs: row.taughtDateBs || "",
       completionNote: row.completionNote || "",
       countsTowardSalary: row.countsTowardSalary !== false,
       deliveredByName: row.deliveredByName || ""

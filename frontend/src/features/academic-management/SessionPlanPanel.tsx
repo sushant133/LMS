@@ -51,6 +51,10 @@ import {
   AcademicPrintFooter,
   AcademicPrintHeader,
 } from "./AcademicPrintHeader";
+import {
+  AcademicSubjectMasterDetail,
+  isPhoneViewport,
+} from "./AcademicSubjectMasterDetail";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
@@ -734,7 +738,9 @@ export const SessionPlanPanel = ({
     const firstFaculty = faculties[0];
     const firstYear = firstFaculty?.years[0];
     const firstSubject = firstYear?.subjects[0];
-    if (firstFaculty && firstYear && firstSubject) {
+    // On a phone the detail replaces the tree, so auto-selecting would open a
+    // subject the user never picked. Start on the subject list there instead.
+    if (firstFaculty && firstYear && firstSubject && !isPhoneViewport()) {
       setSelectedFacultyKey(firstFaculty.key);
       setSelectedYearKey(firstYear.key);
       setSelectedSubject(firstSubject);
@@ -1776,8 +1782,12 @@ export const SessionPlanPanel = ({
         </Card>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px)_1fr]">
-        <div className="no-print">
+      {/* Phones swap panes: picking a subject shows it straight away
+          instead of leaving it below the fold. lg+ is unchanged. */}
+      <AcademicSubjectMasterDetail
+        selectionKey={selectedSubject?.subjectKey}
+        onClearSelection={() => setSelectedSubject(null)}
+        tree={
           <AcademicYearSubjectTree
             faculties={faculties}
             selectedFacultyKey={selectedFacultyKey}
@@ -1795,9 +1805,8 @@ export const SessionPlanPanel = ({
                 : "No subjects assigned to you for the current filters."
             }
           />
-        </div>
-
-        <div className="space-y-4 min-w-0">
+        }
+      >
           {!selectedSubjectMeta ? (
             <EmptyState
               title="Select a subject"
@@ -1844,8 +1853,7 @@ export const SessionPlanPanel = ({
               {selectedPlans.map((plan) => renderPlanCard(plan))}
             </>
           )}
-        </div>
-      </div>
+      </AcademicSubjectMasterDetail>
 
       {/* Dedicated print / PDF area — A4 landscape, continuous multi-page table */}
       <div

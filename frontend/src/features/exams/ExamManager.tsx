@@ -302,17 +302,20 @@ const PublishByBatchYearPanel = ({
               key={row.yearId}
               className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="max-sm:min-w-0">
                   <p className="text-sm font-medium text-slate-800">
                     {row.label}
                   </p>
                   <p className="text-xs text-slate-500">{statusText}</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                {/* Phones: one button per row so long labels never overlap.
+                    sm+: the original inline group. */}
+                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                   <Button
                     size="sm"
                     variant="ghost"
+                    className="max-sm:border max-sm:border-slate-200 max-sm:bg-white"
                     onClick={() => toggleExpanded(row.yearId)}
                   >
                     {isExpanded ? "Hide subjects" : "View subjects"}
@@ -1862,9 +1865,9 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                         key={exam._id}
                         className={`rounded-2xl border p-4 transition-colors ${selectedExamId === exam._id ? "border-brand-300 bg-brand-50/30" : "border-slate-200"}`}
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <h3 className="font-semibold text-slate-900">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                          <div className="max-sm:min-w-0">
+                            <h3 className="font-semibold text-slate-900 max-sm:break-words">
                               {exam.name}
                             </h3>
                             <p className="text-sm text-slate-500">
@@ -1966,7 +1969,10 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                           </div>
                         </div>
                         {canManage ? (
-                          <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                          /* Phones: stack the long "(All Batches/Years)"
+                             actions one per row — side by side they wrapped
+                             into each other and overlapped. */
+                          <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-100 pt-3 sm:flex sm:flex-wrap">
                             <Button
                               size="sm"
                               variant="outline"

@@ -849,14 +849,19 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
           message: notificationMessage,
           type: "EXAM",
           channel: "IN_APP",
-          metadata: { examId }
+          metadata: { examId },
+          // Publishing is a deliberate admin act, and the wording repeats when
+          // subjects are released one at a time — never swallow it.
+          dedupeHours: 0
         }),
         notifyParentsOfStudent(
           schoolId,
           student._id.toString(),
           notificationTitle,
           parentNotificationMessage,
-          "EXAM"
+          "EXAM",
+          "BOTH",
+          { hours: 0 }
         )
       ])
     )

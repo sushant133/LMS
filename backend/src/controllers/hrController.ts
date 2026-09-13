@@ -4,7 +4,7 @@ import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
 import { Teacher } from "../models/Teacher.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
-import { sendNotification } from "../utils/notificationService.js";
+import { notifySchoolAdmins, sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -23,6 +23,27 @@ export const listLeaveRequests = asyncHandler(async (req: Request, res: Response
 export const createLeaveRequest = asyncHandler(async (req: Request, res: Response) => {
   const payload = leaveRequestSchema.parse(req.body);
   const leave = await LeaveRequest.create({ ...payload, schoolId: req.tenantSchoolId });
+
+  // A leave request is useless until somebody approves it, so the approvers
+  // must be told it exists. Previously this notified nobody at all.
+  const teacher = await Teacher.findById(leave.teacherId)
+    .select("user teacherCode")
+    .populate("user", "fullName")
+    .lean();
+  const teacherName =
+    (teacher?.user as { fullName?: string } | undefined)?.fullName?.trim() ||
+    String(teacher?.teacherCode || "").trim() ||
+    "A teacher";
+
+  await notifySchoolAdmins(req.tenantSchoolId!, {
+    title: "Leave request awaiting approval",
+    message: `${teacherName} requested ${String(leave.type).replace(/_/g, " ").toLowerCase()} leave from ${leave.startDateBs} to ${leave.endDateBs}. Reason: ${leave.reason}`,
+    type: "PAYROLL",
+    metadata: { leaveRequestId: leave._id.toString(), path: "/hr" },
+    // Each request is its own event; the id in metadata keeps them distinct.
+    dedupeHours: 0
+  });
+
   return sendSuccess(res, "Leave request submitted", leave, 201);
 });
 
@@ -44,7 +65,9 @@ export const updateLeaveStatus = asyncHandler(async (req: Request, res: Response
       title: `Leave ${payload.status.toLowerCase()}`,
       message: `Your leave request from ${leave.startDateBs} to ${leave.endDateBs} was ${payload.status.toLowerCase()}.`,
       type: "PAYROLL",
-      channel: "BOTH"
+      channel: "BOTH",
+      // A human decision on this teacher's leave — always deliver it.
+      dedupeHours: 0
     });
   }
 

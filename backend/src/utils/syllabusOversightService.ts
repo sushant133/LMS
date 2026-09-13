@@ -762,6 +762,7 @@ export const completeSyllabusOversight = async (
     userId: req.user!.userId,
     note,
     deliveredByName,
+    taughtDateBs: dateBs,
     todaysCoverage: coverageLabel,
     overwriteAttribution: true
   });

@@ -146,18 +146,12 @@ export const sendManualNotification = asyncHandler(async (req: Request, res: Res
     throw new ApiError(400, "Could not deliver notification to recipient");
   }
 
-  const plain =
-    notification &&
-    typeof notification === "object" &&
-    "toObject" in notification &&
-    typeof (notification as { toObject: () => unknown }).toObject === "function"
-      ? (notification as { toObject: () => Record<string, unknown> }).toObject()
-      : (notification as Record<string, unknown>);
-
   return sendSuccess(
     res,
     "Notification sent",
-    serializeNotification(plain as Parameters<typeof serializeNotification>[0]),
+    serializeNotification(
+      notification.toObject() as Parameters<typeof serializeNotification>[0]
+    ),
     201
   );
 });

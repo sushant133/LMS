@@ -107,7 +107,7 @@ export const FieldStudentAttendancePanel = ({ data }: Props) => {
                           {row.status.replace(/_/g, " ")}
                         </Badge>
                       </Td>
-                      <Td className="text-sm">{row.remarks || "—"}</Td>
+                      <Td className="cell-wrap text-sm">{row.remarks || "—"}</Td>
                     </tr>
                   ))}
                 </TableBody>

@@ -6,6 +6,7 @@ import {
   type UIEvent,
 } from "react";
 import { cn } from "lib/utils";
+import { TableAutoScrollProvider } from "./table";
 
 interface StickyTableScrollProps {
   /** Fixed header content (usually a full <table> with only thead). */
@@ -82,6 +83,9 @@ export const StickyTableScroll = ({
   }, [syncScrollbarPadding, header, body]);
 
   return (
+    /* This component owns horizontal scrolling for both tables, so the
+       <Table> primitive must not add a second scroll container of its own. */
+    <TableAutoScrollProvider enabled={false}>
     <div className={cn("flex min-h-0 min-w-0 flex-col isolate", className)}>
       {/* Always-visible header strip (does not scroll vertically) */}
       <div
@@ -113,5 +117,6 @@ export const StickyTableScroll = ({
         {body}
       </div>
     </div>
+    </TableAutoScrollProvider>
   );
 };

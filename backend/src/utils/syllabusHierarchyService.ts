@@ -855,6 +855,7 @@ type LeanSub = {
   todaysCoverage?: string;
   sortOrder?: number;
   completionSource?: string | null;
+  taughtDateBs?: string;
   completedByTeacherId?: { toString(): string } | string | null;
   completedByUserId?: { toString(): string } | string | null;
   completedAt?: Date | string | null;
@@ -886,6 +887,7 @@ const toAttribution = (
     !teacherId &&
     sub.countsTowardSalary !== false &&
     !(sub.deliveredByName || "").trim() &&
+    !(sub.taughtDateBs || "").trim() &&
     !completedAt
   ) {
     return undefined;
@@ -896,6 +898,7 @@ const toAttribution = (
     completedByTeacherName: teacherId ? teacherNameById?.get(teacherId) : undefined,
     completedByUserId: userId || undefined,
     completedAt,
+    taughtDateBs: (sub.taughtDateBs || "").trim() || undefined,
     completionNote: sub.completionNote || "",
     countsTowardSalary: sub.countsTowardSalary !== false && source !== "ADMINISTRATION",
     deliveredByName: sub.deliveredByName || ""

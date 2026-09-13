@@ -254,7 +254,7 @@ export const TransportManager = () => {
           <CardTitle>Routes</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table className="table-sticky-first">
             <TableHead>
               <tr>
                 <Th>Name</Th>
@@ -279,7 +279,7 @@ export const TransportManager = () => {
                     <Td>{r.vehicleNumber}</Td>
                     <Td>{r.driverName}</Td>
                     <Td>{formatCurrencyNpr(r.monthlyFeeNpr)}</Td>
-                    <Td>{r.stops.map((s) => s.name).join(", ")}</Td>
+                    <Td className="cell-wrap">{r.stops.map((s) => s.name).join(", ")}</Td>
                   </tr>
                 ),
               )}
@@ -292,7 +292,7 @@ export const TransportManager = () => {
           <CardTitle>Assignments</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table className="table-sticky-first">
             <TableHead>
               <tr>
                 <Th>Route</Th>

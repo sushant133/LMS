@@ -190,6 +190,8 @@ export interface SyllabusCompletionAttribution {
   completedByTeacherName?: string;
   completedByUserId?: string;
   completedAt?: string;
+  /** BS date the topic was actually taught — what oversight reports as "taught on". */
+  taughtDateBs?: string;
   completionNote?: string;
   /** False when extra lectures / administration completed the leaf. */
   countsTowardSalary: boolean;

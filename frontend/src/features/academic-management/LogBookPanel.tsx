@@ -49,6 +49,10 @@ import {
   AcademicPrintFooter,
   AcademicPrintHeader,
 } from "./AcademicPrintHeader";
+import {
+  AcademicSubjectMasterDetail,
+  isPhoneViewport,
+} from "./AcademicSubjectMasterDetail";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
@@ -933,7 +937,9 @@ export const LogBookPanel = ({
     const firstFaculty = faculties[0];
     const firstYear = firstFaculty?.years[0];
     const firstSubject = firstYear?.subjects[0];
-    if (firstFaculty && firstYear && firstSubject) {
+    // On a phone the detail replaces the tree, so auto-selecting would open a
+    // subject the user never picked. Start on the subject list there instead.
+    if (firstFaculty && firstYear && firstSubject && !isPhoneViewport()) {
       setSelectedFacultyKey(firstFaculty.key);
       setSelectedYearKey(firstYear.key);
       setSelectedSubject(firstSubject);
@@ -1598,8 +1604,15 @@ export const LogBookPanel = ({
         </Card>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px)_1fr]">
-        <div className="no-print">
+      {/* Phones swap panes: picking a subject shows it straight away
+          instead of leaving it below the fold. lg+ is unchanged. */}
+      <AcademicSubjectMasterDetail
+        selectionKey={selectedSubject?.subjectKey}
+        onClearSelection={() => {
+          setSelectedSubject(null);
+          setSelectedEntryId(null);
+        }}
+        tree={
           <AcademicYearSubjectTree
             faculties={faculties}
             selectedFacultyKey={selectedFacultyKey}
@@ -1617,9 +1630,8 @@ export const LogBookPanel = ({
                 : "No subjects assigned to you for the current filters."
             }
           />
-        </div>
-
-        <div className="space-y-4 min-w-0">
+        }
+      >
           {!selectedSubjectMeta ? (
             <EmptyState
               title="Select a subject"
@@ -1878,8 +1890,7 @@ export const LogBookPanel = ({
               ) : null}
             </>
           )}
-        </div>
-      </div>
+      </AcademicSubjectMasterDetail>
 
       <div id="log-book-print-area" className="hidden print:block">
         <AcademicPrintHeader

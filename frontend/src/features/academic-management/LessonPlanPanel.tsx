@@ -59,6 +59,10 @@ import {
   AcademicPrintFooter,
   AcademicPrintHeader,
 } from "./AcademicPrintHeader";
+import {
+  AcademicSubjectMasterDetail,
+  isPhoneViewport,
+} from "./AcademicSubjectMasterDetail";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
@@ -1531,7 +1535,9 @@ export const LessonPlanPanel = ({
     const firstFaculty = faculties[0];
     const firstYear = firstFaculty?.years[0];
     const firstSubject = firstYear?.subjects[0];
-    if (firstFaculty && firstYear && firstSubject) {
+    // On a phone the detail replaces the tree, so auto-selecting would open a
+    // subject the user never picked. Start on the subject list there instead.
+    if (firstFaculty && firstYear && firstSubject && !isPhoneViewport()) {
       setSelectedFacultyKey(firstFaculty.key);
       setSelectedYearKey(firstYear.key);
       setSelectedSubject(firstSubject);
@@ -2310,8 +2316,12 @@ export const LessonPlanPanel = ({
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px)_1fr]">
-        <div className="no-print">
+      {/* Phones swap panes: picking a subject shows it straight away
+          instead of leaving it below the fold. lg+ is unchanged. */}
+      <AcademicSubjectMasterDetail
+        selectionKey={selectedSubject?.subjectKey}
+        onClearSelection={() => setSelectedSubject(null)}
+        tree={
           <AcademicYearSubjectTree
             faculties={faculties}
             selectedFacultyKey={selectedFacultyKey}
@@ -2329,9 +2339,8 @@ export const LessonPlanPanel = ({
                 : "No subjects assigned to you for the current filters."
             }
           />
-        </div>
-
-        <div className="space-y-4 min-w-0">
+        }
+      >
           {!selectedSubjectMeta ? (
             <EmptyState
               title="Select a subject"
@@ -2522,7 +2531,7 @@ export const LessonPlanPanel = ({
                                       : null}
                                   </Td>
                                   <Td className="text-center tabular-nums">{row.hours}</Td>
-                                  <Td>{row.remarks || ""}</Td>
+                                  <Td className="cell-wrap">{row.remarks || ""}</Td>
                                   <Td>
                                     {isFirst && plan ? (
                                       <Badge
@@ -2682,8 +2691,7 @@ export const LessonPlanPanel = ({
               })}
             </>
           )}
-        </div>
-      </div>
+      </AcademicSubjectMasterDetail>
 
       {/*
         Print / PDF area — deliberately mirrors the Session Plan report so the

@@ -2466,6 +2466,7 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
         source: "TEACHER",
         teacherId: payload.teacherId,
         userId: req.user!.userId,
+        taughtDateBs: payload.dateBs,
         todaysCoverage: payload.topicCovered || taughtTitles.join("; ") || "",
         overwriteAttribution: false
       });
@@ -2694,6 +2695,7 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
       source: "TEACHER",
       teacherId: existing.teacherId.toString(),
       userId: req.user!.userId,
+      taughtDateBs: String(existing.dateBs || ""),
       todaysCoverage: existing.topicCovered || updatedTitles.join("; ") || "",
       overwriteAttribution: false
     });

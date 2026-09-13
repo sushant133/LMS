@@ -3461,7 +3461,7 @@ export const AccountingManager = () => {
                   description="Collect fees in Student Fee Records or add a non-fee entry in the Other Income Register."
                 />
               ) : (
-                <Table>
+                <Table className="table-sticky-first">
                   <TableHead>
                     <tr>
                       <Th>Date</Th>
@@ -3485,7 +3485,7 @@ export const AccountingManager = () => {
                           <Td className="font-mono text-xs">
                             {row.receiptNumber || "—"}
                           </Td>
-                          <Td>
+                          <Td className="cell-wrap">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <Badge
                                 className={cn(
@@ -3694,7 +3694,7 @@ export const AccountingManager = () => {
                           {row.entryType}
                         </Badge>
                       </Td>
-                      <Td>{row.description}</Td>
+                      <Td className="cell-wrap">{row.description}</Td>
                       <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
                       <Td>{formatCurrencyNpr(row.balanceAfterNpr)}</Td>
                     </tr>

@@ -3,7 +3,6 @@ import type { LibraryIssueStatus } from "@phit-erp/shared";
 import { LibraryIssue, type LibraryIssueDocument } from "../models/LibraryBook.js";
 
 type LibraryIssueEntity = HydratedDocument<LibraryIssueDocument>;
-import { Notification } from "../models/Notification.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
@@ -29,22 +28,16 @@ const getReminderMessage = (bookTitle: string, dueDateBs: string, type: Reminder
   }
 };
 
-const hasReminderBeenSent = async (
-  schoolId: string,
-  recipientUserId: string,
-  issueId: string,
-  reminderType: ReminderType
-): Promise<boolean> => {
-  const existing = await Notification.findOne({
-    schoolId,
-    recipientUserId,
-    type: "LIBRARY",
-    "metadata.libraryIssueId": issueId,
-    "metadata.reminderType": reminderType
-  }).lean();
-
-  return Boolean(existing);
-};
+/**
+ * Stable identity for "we already sent this reminder for this loan".
+ *
+ * This used to be answered by looking for a matching row in the Notification
+ * collection — but clearing a notification DELETES that row, and these
+ * reminders are re-evaluated on every GET /library/issues. So a borrower who
+ * dismissed an overdue reminder got it again on the next page load, forever.
+ */
+const reminderDedupeKey = (issueId: string, reminderType: ReminderType): string =>
+  `library:${reminderType}:${issueId}`;
 
 const sendLibraryReminder = async (
   schoolId: string,
@@ -54,11 +47,6 @@ const sendLibraryReminder = async (
   dueDateBs: string,
   reminderType: ReminderType
 ): Promise<void> => {
-  const alreadySent = await hasReminderBeenSent(schoolId, recipientUserId, issueId, reminderType);
-  if (alreadySent) {
-    return;
-  }
-
   await sendNotification({
     schoolId,
     recipientUserId,
@@ -66,6 +54,7 @@ const sendLibraryReminder = async (
     message: getReminderMessage(bookTitle, dueDateBs, reminderType),
     type: "LIBRARY",
     channel: "BOTH",
+    dedupeKey: reminderDedupeKey(issueId, reminderType),
     metadata: {
       libraryIssueId: issueId,
       reminderType
@@ -132,7 +121,9 @@ export const processLibraryIssueReminders = async (
         issue.studentId.toString(),
         reminderTitles.BEFORE_DUE,
         getReminderMessage(bookTitle, issue.dueDateBs, "BEFORE_DUE"),
-        "LIBRARY"
+        "LIBRARY",
+        "BOTH",
+        { key: reminderDedupeKey(issue._id.toString(), "BEFORE_DUE") + ":parent" }
       );
     }
   }
@@ -145,7 +136,9 @@ export const processLibraryIssueReminders = async (
         issue.studentId.toString(),
         reminderTitles.DUE_TODAY,
         getReminderMessage(bookTitle, issue.dueDateBs, "DUE_TODAY"),
-        "LIBRARY"
+        "LIBRARY",
+        "BOTH",
+        { key: reminderDedupeKey(issue._id.toString(), "DUE_TODAY") + ":parent" }
       );
     }
   }
@@ -158,7 +151,9 @@ export const processLibraryIssueReminders = async (
         issue.studentId.toString(),
         reminderTitles.OVERDUE,
         getReminderMessage(bookTitle, issue.dueDateBs, "OVERDUE"),
-        "LIBRARY"
+        "LIBRARY",
+        "BOTH",
+        { key: reminderDedupeKey(issue._id.toString(), "OVERDUE") + ":parent" }
       );
     }
   }

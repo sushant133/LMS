@@ -20,7 +20,9 @@
     "install:frontend": "npm install --prefix ../frontend",
     "install:all": "npm install && npm run install:frontend",
     "build:frontend": "npm run build --prefix ../frontend",
-    "build:all": "npm run build && npm run build:frontend"
+    "build:all": "npm run build && npm run build:frontend",
+    "syllabus:taught-dates:report": "tsx src/scripts/backfillSyllabusTaughtDates.ts",
+    "syllabus:taught-dates:apply": "tsx src/scripts/backfillSyllabusTaughtDates.ts --apply"
   },
   "dependencies": {
     "@phit-erp/shared": "file:./shared",

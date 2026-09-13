@@ -202,7 +202,10 @@ export const notifyTeacherOfSubmissionUpdate = async (
     message,
     type: "EXAM",
     channel: "IN_APP",
-    metadata
+    metadata,
+    // A human decision on the teacher's submission — returning the same
+    // subject twice must reach them both times.
+    dedupeHours: 0
   });
 };
 

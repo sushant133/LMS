@@ -629,7 +629,8 @@ export const EmployeeAttendancePanel = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
+      {/* tab-strip: one swipeable row on a phone, plain flex-wrap from md up. */}
+      <div className="tab-strip flex flex-wrap gap-2">
         {(
           [
             ...(canTake || canEdit ? (["mark"] as const) : []),
@@ -1010,7 +1011,9 @@ export const EmployeeAttendancePanel = ({
             )}
 
             {canWriteSheet && rows.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              /* Phones: one action per row. Wrapped side by side these six
+                 labels produced 1-2 per line with a ragged right edge. */
+              <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                 <Button
                   type="button"
                   variant="outline"

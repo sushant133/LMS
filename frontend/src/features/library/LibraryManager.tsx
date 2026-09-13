@@ -1227,7 +1227,7 @@ export const LibraryManager = () => {
                           }}
                         />
                       </FormField>
-                      <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <div className="min-w-0 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                         <p className="text-sm font-medium text-slate-800">
                           Book codes ({copyDrafts.length})
                         </p>
@@ -1235,12 +1235,15 @@ export const LibraryManager = () => {
                           Each physical book needs its own code. Codes must be
                           unique (e.g. ANA001 … ANA030).
                         </p>
-                        <div className="max-h-96 overflow-auto overscroll-contain pr-1 [scrollbar-width:thin]">
-                          <div className="min-w-[480px] space-y-2">
+                        {/* The 480px min-width is what pushed these inputs past the card
+                            edge on a phone. Kept from sm up so desktop is
+                            unchanged; dropped below it so they fit. */}
+                        <div className="max-h-96 min-w-0 overflow-auto overscroll-contain pr-1 [scrollbar-width:thin]">
+                          <div className="min-w-0 space-y-2 sm:min-w-[480px]">
                           {copyDrafts.map((copy, index) => (
                             <div
                               key={index}
-                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-2"
+                              className="grid min-w-0 gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-2"
                             >
                               <FormField label={`Copy ${index + 1} code *`}>
                                 <Input
@@ -2560,7 +2563,7 @@ export const LibraryManager = () => {
               <CardTitle>Library staff accounts</CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table className="table-sticky-first">
                 <TableHead>
                   <tr>
                     <Th className="w-14 text-center">S.N.</Th>
@@ -2577,7 +2580,9 @@ export const LibraryManager = () => {
                         {index + 1}
                       </Td>
                       <Td>{member.fullName}</Td>
-                      <Td>{member.email}</Td>
+                      <Td className="cell-truncate-mobile" title={member.email}>
+                        {member.email}
+                      </Td>
                       <Td>{member.phone ?? "—"}</Td>
                       <Td>
                         <Badge

@@ -893,7 +893,10 @@ export const notifyTeacher = async (
     title,
     message,
     type: "ACADEMIC_MANAGEMENT",
-    metadata
+    metadata,
+    // A human decision on the teacher's plan — an approve/return after a
+    // revision repeats the wording and must still be delivered.
+    dedupeHours: 0
   });
 };
 

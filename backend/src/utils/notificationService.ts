@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import type { Request } from "express";
 import type { NotificationChannel, NotificationType } from "@phit-erp/shared";
 import { Notification } from "../models/Notification.js";
+import { NotificationDedupe } from "../models/NotificationDedupe.js";
 import { User } from "../models/User.js";
 import { deliverPushToUser } from "./fcmPushService.js";
 import { tenantObjectId } from "./tenant.js";
@@ -15,7 +17,48 @@ interface SendNotificationInput {
   metadata?: Record<string, string>;
   /** When set, skip creating a second identical unread notification within this many hours. */
   dedupeHours?: number;
+  /**
+   * Stable identity of a recurring notification stream (e.g. "admin-pending:<schoolId>").
+   *
+   * Recurring jobs MUST pass this. Unlike `dedupeHours`, it is checked against a
+   * separate collection that clearing a notification does not touch and that
+   * survives restarts, so a digest is not re-delivered just because the user
+   * dismissed it or the server rebooted.
+   */
+  dedupeKey?: string;
+  /**
+   * Re-send the same content after this many hours. Omit for "only when the
+   * content actually changes" — the right default for backlog digests, which
+   * otherwise nag every single run with an identical list.
+   */
+  renotifyAfterHours?: number;
 }
+
+/**
+ * Identity of "what this notification says". Metadata is folded in so two
+ * notices that read alike but point at different records (two book loans, two
+ * students) are still treated as distinct.
+ */
+const hashContent = (
+  title: string,
+  message: string,
+  type: string,
+  metadata?: Record<string, string>
+): string => {
+  const meta = metadata
+    ? Object.keys(metadata)
+        .sort()
+        .map((key) => `${key}=${metadata[key]}`)
+        .join("&")
+    : "";
+  return createHash("sha1").update([type, title, message, meta].join("")).digest("hex");
+};
+
+/** Named streams are remembered for a year; auto keys only past their window. */
+const dedupeExpiry = (renotifyAfterHours: number): Date => {
+  const hours = renotifyAfterHours > 0 ? Math.max(renotifyAfterHours * 2, 24) : 24 * 365;
+  return new Date(Date.now() + hours * 60 * 60 * 1000);
+};
 
 const sendSmsStub = async (phone: string, message: string): Promise<"SENT" | "FAILED" | "SKIPPED"> => {
   if (!phone) {
@@ -77,21 +120,43 @@ export const sendNotification = async (input: SendNotificationInput) => {
   const type = input.type ?? "GENERAL";
   const dedupeHours = input.dedupeHours ?? 12;
 
-  if (dedupeHours > 0) {
-    const since = new Date(Date.now() - dedupeHours * 60 * 60 * 1000);
-    const existing = await Notification.findOne({
-      schoolId: input.schoolId,
+  const contentHash = hashContent(input.title, input.message, type, input.metadata);
+
+  /*
+   * Dedupe identity.
+   *
+   * An explicit dedupeKey names a recurring stream and, by default, repeats
+   * only when its content changes. Without one we derive a key from the
+   * message itself so that EVERY caller still gets a durable guard: re-saving
+   * a sheet, reloading a page that re-evaluates reminders, or restarting the
+   * server will not produce a second copy within `dedupeHours`.
+   *
+   * Pass dedupeHours: 0 to force a send (e.g. an admin pressing "send reminder"
+   * on purpose).
+   */
+  const explicitKey = input.dedupeKey?.trim();
+  const dedupeKey = explicitKey || (dedupeHours > 0 ? `auto:${type}:${contentHash}` : "");
+  const renotifyAfterHours = input.renotifyAfterHours ?? (explicitKey ? 0 : dedupeHours);
+
+  if (dedupeKey) {
+    /*
+     * Deliberately NOT a query against the Notification rows: clearing a
+     * notification DELETES its row, so consulting them made dismissing a
+     * notification the very thing that re-armed it. This collection is
+     * untouched by clearing and survives restarts.
+     */
+    const seen = await NotificationDedupe.findOne({
       recipientUserId: recipientId,
-      title: input.title,
-      message: input.message,
-      type,
-      read: false,
-      createdAt: { $gte: since }
+      dedupeKey
     })
-      .select("_id")
+      .select("contentHash lastSentAt")
       .lean();
-    if (existing) {
-      return existing;
+
+    if (seen && seen.contentHash === contentHash) {
+      if (renotifyAfterHours <= 0) return null;
+      const nextAllowedAt =
+        new Date(seen.lastSentAt).getTime() + renotifyAfterHours * 60 * 60 * 1000;
+      if (Date.now() < nextAllowedAt) return null;
     }
   }
 
@@ -112,6 +177,21 @@ export const sendNotification = async (input: SendNotificationInput) => {
     metadata: input.metadata
   });
 
+  if (dedupeKey) {
+    await NotificationDedupe.updateOne(
+      { recipientUserId: recipientId, dedupeKey },
+      {
+        $set: {
+          schoolId: input.schoolId,
+          contentHash,
+          lastSentAt: new Date(),
+          expiresAt: dedupeExpiry(renotifyAfterHours)
+        }
+      },
+      { upsert: true }
+    );
+  }
+
   // Mobile system tray push (FCM). Fire-and-forget so in-app delivery is never blocked.
   // Personal: only this recipientUserId's registered devices receive the banner.
   void deliverPushToUser({
@@ -120,7 +200,15 @@ export const sendNotification = async (input: SendNotificationInput) => {
     message: input.message,
     type,
     notificationId: created._id.toString(),
-    metadata: input.metadata
+    metadata: input.metadata,
+    /*
+     * Only named recurring streams collapse. FCM keeps at most 4 distinct
+     * collapse keys per device and drops the rest unpredictably while a device
+     * is offline — and the auto key is unique per message, so using it here
+     * would spend that budget on one-off notifications and risk losing them.
+     * One-offs are meant to stack in the tray anyway.
+     */
+    collapseKey: explicitKey || undefined
   });
 
   return created;
@@ -132,7 +220,13 @@ export const notifyParentsOfStudent = async (
   title: string,
   message: string,
   type: NotificationType,
-  channel: NotificationChannel = "BOTH"
+  channel: NotificationChannel = "BOTH",
+  /**
+   * `key` names a recurring stream (see SendNotificationInput.dedupeKey).
+   * `hours: 0` forces delivery — use it for deliberate admin actions such as
+   * publishing results, which may legitimately repeat identical text.
+   */
+  dedupe?: { key?: string; hours?: number }
 ) => {
   const { ParentChildLink } = await import("../models/ParentChildLink.js");
   const { approvedParentLinkFilter } = await import("./parentScope.js");
@@ -155,8 +249,48 @@ export const notifyParentsOfStudent = async (
         type,
         channel,
         metadata: { studentId },
+        dedupeKey: dedupe?.key,
         // Avoid flooding parents when the same day is re-saved
-        dedupeHours: type === "ATTENDANCE" ? 12 : undefined
+        dedupeHours: dedupe?.hours ?? (type === "ATTENDANCE" ? 12 : undefined)
+      })
+    )
+  );
+};
+
+/**
+ * Fan a notification out to every administrator of a school.
+ *
+ * Anything an admin must act on (an approval queue, an exception, a request)
+ * should go through here so no admin-facing event depends on someone
+ * remembering to look at a list page.
+ */
+export const notifySchoolAdmins = async (
+  schoolId: string,
+  input: {
+    title: string;
+    message: string;
+    type?: NotificationType;
+    channel?: NotificationChannel;
+    metadata?: Record<string, string>;
+    dedupeKey?: string;
+    dedupeHours?: number;
+    renotifyAfterHours?: number;
+  }
+): Promise<void> => {
+  const admins = await User.find({
+    schoolId,
+    role: { $in: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+    isActive: { $ne: false }
+  })
+    .select("_id")
+    .lean();
+
+  await Promise.all(
+    admins.map((admin) =>
+      sendNotification({
+        schoolId,
+        recipientUserId: admin._id.toString(),
+        ...input
       })
     )
   );

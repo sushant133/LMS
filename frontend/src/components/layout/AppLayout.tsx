@@ -1335,7 +1335,10 @@ export const AppLayout = () => {
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 overflow-x-auto px-4 py-6 sm:px-6 lg:px-8">
+          {/* overflow-x-clip (NOT auto): the page itself must never scroll
+              sideways. Wide tables scroll inside their own container so the
+              sticky header, cards, headings and buttons stay aligned on mobile. */}
+          <main className="min-w-0 max-w-full flex-1 overflow-x-clip px-4 py-6 sm:px-6 md:overflow-x-auto lg:px-8">
             <div className="app-shell-main-inner min-w-0">
               <ReadOnlyBanner />
               {/* Keyed on the path so leaving a broken section clears the error by itself.

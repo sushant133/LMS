@@ -184,7 +184,7 @@ export const FeeRefundsPanel = ({ canWrite }: { canWrite: boolean }) => {
                   <Td>{refund.refundNumber}</Td>
                   <Td>{refund.dateBs}</Td>
                   <Td>{formatCurrencyNpr(refund.amountNpr)}</Td>
-                  <Td>{refund.reason}</Td>
+                  <Td className="cell-wrap">{refund.reason}</Td>
                   <Td>{refund.paymentMethod.replace(/_/g, " ")}</Td>
                 </tr>
               ))}

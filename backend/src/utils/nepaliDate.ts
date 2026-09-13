@@ -223,6 +223,14 @@ export const resolveAdBsDatePair = (input: {
 };
 
 /** JS weekday (0=Sunday … 6=Saturday) for a BS calendar date. */
+/** Current hour (0-23) on the Nepal wall clock, regardless of server timezone. */
+export const getNepalHour = (): number =>
+  new Date(Date.now() + NEPAL_TIMEZONE_OFFSET_MINUTES * 60_000).getUTCHours();
+
+/** Weekday name ("Sunday" … "Saturday") for a BS date. */
+export const getDayNameFromBs = (dateBs: string): string =>
+  WEEKDAY_NAMES[getDayOfWeekFromBs(dateBs)] ?? "";
+
 export const getDayOfWeekFromBs = (dateBs: string): number => {
   const validated = ensureValidBsDate(dateBs);
   const [year, month, day] = validated.split("-").map(Number);

@@ -4,7 +4,9 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex cursor-pointer items-center justify-center rounded-xl text-sm font-medium transition disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+  // max-w-full + min-w-0 keep long labels inside the parent card on phones;
+  // text-center/leading-tight keep a wrapped 2-line label readable.
+  "inline-flex max-w-full min-w-0 cursor-pointer items-center justify-center rounded-xl text-center text-sm leading-tight font-medium transition disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
   {
     variants: {
       variant: {
@@ -15,10 +17,12 @@ const buttonVariants = cva(
         ghost: "text-slate-700 hover:bg-slate-100",
         destructive: "bg-red-600 text-white hover:bg-red-700",
       },
+      // min-h (not h): a label that wraps to two lines grows the button
+      // instead of spilling its text above and below the border.
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-8 rounded-lg px-3",
-        lg: "h-11 px-6",
+        default: "min-h-10 px-4 py-2",
+        sm: "min-h-8 rounded-lg px-3 py-1.5",
+        lg: "min-h-11 px-6 py-2.5",
       },
     },
     defaultVariants: {

@@ -983,3 +983,183 @@ input.time-input[type="time"]::-webkit-calendar-picker-indicator:hover {
 [data-popover-content] {
   z-index: 9999 !important;
 }
+
+/* ==========================================================================
+   Mobile hardening (phone browser + Capacitor Android app)
+
+   Reported from a Redmi-class phone:
+   - the whole page slid sideways while the sticky top bar stayed put, so the
+     left edge of every card, heading, filter and button was cut off;
+   - wide tables dragged the page with them instead of scrolling themselves;
+   - table columns squeezed into vertical word stacks ("Ba 1 / Pa / 1234");
+   - the last row / action button sat under the 3-button nav bar.
+
+   DESKTOP MUST NOT CHANGE. Every rule that alters layout is inside the
+   `max-width: 767.98px` block below; only the rules outside it are global,
+   and each of those is inert when content already fits.
+   ========================================================================== */
+
+/* --- Global, but inert when nothing overflows ---------------------------- */
+
+/* Horizontal scroll container for raw <table> markup that does not use the
+   <Table> primitive. No scrollbar and no layout change while the table fits. */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.table-scroll::-webkit-scrollbar {
+  height: 0.5rem;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: #cbd5e1;
+}
+
+/* Long unbroken strings (emails, codes, URLs) must not force a card wider
+   than its container. Inert unless a word actually overflows. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* --- Phone only: everything below is scoped to < 768px ------------------- */
+
+@media (max-width: 767.98px) {
+  /* The viewport never scrolls sideways on a phone; wide content scrolls in its
+     own container instead. `clip` rather than `hidden`: it does not create a
+     scroll container, so position:sticky keeps working. Desktop keeps its
+     original body{overflow-x:hidden} + main{overflow-x:auto} untouched. */
+  html {
+    overflow-x: clip;
+  }
+
+  body {
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+  }
+
+  /* Anchored scrolling (scrollIntoView on panels) must clear the sticky top bar
+     instead of hiding the target behind it. Table internals are excluded so
+     scrolling *inside* a table is unaffected. */
+  main [id]:not(tr):not(td):not(th):not(option):not([data-table-scroll] *) {
+    scroll-margin-top: calc(4.5rem + var(--app-safe-top));
+  }
+
+  /* Keep the last row / button clear of the Android navigation bar. On a phone
+     browser env(safe-area-inset-bottom) is 0, so a real gap is added
+     unconditionally and the inset is layered on for the native app. */
+  .app-shell-main > main {
+    padding-bottom: calc(4rem + var(--app-safe-bottom));
+  }
+
+  /* Table cells keep their content on one line so auto table layout cannot
+     squeeze a column into a vertical word stack; the table then grows past the
+     phone and scrolls inside [data-table-scroll]. Cells opt back into wrapping
+     with .cell-wrap (or an explicit whitespace-normal). */
+  [data-table-scroll] th:not(.cell-wrap):not(.whitespace-normal),
+  [data-table-scroll] td:not(.cell-wrap):not(.whitespace-normal),
+  .table-scroll th:not(.cell-wrap):not(.whitespace-normal),
+  .table-scroll td:not(.cell-wrap):not(.whitespace-normal) {
+    white-space: nowrap;
+  }
+
+  /* Free-text columns (description, remarks, narration, address, reason) wrap
+     at a readable width instead of one word per line. */
+  .cell-wrap {
+    white-space: normal;
+    min-width: 12rem;
+    max-width: 24rem;
+    overflow-wrap: anywhere;
+  }
+
+  /* Freeze the identifying (first) column so it stays on screen while the rest
+     of a wide table scrolls. Opt in with .table-sticky-first on the <table>. */
+  .table-sticky-first th:first-child,
+  .table-sticky-first td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+  }
+
+  .table-sticky-first thead th:first-child {
+    background: #f8fafc;
+  }
+
+  .table-sticky-first tbody td:first-child {
+    background: #fff;
+  }
+
+  /* Hairline so the frozen column reads as pinned once the table is scrolled. */
+  .table-sticky-first th:first-child::after,
+  .table-sticky-first td:first-child::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1px;
+    background: #e2e8f0;
+  }
+
+  /* Columns that would otherwise widen the table past any phone. */
+  .cell-truncate-mobile {
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Tab bars (flex-wrap on desktop) ragged-wrap into 3-4 uneven rows on a
+     phone and eat the screen. Turn them into one swipeable row instead —
+     the standard mobile tab pattern. Desktop keeps plain flex-wrap. */
+  .tab-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .tab-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab-strip > * {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  /* Native time fields are pinned to a fixed 9.75rem so the picker icon always
+     fits on desktop. That width beats Tailwind's w-full (higher specificity),
+     so a two-up Check-in / Check-out grid on a phone overflowed its card and
+     pushed the clock icon outside the border. Let them shrink to the column
+     and keep 9.75rem as the cap, so wider layouts are unchanged. */
+  input[type="time"].time-input,
+  input.time-input[type="time"] {
+    min-width: 0;
+    width: 100%;
+    max-width: 9.75rem;
+  }
+}
+
+/* Printing / PDF export: a horizontal scroll container would clip whatever is
+   scrolled out of view. Let every table lay out at full width on paper. */
+@media print {
+  .table-scroll,
+  [data-table-scroll] {
+    overflow: visible !important;
+    max-width: none !important;
+  }
+
+  [data-table-scroll] > table {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+}

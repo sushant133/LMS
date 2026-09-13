@@ -3377,7 +3377,7 @@ export const LaboratoryManager = () => {
             </CardHeader>
             <CardContent className="min-w-0">
               <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
-                <Table className="w-full min-w-[640px]">
+                <Table className="table-sticky-first w-full min-w-[640px]">
                   <TableHead>
                     <tr>
                       <Th className="w-14 whitespace-nowrap text-center">S.N.</Th>

@@ -11,7 +11,9 @@ import type {
   SyllabusOversightListRow,
 } from "@phit-erp/shared";
 import {
+  ArrowLeft,
   Building2,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -19,7 +21,7 @@ import {
   ListChecks,
   UserRound,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -71,6 +73,21 @@ const attributionLabel = (
   return "";
 };
 
+/**
+ * Who actually taught a completed leaf. Administration entries carry a guest /
+ * extra-lecture instructor name; teacher entries carry the teacher.
+ */
+const completedByLabel = (
+  attribution?: AcademicSyllabusSubUnitRecord["attribution"],
+): string => {
+  const guest = attribution?.deliveredByName?.trim();
+  const teacher = attribution?.completedByTeacherName?.trim();
+  if (attribution?.source === "ADMINISTRATION") {
+    return guest || teacher || "Administration";
+  }
+  return teacher || guest || "";
+};
+
 interface SyllabusOversightPanelProps {
   filters: AcademicManagementFilters;
   subjects: Array<
@@ -107,6 +124,8 @@ export const SyllabusOversightPanel = ({
   const [selectedLeaves, setSelectedLeaves] = useState<Set<string>>(new Set());
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(new Set());
+  /** Detail pane, so a phone can jump straight to it when a subject is picked. */
+  const detailRef = useRef<HTMLDivElement>(null);
 
   const listQuery = useQuery({
     queryKey: ["academic-management", "syllabus-oversight", listParams],
@@ -277,14 +296,18 @@ export const SyllabusOversightPanel = ({
                         : ""}
                   </Badge>
                 ) : null}
-                {done && node.attribution?.completedByTeacherName ? (
-                  <span className="text-xs text-slate-500">
-                    {node.attribution.completedByTeacherName}
+                {done && completedByLabel(node.attribution) ? (
+                  <span className="text-xs text-slate-600">
+                    Completed by{" "}
+                    <span className="font-medium text-slate-800">
+                      {completedByLabel(node.attribution)}
+                    </span>
                   </span>
                 ) : null}
-                {done && node.attribution?.deliveredByName ? (
-                  <span className="text-xs text-slate-500">
-                    Extra: {node.attribution.deliveredByName}
+                {done && node.attribution?.taughtDateBs ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-slate-600">
+                    <CalendarDays className="h-3 w-3 text-slate-400" />
+                    Taught {node.attribution.taughtDateBs}
                   </span>
                 ) : null}
               </span>
@@ -375,7 +398,10 @@ export const SyllabusOversightPanel = ({
         />
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,22rem)_1fr]">
-          <Card className="h-fit">
+          {/* Phones show one pane at a time: picking a subject swaps the list
+              for its detail, so there is nothing to scroll past. From md up the
+              original two-pane layout is untouched. */}
+          <Card className={cn("h-fit", selectedId && "max-md:hidden")}>
             <CardHeader>
               <CardTitle>All subjects</CardTitle>
             </CardHeader>
@@ -389,6 +415,16 @@ export const SyllabusOversightPanel = ({
                     setSelectedLeaves(new Set());
                     const assigned = row.assignedTeachers[0]?.teacherId ?? "";
                     setTeacherId(assigned);
+                    // On a phone the detail replaces the list in place; start it
+                    // at the top rather than wherever the list was scrolled to.
+                    if (
+                      typeof window !== "undefined" &&
+                      window.matchMedia("(max-width: 767.98px)").matches
+                    ) {
+                      requestAnimationFrame(() =>
+                        detailRef.current?.scrollIntoView({ block: "start" }),
+                      );
+                    }
                   }}
                   className={cn(
                     "w-full rounded-xl border px-3 py-2.5 text-left transition",
@@ -427,7 +463,22 @@ export const SyllabusOversightPanel = ({
             </CardContent>
           </Card>
 
-          <div className="space-y-4">
+          <div ref={detailRef} className={cn("space-y-4", !selectedId && "max-md:hidden")}>
+            {selectedId ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="no-print md:hidden"
+                onClick={() => {
+                  setSelectedId(null);
+                  setSelectedLeaves(new Set());
+                }}
+              >
+                <ArrowLeft className="mr-1.5 h-4 w-4" />
+                All subjects
+              </Button>
+            ) : null}
             {!selectedId ? (
               <EmptyState
                 title="Select a subject"
@@ -664,6 +715,7 @@ export const SyllabusOversightPanel = ({
                             <th className="py-2 pr-3">Unit / sub-unit</th>
                             <th className="py-2 pr-3">Status</th>
                             <th className="py-2 pr-3">Completed by</th>
+                            <th className="py-2 pr-3">Taught on</th>
                             <th className="py-2">Salary</th>
                           </tr>
                         </thead>
@@ -696,6 +748,9 @@ export const SyllabusOversightPanel = ({
                                   </Badge>
                                 </td>
                                 <td className="py-2 pr-3">{who}</td>
+                                <td className="py-2 pr-3 whitespace-nowrap">
+                                  {leaf.attribution?.taughtDateBs || "—"}
+                                </td>
                                 <td className="py-2">
                                   {leaf.status === "COMPLETED" || leaf.status === "SKIPPED"
                                     ? leaf.attribution?.countsTowardSalary === false ||

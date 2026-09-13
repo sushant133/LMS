@@ -109,6 +109,13 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  /** code -> ledger name, so the Parent column reads "Assets", not "1000". */
+  const nameByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of accountsQuery.data ?? []) map.set(a.code, a.name);
+    return map;
+  }, [accountsQuery.data]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (accountsQuery.data ?? []).filter((a) => {
@@ -136,13 +143,32 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
   };
 
   const toggleActive = (account: ChartOfAccountRecord) => {
-    if (account.isSystem && account.isActive !== false) {
-      // Allow disable of system for rare cases? Spec: disable yes, delete no if tx.
-      // System accounts can be disabled but not code-changed.
+    const disabling = account.isActive !== false;
+
+    if (disabling) {
+      // A group/root ledger must not end up Disabled while its children are
+      // still Active — that is what left "Assets" disabled under active
+      // "Cash in Hand", "Bank Accounts", etc.
+      const activeChildren = (accountsQuery.data ?? []).filter(
+        (a) => a.parentCode === account.code && a.isActive !== false,
+      );
+      if (activeChildren.length > 0) {
+        toast.error(
+          `"${account.name}" still has ${activeChildren.length} active sub-ledger(s). Disable those first.`,
+        );
+        return;
+      }
+      // System accounts can be disabled but never silently — posting rules
+      // depend on them.
+      const warning = account.isSystem
+        ? `"${account.name}" is a system ledger used by automatic posting. Disable it anyway?`
+        : `Disable ledger "${account.name}"?`;
+      if (!window.confirm(warning)) return;
     }
+
     void update.mutateAsync({
       id: account._id,
-      payload: { isActive: account.isActive === false },
+      payload: { isActive: !disabling },
     });
   };
 
@@ -307,7 +333,7 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
               description="Seed the default chart of accounts to get started."
             />
           ) : (
-            <Table>
+            <Table className="table-sticky-first">
               <TableHead>
                 <tr>
                   <Th>Code</Th>
@@ -328,13 +354,27 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
                       <Td>
                         <div className="font-medium">{account.name}</div>
                         {account.nameNp ? (
-                          <div className="text-xs text-slate-500">
+                          <div className="font-nepali text-xs leading-snug text-slate-500">
                             {account.nameNp}
                           </div>
                         ) : null}
                       </Td>
                       <Td>{typeLabel[account.accountType] ?? account.accountType}</Td>
-                      <Td>{account.parentCode ?? "—"}</Td>
+                      <Td>
+                        {account.parentCode ? (
+                          <>
+                            <div className="font-medium">
+                              {nameByCode.get(account.parentCode) ??
+                                account.parentCode}
+                            </div>
+                            <div className="font-mono text-xs text-slate-500">
+                              {account.parentCode}
+                            </div>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </Td>
                       <Td>
                         <Badge
                           className={
