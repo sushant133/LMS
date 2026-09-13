@@ -5,7 +5,9 @@ import { AuthLayout } from "components/layout/AuthLayout";
 import { ErrorBoundary } from "components/shared/ErrorBoundary";
 import { OfflineLoginOnly } from "components/shared/OfflineLoginOnly";
 import { PageLoadingState } from "components/shared/LoadingState";
+import { useAuth } from "features/auth/AuthProvider";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
+import { getRoleRedirectPath } from "lib/auth";
 import { lazyWithRetry as lazy } from "lib/lazyWithRetry";
 import { isNativeApp } from "lib/platform";
 import { LoginPage } from "pages/LoginPage";
@@ -82,9 +84,33 @@ const StaffProfilePage = lazy(() =>
   import("pages/StaffProfilePage").then((module) => ({ default: module.StaffProfilePage })),
 );
 
-/** App entry always opens the login page — no silent auto-login from a leftover cookie. */
+/**
+ * Where a cold start lands.
+ *
+ * Web keeps the old rule — entry always opens the login page, so a leftover cookie on a
+ * shared computer never signs someone in silently.
+ *
+ * The native app cannot use that rule. Back at the home screen calls App.exitApp(), which
+ * finishes the activity, so every reopen is a cold start on "/" — and the user was shown a
+ * login page for a session they were still in. The phone is personal and the session cookie
+ * is the source of truth, so here we resume it and only fall through to /login when there
+ * is genuinely no session. (Logout is unaffected: it clears the session and lands on
+ * /login directly, never through here.)
+ */
 const RootRedirect = () => {
-  return <Navigate to="/login" replace />;
+  const { user, loading, loggingOut } = useAuth();
+
+  if (!isNativeApp()) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Deciding before /auth/me answers would flash the login page at a signed-in user.
+  if (loading) {
+    return <PageLoadingState />;
+  }
+
+  const home = loggingOut ? null : getRoleRedirectPath(user?.role);
+  return <Navigate to={home ?? "/login"} replace />;
 };
 
 const LazyRoute = ({ children }: { children: ReactNode }) => {
