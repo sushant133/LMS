@@ -11,6 +11,7 @@ import "@munatech/nepali-datepicker/styles.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { SplashScreen } from "@capacitor/splash-screen";
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import App from "./App";
@@ -19,6 +20,7 @@ import "./index.css";
 import { ErrorBoundary } from "components/shared/ErrorBoundary";
 import { AuthProvider } from "features/auth/AuthProvider";
 import { queryClient } from "lib/queryClient";
+import { isNativeApp } from "lib/platform";
 import { installStaleChunkRecovery } from "lib/staleChunkRecovery";
 
 installStaleChunkRecovery();
@@ -28,29 +30,56 @@ if (typeof window !== "undefined" && "scrollRestoration" in window.history) {
 }
 
 /**
- * Dismiss the static #app-boot-loader from index.html once React has actually
- * painted something (its own splash, a route loader or the page itself). Tied to
- * the first #root child rather than to render() so a slow lazy chunk still shows
- * the logo instead of a blank white screen — which is what a notification tap used
- * to open into.
+ * Startup hand-off: native launch splash → #app-boot-loader (index.html) → the app.
+ *
+ * All three show the same logo on white, and each one is only dropped once the next
+ * is on screen, so opening the app — including from a notification tap, which is the
+ * slowest path because the WebView cold-loads the remote site — is a single
+ * continuous logo screen with no white gap in the middle.
  */
+const BOOT_LOADER_FADE_MS = 300;
+/** Nothing may hold the startup screen longer than this, whatever went wrong. */
+const BOOT_LOADER_TIMEOUT_MS = 20_000;
+
+let bootLoaderDismissed = false;
+
 const dismissBootLoader = (): void => {
+  if (bootLoaderDismissed) return;
+  bootLoaderDismissed = true;
+
   const loader = document.getElementById("app-boot-loader");
-  if (!loader) return;
-  document.documentElement.classList.add("app-booted");
-  window.setTimeout(() => loader.remove(), 300);
+  if (loader) {
+    document.documentElement.classList.add("app-booted");
+    window.setTimeout(() => loader.remove(), BOOT_LOADER_FADE_MS);
+  }
+
+  // Hidden last: the native splash sits on top, so the web loader is swapped out
+  // behind it and the splash then fades straight onto real content.
+  if (!isNativeApp()) return;
+  void SplashScreen.hide({ fadeOutDuration: BOOT_LOADER_FADE_MS }).catch(() => {
+    // Older shells without the plugin still auto-hide on their own
+  });
 };
+
+/**
+ * The app is "up" once #root has painted something that is not itself a full-page
+ * loading screen — PageLoadingState flags those on <html>. Swapping our logo for
+ * another spinner would be the flicker this hand-off exists to avoid.
+ */
+const appHasPainted = (root: HTMLElement | null): boolean =>
+  Boolean(root) &&
+  root!.childElementCount > 0 &&
+  !document.documentElement.hasAttribute("data-app-loading");
 
 const waitForFirstPaint = (): void => {
   const startedAt = Date.now();
   const root = document.getElementById("root");
 
   // rAF is paused while the WebView is hidden; the timer is the backstop.
-  window.setTimeout(dismissBootLoader, 15_000);
+  window.setTimeout(dismissBootLoader, BOOT_LOADER_TIMEOUT_MS);
 
   const tick = () => {
-    // Give up after 15s: whatever went wrong, the loader must not trap the screen.
-    if (!root || root.childElementCount > 0 || Date.now() - startedAt > 15_000) {
+    if (!root || appHasPainted(root) || Date.now() - startedAt > BOOT_LOADER_TIMEOUT_MS) {
       dismissBootLoader();
       return;
     }
