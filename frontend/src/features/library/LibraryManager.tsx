@@ -42,6 +42,7 @@ import { useIsCollege } from "hooks/useInstitutionType";
 import { useCanEditOrDeleteRecords, useIsGrantedAdmin } from "hooks/useModuleAccess";
 import { LibraryIssuedBooksPanel } from "features/library/LibraryIssuedBooksPanel";
 import {
+  BorrowStatusBanner,
   LibraryIssueLimitsPanel,
   StudentBorrowStatusBanner,
 } from "features/library/LibraryIssueLimitsPanel";
@@ -2208,12 +2209,18 @@ export const LibraryManager = () => {
                       )}
                     </div>
                     {selectedTeacher ? (
-                      <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-                        Borrower:{" "}
-                        <strong>
-                          {selectedTeacher.user?.fullName ?? "Teacher"}
-                        </strong>
-                      </p>
+                      <div className="space-y-2">
+                        <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+                          Borrower:{" "}
+                          <strong>
+                            {selectedTeacher.user?.fullName ?? "Teacher"}
+                          </strong>
+                        </p>
+                        <BorrowStatusBanner
+                          borrowerType="TEACHER"
+                          borrowerId={selectedTeacher._id}
+                        />
+                      </div>
                     ) : null}
                   </>
                 ) : (
@@ -2294,12 +2301,18 @@ export const LibraryManager = () => {
                       </p>
                     ) : null}
                     {selectedStaff ? (
-                      <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-                        Borrower: <strong>{selectedStaff.fullName}</strong>
-                        {selectedStaff.designation
-                          ? ` · ${selectedStaff.designation}`
-                          : ""}
-                      </p>
+                      <div className="space-y-2">
+                        <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+                          Borrower: <strong>{selectedStaff.fullName}</strong>
+                          {selectedStaff.designation
+                            ? ` · ${selectedStaff.designation}`
+                            : ""}
+                        </p>
+                        <BorrowStatusBanner
+                          borrowerType="STAFF"
+                          borrowerId={selectedStaff._id}
+                        />
+                      </div>
                     ) : null}
                   </>
                 )}

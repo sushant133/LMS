@@ -192,6 +192,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         lang={nepali ? lang || "ne" : lang}
+        /* NepaliCharPad attaches to this — ऋ / ं / ः are not on the Nepali layouts. */
+        data-nepali={nepali ? "true" : undefined}
         spellCheck={nepali ? false : props.spellCheck}
         autoCorrect={nepali ? "off" : props.autoCorrect}
         autoCapitalize={nepali ? "off" : props.autoCapitalize}

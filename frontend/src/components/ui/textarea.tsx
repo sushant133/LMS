@@ -103,6 +103,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         ref={ref}
         {...props}
         lang={nepali ? lang || "ne" : lang}
+        data-nepali={nepali ? "true" : undefined}
         spellCheck={nepali ? false : props.spellCheck}
         autoCorrect={nepali ? "off" : props.autoCorrect}
         autoCapitalize={nepali ? "off" : props.autoCapitalize}

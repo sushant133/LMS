@@ -24,6 +24,7 @@ import {
 import {
   createIssueLimitException,
   getIssueLimits,
+  getBorrowStatus,
   getStudentBorrowStatus,
   listIssueLimitExceptions,
   revokeIssueLimitException,
@@ -84,6 +85,13 @@ router.get(
   "/students/:studentId/borrow-status",
   authorize("COLLEGE_ADMIN", "LIBRARY_STAFF", "SUPER_ADMIN"),
   getStudentBorrowStatus
+);
+
+/** Current issued / max for any borrower kind (student, teacher, staff). */
+router.get(
+  "/borrow-status/:borrowerType/:borrowerId",
+  authorize("COLLEGE_ADMIN", "LIBRARY_STAFF", "SUPER_ADMIN"),
+  getBorrowStatus
 );
 
 router.get("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listBooks);

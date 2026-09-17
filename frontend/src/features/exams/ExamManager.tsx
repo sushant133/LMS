@@ -55,6 +55,12 @@ const TeacherRoutineList = lazy(() =>
     default: module.TeacherRoutineList,
   })),
 );
+const AdmitCardPanel = lazy(() =>
+  import("features/exams/AdmitCardPanel").then((module) => ({
+    default: module.AdmitCardPanel,
+  })),
+);
+
 const PrintResultsPanel = lazy(() =>
   import("features/exams/PrintResultsPanel").then((module) => ({
     default: module.PrintResultsPanel,
@@ -469,6 +475,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const [selectedExamId, setSelectedExamId] = useState("");
   const [adminSection, setAdminSection] = useState<
     | "manage"
+    | "admit-card"
     | "print-results"
     | "exam-records"
     | "enter-marks"
@@ -1275,6 +1282,14 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
             >
               Print Results
             </Button>
+            {/* Admit cards for the students appearing in an exam. */}
+            <Button
+              size="sm"
+              variant={adminSection === "admit-card" ? "default" : "outline"}
+              onClick={() => setAdminSection("admit-card")}
+            >
+              Admit Card
+            </Button>
             {/* Read-only history — open any past exam of any batch/year on its own. */}
             <Button
               size="sm"
@@ -1416,6 +1431,35 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 }))}
                 students={studentsQuery.data ?? []}
                 isCollege={isCollege}
+              />
+            </Suspense>
+          ) : null}
+
+          {adminSection === "admit-card" ? (
+            <Suspense fallback={<LoadingState />}>
+              <AdmitCardPanel
+                isCollege={isCollege}
+                labels={labels}
+                exams={examsQuery.data ?? []}
+                batches={(batchesQuery.data ?? []).map((batch) => ({
+                  _id: String(batch._id),
+                  name: String(batch.name ?? ""),
+                }))}
+                years={(yearsQuery.data ?? []).map((year) => ({
+                  _id: String(year._id),
+                  name: String(year.name ?? ""),
+                  batchId: year.batchId ? String(year.batchId) : undefined,
+                }))}
+                classes={(classesQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                }))}
+                sections={(sectionsQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                  classId: row.classId ? String(row.classId) : undefined,
+                }))}
+                students={studentsQuery.data ?? []}
               />
             </Suspense>
           ) : null}

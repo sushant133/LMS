@@ -1502,6 +1502,16 @@ export const printMarksheetElement = async (element: HTMLElement | null): Promis
 };
 
 /**
+ * Admit cards print A4 portrait; admit-card.css lays the sheet out as a fixed
+ * 2 x 3 millimetre grid so every page carries exactly six cards.
+ */
+export const printAdmitCardsElement = async (
+  element: HTMLElement | null
+): Promise<void> => {
+  await printElement(element, "a4-portrait");
+};
+
+/**
  * Bulk results (CTEVT Internal Assessment Report) print landscape — the wide
  * per-subject Th/Pr column grid needs the 297mm edge to stay readable.
  */

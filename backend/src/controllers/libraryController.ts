@@ -39,7 +39,10 @@ import { sendSuccess } from "../utils/response.js";
 import { assertStudentLoginActive } from "../utils/studentLoginAccess.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { withTenantScope } from "../utils/tenant.js";
-import { resolveStudentBorrowStatus } from "../utils/libraryIssueLimits.js";
+import {
+  resolveBorrowStatus,
+  resolveStudentBorrowStatus
+} from "../utils/libraryIssueLimits.js";
 
 /** Nested populate so borrower fullName and issuer are available on issue lists. */
 const issueBorrowerPopulate: Array<{
@@ -711,7 +714,7 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(400, "Due date cannot be before the issue date");
   }
 
-  // Enforce student issue limits before claiming a physical copy
+  // Enforce borrower issue limits before claiming a physical copy
   if (payload.borrowerType === "STUDENT" && payload.studentId) {
     const student = await Student.findOne(
       withTenantScope(req, { _id: payload.studentId })
@@ -743,6 +746,19 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     if (!teacher) {
       throw new ApiError(404, "Teacher not found");
     }
+
+    const borrowStatus = await resolveBorrowStatus({
+      schoolId: schoolId.toString(),
+      borrowerType: "TEACHER",
+      borrowerId: payload.teacherId
+    });
+    if (!borrowStatus.canIssue) {
+      throw new ApiError(
+        400,
+        borrowStatus.message ||
+          `Book issue limit reached. Maximum allowed is ${borrowStatus.maxAllowed} book(s).`
+      );
+    }
   } else if (payload.borrowerType === "STAFF" && payload.staffId) {
     const staff = await CollegeStaff.findOne(
       withTenantScope(req, {
@@ -753,6 +769,19 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     );
     if (!staff) {
       throw new ApiError(404, "Staff member not found or inactive");
+    }
+
+    const borrowStatus = await resolveBorrowStatus({
+      schoolId: schoolId.toString(),
+      borrowerType: "STAFF",
+      borrowerId: payload.staffId
+    });
+    if (!borrowStatus.canIssue) {
+      throw new ApiError(
+        400,
+        borrowStatus.message ||
+          `Book issue limit reached. Maximum allowed is ${borrowStatus.maxAllowed} book(s).`
+      );
     }
   } else {
     throw new ApiError(400, "Select a valid student, teacher, or staff borrower");

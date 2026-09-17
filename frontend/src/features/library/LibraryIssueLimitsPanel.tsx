@@ -1,11 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  LIBRARY_BORROWER_TYPES,
   LIBRARY_ISSUE_LIMIT_YEAR_LEVELS,
+  defaultLibraryIssueStaffLimits,
+  libraryBorrowerTypeLabel,
+  type LibraryBorrowStatus,
+  type LibraryBorrowerType,
   type LibraryIssueLimitConfigRecord,
   type LibraryIssueLimitExceptionRecord,
+  type LibraryIssueStaffLimits,
   type LibraryIssueYearLimits,
-  type LibraryStudentBorrowStatus,
 } from "@phit-erp/shared";
 import { Plus, Shield, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +30,7 @@ import { Textarea } from "components/ui/textarea";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 
 type IssueStudentRow = {
@@ -39,10 +44,30 @@ type IssueStudentRow = {
   user?: { fullName?: string } | null;
 };
 
+type TeacherRow = {
+  _id: string;
+  user?: { fullName?: string } | null;
+};
+
+type StaffRow = {
+  _id: string;
+  staffId?: string;
+  fullName: string;
+  designation?: string;
+  department?: string;
+};
+
 type ScopeOption = {
   _id: string;
   name: string;
   batchId?: string;
+};
+
+/** One row in the borrower picker, whatever the borrower kind. */
+type BorrowerOption = {
+  _id: string;
+  name: string;
+  subtitle: string;
 };
 
 const formatTodayBs = (): string => {
@@ -60,12 +85,21 @@ type LimitsDraft = Record<
   (typeof LIBRARY_ISSUE_LIMIT_YEAR_LEVELS)[number],
   number | ""
 >;
+type StaffLimitsDraft = Record<"TEACHER" | "STAFF", number | "">;
 
 const toLimitsDraft = (limits: LibraryIssueYearLimits): LimitsDraft => ({
   "1st Year": limits["1st Year"],
   "2nd Year": limits["2nd Year"],
   "3rd Year": limits["3rd Year"],
 });
+
+/** Configs saved before teacher/staff limits existed come back without them. */
+const toStaffLimitsDraft = (
+  limits: LibraryIssueStaffLimits | undefined,
+): StaffLimitsDraft => {
+  const base = limits ?? defaultLibraryIssueStaffLimits();
+  return { TEACHER: base.TEACHER, STAFF: base.STAFF };
+};
 
 const finalizeLimitsDraft = (
   draft: LimitsDraft,
@@ -83,21 +117,40 @@ const finalizeLimitsDraft = (
   return out;
 };
 
+const finalizeStaffLimitsDraft = (
+  draft: StaffLimitsDraft,
+): LibraryIssueStaffLimits | null => {
+  const out = {} as LibraryIssueStaffLimits;
+  for (const key of ["TEACHER", "STAFF"] as const) {
+    const raw = draft[key];
+    if (raw === "" || raw === undefined || raw === null || Number.isNaN(Number(raw))) {
+      return null;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 50) return null;
+    out[key] = Math.floor(n);
+  }
+  return out;
+};
+
 export const LibraryIssueLimitsPanel = ({
   canManage,
 }: LibraryIssueLimitsPanelProps) => {
   const [limitsDraft, setLimitsDraft] = useState<LimitsDraft | null>(null);
+  const [staffDraft, setStaffDraft] = useState<StaffLimitsDraft | null>(null);
   const [includeRevoked, setIncludeRevoked] = useState(false);
   const [showExceptionForm, setShowExceptionForm] = useState(false);
+  const [borrowerType, setBorrowerType] =
+    useState<LibraryBorrowerType>("STUDENT");
   const [exceptionForm, setExceptionForm] = useState({
-    studentId: "",
+    borrowerId: "",
     additionalBooks: 1 as number | "",
     reason: "",
     effectiveFromBs: formatTodayBs(),
     effectiveUntilBs: "",
     remarks: "",
   });
-  const [studentSearch, setStudentSearch] = useState("");
+  const [borrowerSearch, setBorrowerSearch] = useState("");
   const [filterBatchId, setFilterBatchId] = useState("");
   const [filterYearId, setFilterYearId] = useState("");
 
@@ -120,31 +173,51 @@ export const LibraryIssueLimitsPanel = ({
       ),
   });
 
+  const formOpen = canManage && showExceptionForm;
+
   const studentsQuery = useQuery({
     queryKey: ["students", "library-issue-limits"],
     queryFn: () =>
       unwrap<IssueStudentRow[]>(
         api.get("/students", { params: { loginActive: "1" } }),
       ),
-    enabled: canManage && showExceptionForm,
+    enabled: formOpen && borrowerType === "STUDENT",
+  });
+
+  const teachersQuery = useQuery({
+    queryKey: ["teachers", "library-issue-limits"],
+    queryFn: () => unwrap<TeacherRow[]>(api.get("/teachers")),
+    enabled: formOpen && borrowerType === "TEACHER",
+  });
+
+  const staffQuery = useQuery({
+    queryKey: ["library-borrowers-staff", "library-issue-limits"],
+    queryFn: () => unwrap<StaffRow[]>(api.get("/library/borrowers/staff")),
+    enabled: formOpen && borrowerType === "STAFF",
   });
 
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/batches")),
-    enabled: canManage && showExceptionForm,
+    enabled: formOpen && borrowerType === "STUDENT",
   });
 
   const yearsQuery = useQuery({
     queryKey: ["years"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/years")),
-    enabled: canManage && showExceptionForm,
+    enabled: formOpen && borrowerType === "STUDENT",
   });
 
   const limits: LimitsDraft | null = limitsDraft
     ? limitsDraft
     : limitsQuery.data?.limits
       ? toLimitsDraft(limitsQuery.data.limits)
+      : null;
+
+  const staffLimits: StaffLimitsDraft | null = staffDraft
+    ? staffDraft
+    : limitsQuery.data
+      ? toStaffLimitsDraft(limitsQuery.data.staffLimits)
       : null;
 
   const batches = batchesQuery.data ?? [];
@@ -178,8 +251,39 @@ export const LibraryIssueLimitsPanel = ({
       }));
   }, [years, filterBatchId]);
 
-  const filteredStudentsAll = useMemo(() => {
-    const q = studentSearch.trim().toLowerCase();
+  /** Borrower list for the active tab, already filtered and sorted. */
+  const borrowerOptionsAll = useMemo<BorrowerOption[]>(() => {
+    const q = borrowerSearch.trim().toLowerCase();
+
+    if (borrowerType === "TEACHER") {
+      return (teachersQuery.data ?? [])
+        .map((t) => ({
+          _id: t._id,
+          name: t.user?.fullName ?? "Teacher",
+          subtitle: "Teacher",
+        }))
+        .filter((row) => !q || row.name.toLowerCase().includes(q))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    if (borrowerType === "STAFF") {
+      return (staffQuery.data ?? [])
+        .map((s) => ({
+          _id: s._id,
+          name: s.fullName,
+          subtitle: [s.staffId, s.designation, s.department]
+            .filter(Boolean)
+            .join(" · "),
+        }))
+        .filter(
+          (row) =>
+            !q ||
+            row.name.toLowerCase().includes(q) ||
+            row.subtitle.toLowerCase().includes(q),
+        )
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     const yearNameFilter = filterYearId.startsWith("name:")
       ? filterYearId.slice("name:".length).trim().toLowerCase()
       : "";
@@ -201,27 +305,58 @@ export const LibraryIssueLimitsPanel = ({
         const roll = String(s.rollNumber ?? "");
         return name.includes(q) || adm.includes(q) || roll.includes(q);
       })
-      .sort((a, b) =>
-        (a.user?.fullName ?? "").localeCompare(b.user?.fullName ?? ""),
-      );
+      .map((s) => ({
+        _id: s._id,
+        name: s.user?.fullName ?? "Student",
+        subtitle: [
+          s.admissionNumber,
+          s.rollNumber != null ? `Roll ${s.rollNumber}` : "",
+          s.batchName,
+          s.yearName,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [
+    borrowerType,
+    borrowerSearch,
     studentsQuery.data,
-    studentSearch,
+    teachersQuery.data,
+    staffQuery.data,
     filterBatchId,
     filterYearId,
   ]);
 
-  const filteredStudents = useMemo(
-    () => filteredStudentsAll.slice(0, 80),
-    [filteredStudentsAll],
+  const borrowerOptions = useMemo(
+    () => borrowerOptionsAll.slice(0, 80),
+    [borrowerOptionsAll],
   );
 
+  const borrowersLoading =
+    borrowerType === "STUDENT"
+      ? studentsQuery.isLoading || batchesQuery.isLoading || yearsQuery.isLoading
+      : borrowerType === "TEACHER"
+        ? teachersQuery.isLoading
+        : staffQuery.isLoading;
+
+  /** Switching borrower kind clears the selection and the student-only filters. */
+  useEffect(() => {
+    setExceptionForm((c) => ({ ...c, borrowerId: "" }));
+    setBorrowerSearch("");
+    setFilterBatchId("");
+    setFilterYearId("");
+  }, [borrowerType]);
+
   const saveLimits = useMutation({
-    mutationFn: (next: LibraryIssueYearLimits) =>
-      unwrap(api.put("/library/issue-limits", { limits: next })),
+    mutationFn: (next: {
+      limits: LibraryIssueYearLimits;
+      staffLimits: LibraryIssueStaffLimits;
+    }) => unwrap(api.put("/library/issue-limits", next)),
     onSuccess: async () => {
-      toast.success("Year-wise issue limits saved");
+      toast.success("Issue limits saved");
       setLimitsDraft(null);
+      setStaffDraft(null);
       await queryClient.invalidateQueries({
         queryKey: ["library-issue-limits"],
       });
@@ -231,7 +366,8 @@ export const LibraryIssueLimitsPanel = ({
 
   const createException = useMutation({
     mutationFn: (payload: {
-      studentId: string;
+      borrowerType: LibraryBorrowerType;
+      borrowerId: string;
       additionalBooks: number;
       reason: string;
       effectiveFromBs: string;
@@ -242,14 +378,14 @@ export const LibraryIssueLimitsPanel = ({
       toast.success("Exception granted");
       setShowExceptionForm(false);
       setExceptionForm({
-        studentId: "",
+        borrowerId: "",
         additionalBooks: 1,
         reason: "",
         effectiveFromBs: formatTodayBs(),
         effectiveUntilBs: "",
         remarks: "",
       });
-      setStudentSearch("");
+      setBorrowerSearch("");
       setFilterBatchId("");
       setFilterYearId("");
       await queryClient.invalidateQueries({
@@ -271,7 +407,7 @@ export const LibraryIssueLimitsPanel = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const dirty =
+  const yearDirty =
     Boolean(limitsDraft) &&
     Boolean(limitsQuery.data?.limits) &&
     LIBRARY_ISSUE_LIMIT_YEAR_LEVELS.some((y) => {
@@ -281,6 +417,38 @@ export const LibraryIssueLimitsPanel = ({
       return Number(draftVal) !== saved;
     });
 
+  const staffDirty =
+    Boolean(staffDraft) &&
+    Boolean(limitsQuery.data) &&
+    (["TEACHER", "STAFF"] as const).some((key) => {
+      const draftVal = staffDraft?.[key];
+      const saved = toStaffLimitsDraft(limitsQuery.data!.staffLimits)[key];
+      if (draftVal === "" || draftVal === undefined) return true;
+      return Number(draftVal) !== saved;
+    });
+
+  const dirty = yearDirty || staffDirty;
+
+  const resetDrafts = () => {
+    setLimitsDraft(null);
+    setStaffDraft(null);
+  };
+
+  const handleSaveLimits = () => {
+    if (!limitsQuery.data) return;
+    const yearFinal = finalizeLimitsDraft(
+      limitsDraft ?? toLimitsDraft(limitsQuery.data.limits),
+    );
+    const staffFinal = finalizeStaffLimitsDraft(
+      staffDraft ?? toStaffLimitsDraft(limitsQuery.data.staffLimits),
+    );
+    if (!yearFinal || !staffFinal) {
+      toast.error("Enter a valid number (0–50) for every limit before saving");
+      return;
+    }
+    saveLimits.mutate({ limits: yearFinal, staffLimits: staffFinal });
+  };
+
   const exceptions = exceptionsQuery.data?.records ?? [];
 
   return (
@@ -289,11 +457,12 @@ export const LibraryIssueLimitsPanel = ({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Shield className="h-4 w-4 text-brand-600" />
-            Year-wise book issue limits
+            Book issue limits
           </CardTitle>
           <p className="text-sm text-slate-500">
-            Maximum number of books a student may hold at once, by academic year.
-            Active student exceptions add to this default.
+            Maximum number of books a borrower may hold at once. Students are
+            limited by academic year; teachers and staff have one flat limit
+            each. Active exceptions add to these defaults.
             {!canManage
               ? " You can view limits but only Admin / Super Admin can change them."
               : null}
@@ -307,55 +476,88 @@ export const LibraryIssueLimitsPanel = ({
               title="Could not load limits"
               description={parseErrorMessage(limitsQuery.error)}
             />
-          ) : limits ? (
+          ) : limits && staffLimits ? (
             <>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {LIBRARY_ISSUE_LIMIT_YEAR_LEVELS.map((year) => (
-                  <FormField key={year} label={year}>
-                    <NumberInput
-                      min={0}
-                      max={50}
-                      value={limits[year]}
-                      disabled={!canManage || saveLimits.isPending}
-                      onValueChange={(v) => {
-                        const base =
-                          limitsDraft ??
-                          toLimitsDraft(limitsQuery.data!.limits);
-                        if (v === undefined) {
-                          setLimitsDraft({ ...base, [year]: "" });
-                          return;
-                        }
-                        setLimitsDraft({
-                          ...base,
-                          [year]: Math.max(0, Math.min(50, v)),
-                        });
-                      }}
-                    />
-                    <p className="mt-1 text-xs text-slate-500">
-                      Max concurrent books for {year}
-                    </p>
-                  </FormField>
-                ))}
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Students — by academic year
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {LIBRARY_ISSUE_LIMIT_YEAR_LEVELS.map((year) => (
+                    <FormField key={year} label={year}>
+                      <NumberInput
+                        min={0}
+                        max={50}
+                        value={limits[year]}
+                        disabled={!canManage || saveLimits.isPending}
+                        onValueChange={(v) => {
+                          const base =
+                            limitsDraft ??
+                            toLimitsDraft(limitsQuery.data!.limits);
+                          if (v === undefined) {
+                            setLimitsDraft({ ...base, [year]: "" });
+                            return;
+                          }
+                          setLimitsDraft({
+                            ...base,
+                            [year]: Math.max(0, Math.min(50, v)),
+                          });
+                        }}
+                      />
+                      <p className="mt-1 text-xs text-slate-500">
+                        Max concurrent books for {year}
+                      </p>
+                    </FormField>
+                  ))}
+                </div>
               </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Teachers and staff
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {(["TEACHER", "STAFF"] as const).map((key) => (
+                    <FormField
+                      key={key}
+                      label={
+                        key === "TEACHER" ? "Teachers" : "College staff"
+                      }
+                    >
+                      <NumberInput
+                        min={0}
+                        max={50}
+                        value={staffLimits[key]}
+                        disabled={!canManage || saveLimits.isPending}
+                        onValueChange={(v) => {
+                          const base =
+                            staffDraft ??
+                            toStaffLimitsDraft(limitsQuery.data!.staffLimits);
+                          if (v === undefined) {
+                            setStaffDraft({ ...base, [key]: "" });
+                            return;
+                          }
+                          setStaffDraft({
+                            ...base,
+                            [key]: Math.max(0, Math.min(50, v)),
+                          });
+                        }}
+                      />
+                      <p className="mt-1 text-xs text-slate-500">
+                        Max concurrent books for{" "}
+                        {key === "TEACHER" ? "each teacher" : "each staff member"}
+                      </p>
+                    </FormField>
+                  ))}
+                </div>
+              </div>
+
               {canManage ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
                     disabled={!dirty || saveLimits.isPending}
-                    onClick={() => {
-                      if (!limitsDraft && !limitsQuery.data?.limits) return;
-                      const draft =
-                        limitsDraft ??
-                        toLimitsDraft(limitsQuery.data!.limits);
-                      const finalized = finalizeLimitsDraft(draft);
-                      if (!finalized) {
-                        toast.error(
-                          "Enter a valid number (0–50) for every year before saving",
-                        );
-                        return;
-                      }
-                      saveLimits.mutate(finalized);
-                    }}
+                    onClick={handleSaveLimits}
                   >
                     {saveLimits.isPending ? "Saving…" : "Save limits"}
                   </Button>
@@ -364,7 +566,7 @@ export const LibraryIssueLimitsPanel = ({
                     variant="outline"
                     disabled={!dirty || saveLimits.isPending}
                     onClick={() => {
-                      setLimitsDraft(null);
+                      resetDrafts();
                       toast.message("Limits reset to last saved values");
                     }}
                   >
@@ -375,7 +577,7 @@ export const LibraryIssueLimitsPanel = ({
                     variant="secondary"
                     disabled={!dirty || saveLimits.isPending}
                     onClick={() => {
-                      setLimitsDraft(null);
+                      resetDrafts();
                       toast.message("Changes cancelled");
                     }}
                   >
@@ -400,8 +602,8 @@ export const LibraryIssueLimitsPanel = ({
               Issue limit exceptions
             </CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              Grant extra books to specific students. Example: default 3 +
-              exception +2 → student may borrow 5.
+              Grant extra books to a specific student, teacher, or staff member.
+              Example: default 3 + exception +2 → borrower may hold 5.
             </p>
           </div>
           {canManage ? (
@@ -413,7 +615,7 @@ export const LibraryIssueLimitsPanel = ({
                 if (showExceptionForm) {
                   setFilterBatchId("");
                   setFilterYearId("");
-                  setStudentSearch("");
+                  setBorrowerSearch("");
                 }
               }}
             >
@@ -423,49 +625,79 @@ export const LibraryIssueLimitsPanel = ({
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
-          {canManage && showExceptionForm ? (
+          {formOpen ? (
             <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex flex-wrap gap-2">
+                {LIBRARY_BORROWER_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setBorrowerType(type)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-sm transition",
+                      borrowerType === type
+                        ? "border-brand-500 bg-brand-50 font-medium text-brand-800"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                    )}
+                  >
+                    {libraryBorrowerTypeLabel(type)}
+                  </button>
+                ))}
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <FormField label="Batch">
-                  <Select
-                    value={filterBatchId}
-                    onChange={(e) => {
-                      setFilterBatchId(e.target.value);
-                      setFilterYearId("");
-                      setExceptionForm((c) => ({ ...c, studentId: "" }));
-                    }}
-                  >
-                    <option value="">All batches</option>
-                    {batches.map((b) => (
-                      <option key={b._id} value={b._id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Year">
-                  <Select
-                    value={filterYearId}
-                    onChange={(e) => {
-                      setFilterYearId(e.target.value);
-                      setExceptionForm((c) => ({ ...c, studentId: "" }));
-                    }}
-                  >
-                    <option value="">
-                      {filterBatchId ? "All years in batch" : "All years"}
-                    </option>
-                    {yearOptions.map((y) => (
-                      <option key={y.value} value={y.value}>
-                        {y.label}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Search student">
+                {borrowerType === "STUDENT" ? (
+                  <>
+                    <FormField label="Batch">
+                      <Select
+                        value={filterBatchId}
+                        onChange={(e) => {
+                          setFilterBatchId(e.target.value);
+                          setFilterYearId("");
+                          setExceptionForm((c) => ({ ...c, borrowerId: "" }));
+                        }}
+                      >
+                        <option value="">All batches</option>
+                        {batches.map((b) => (
+                          <option key={b._id} value={b._id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                    <FormField label="Year">
+                      <Select
+                        value={filterYearId}
+                        onChange={(e) => {
+                          setFilterYearId(e.target.value);
+                          setExceptionForm((c) => ({ ...c, borrowerId: "" }));
+                        }}
+                      >
+                        <option value="">
+                          {filterBatchId ? "All years in batch" : "All years"}
+                        </option>
+                        {yearOptions.map((y) => (
+                          <option key={y.value} value={y.value}>
+                            {y.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  </>
+                ) : null}
+                <FormField
+                  label={`Search ${libraryBorrowerTypeLabel(borrowerType).toLowerCase()}`}
+                >
                   <Input
-                    value={studentSearch}
-                    onChange={(e) => setStudentSearch(e.target.value)}
-                    placeholder="Name, roll, admission…"
+                    value={borrowerSearch}
+                    onChange={(e) => setBorrowerSearch(e.target.value)}
+                    placeholder={
+                      borrowerType === "STUDENT"
+                        ? "Name, roll, admission…"
+                        : borrowerType === "TEACHER"
+                          ? "Teacher name"
+                          : "Name, staff ID, designation…"
+                    }
                   />
                 </FormField>
                 <FormField label="Additional books *">
@@ -485,25 +717,22 @@ export const LibraryIssueLimitsPanel = ({
                   />
                 </FormField>
               </div>
-              <p className="text-xs text-slate-500">
-                Filter by batch and year, then search or pick a student from the
-                list.
-              </p>
               <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white">
-                {studentsQuery.isLoading ||
-                batchesQuery.isLoading ||
-                yearsQuery.isLoading ? (
-                  <p className="p-3 text-sm text-slate-500">Loading students…</p>
-                ) : filteredStudents.length === 0 ? (
+                {borrowersLoading ? (
                   <p className="p-3 text-sm text-slate-500">
-                    No students match batch, year, or search.
+                    Loading {libraryBorrowerTypeLabel(borrowerType).toLowerCase()}…
+                  </p>
+                ) : borrowerOptions.length === 0 ? (
+                  <p className="p-3 text-sm text-slate-500">
+                    No {libraryBorrowerTypeLabel(borrowerType).toLowerCase()}{" "}
+                    matches the current filters.
                   </p>
                 ) : (
                   <ul className="divide-y divide-slate-100">
-                    {filteredStudents.map((s) => {
-                      const selected = exceptionForm.studentId === s._id;
+                    {borrowerOptions.map((row) => {
+                      const selected = exceptionForm.borrowerId === row._id;
                       return (
-                        <li key={s._id}>
+                        <li key={row._id}>
                           <button
                             type="button"
                             className={
@@ -514,26 +743,17 @@ export const LibraryIssueLimitsPanel = ({
                             onClick={() =>
                               setExceptionForm((c) => ({
                                 ...c,
-                                studentId: s._id,
+                                borrowerId: row._id,
                               }))
                             }
                           >
                             <span className="min-w-0 flex-1">
-                              <span className="font-medium">
-                                {s.user?.fullName ?? "Student"}
-                              </span>
-                              <span className="block text-xs text-slate-500">
-                                {[
-                                  s.admissionNumber,
-                                  s.rollNumber != null
-                                    ? `Roll ${s.rollNumber}`
-                                    : "",
-                                  s.batchName,
-                                  s.yearName,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </span>
+                              <span className="font-medium">{row.name}</span>
+                              {row.subtitle ? (
+                                <span className="block text-xs text-slate-500">
+                                  {row.subtitle}
+                                </span>
+                              ) : null}
                             </span>
                             {selected ? (
                               <Badge className="bg-brand-100 text-brand-800">
@@ -547,16 +767,15 @@ export const LibraryIssueLimitsPanel = ({
                   </ul>
                 )}
               </div>
-              {filteredStudentsAll.length > 80 ? (
+              {borrowerOptionsAll.length > 80 ? (
                 <p className="text-xs text-slate-500">
-                  Showing first 80 of {filteredStudentsAll.length}. Narrow batch,
-                  year, or search.
+                  Showing first 80 of {borrowerOptionsAll.length}. Narrow the
+                  filters or search.
                 </p>
-              ) : filteredStudents.length > 0 ? (
+              ) : borrowerOptions.length > 0 ? (
                 <p className="text-xs text-slate-500">
-                  {filteredStudents.length} student
-                  {filteredStudents.length === 1 ? "" : "s"} shown
-                  {exceptionForm.studentId ? " · student selected" : ""}
+                  {borrowerOptions.length} shown
+                  {exceptionForm.borrowerId ? " · borrower selected" : ""}
                 </p>
               ) : null}
               <FormField label="Reason *">
@@ -615,7 +834,7 @@ export const LibraryIssueLimitsPanel = ({
                 type="button"
                 disabled={
                   createException.isPending ||
-                  !exceptionForm.studentId ||
+                  !exceptionForm.borrowerId ||
                   !exceptionForm.reason.trim() ||
                   exceptionForm.additionalBooks === "" ||
                   Number(exceptionForm.additionalBooks) < 1
@@ -629,7 +848,8 @@ export const LibraryIssueLimitsPanel = ({
                     return;
                   }
                   createException.mutate({
-                    studentId: exceptionForm.studentId,
+                    borrowerType,
+                    borrowerId: exceptionForm.borrowerId,
                     additionalBooks: Number(exceptionForm.additionalBooks),
                     reason: exceptionForm.reason.trim(),
                     effectiveFromBs: exceptionForm.effectiveFromBs,
@@ -658,14 +878,15 @@ export const LibraryIssueLimitsPanel = ({
           ) : exceptions.length === 0 ? (
             <EmptyState
               title="No exceptions"
-              description="Grant an exception when a student needs more books than the year limit."
+              description="Grant an exception when a borrower needs more books than their default limit."
             />
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <Table>
                 <TableHead>
                   <tr>
-                    <Th>Student</Th>
+                    <Th>Borrower</Th>
+                    <Th>Type</Th>
                     <Th>Extra books</Th>
                     <Th>Reason</Th>
                     <Th>Effective</Th>
@@ -675,76 +896,112 @@ export const LibraryIssueLimitsPanel = ({
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {exceptions.map((row) => (
-                    <tr key={row._id}>
-                      <Td>
-                        <StudentNameLink
-                          studentId={row.studentId}
-                          name={row.studentName || "Student"}
-                          subtitle={[row.admissionNumber, row.batchName, row.yearName]
+                  {exceptions.map((row) => {
+                    const subtitle =
+                      row.borrowerType === "STUDENT"
+                        ? [row.admissionNumber, row.batchName, row.yearName]
                             .filter(Boolean)
-                            .join(" · ")}
-                        />
-                      </Td>
-                      <Td className="font-semibold text-brand-700">
-                        +{row.additionalBooks}
-                      </Td>
-                      <Td className="max-w-[12rem] text-sm">
-                        {row.reason}
-                        {row.remarks ? (
-                          <span className="mt-0.5 block text-xs text-slate-500">
-                            {row.remarks}
-                          </span>
-                        ) : null}
-                      </Td>
-                      <Td className="whitespace-nowrap text-sm">
-                        {row.effectiveFromBs}
-                        {row.effectiveUntilBs
-                          ? ` → ${row.effectiveUntilBs}`
-                          : " → open"}
-                      </Td>
-                      <Td>
-                        {row.isRevoked ? (
-                          <Badge className="bg-slate-200 text-slate-700">
-                            Revoked
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-emerald-100 text-emerald-800">
-                            Active
-                          </Badge>
-                        )}
-                      </Td>
-                      <Td className="text-xs text-slate-500">
-                        {row.createdByName || "—"}
-                      </Td>
-                      {canManage ? (
-                        <Td className="text-right">
-                          {!row.isRevoked ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="destructive"
-                              disabled={revokeException.isPending}
-                              onClick={() => {
-                                if (
-                                  !window.confirm(
-                                    `Revoke +${row.additionalBooks} exception for ${row.studentName ?? "this student"}?`,
-                                  )
-                                ) {
-                                  return;
-                                }
-                                revokeException.mutate(row._id);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            .join(" · ")
+                        : [row.staffCode, row.designation, row.department]
+                            .filter(Boolean)
+                            .join(" · ");
+                    const name =
+                      row.borrowerName ||
+                      row.studentName ||
+                      libraryBorrowerTypeLabel(row.borrowerType);
+                    return (
+                      <tr key={row._id}>
+                        <Td>
+                          {row.borrowerType === "STUDENT" && row.studentId ? (
+                            <StudentNameLink
+                              studentId={row.studentId}
+                              name={name}
+                              subtitle={subtitle}
+                            />
                           ) : (
-                            "—"
+                            <div>
+                              <span className="font-medium">{name}</span>
+                              {subtitle ? (
+                                <span className="block text-xs text-slate-500">
+                                  {subtitle}
+                                </span>
+                              ) : null}
+                            </div>
                           )}
                         </Td>
-                      ) : null}
-                    </tr>
-                  ))}
+                        <Td>
+                          <Badge
+                            className={
+                              row.borrowerType === "STUDENT"
+                                ? "bg-slate-100 text-slate-700"
+                                : row.borrowerType === "TEACHER"
+                                  ? "bg-indigo-100 text-indigo-800"
+                                  : "bg-teal-100 text-teal-800"
+                            }
+                          >
+                            {libraryBorrowerTypeLabel(row.borrowerType)}
+                          </Badge>
+                        </Td>
+                        <Td className="font-semibold text-brand-700">
+                          +{row.additionalBooks}
+                        </Td>
+                        <Td className="max-w-[12rem] text-sm">
+                          {row.reason}
+                          {row.remarks ? (
+                            <span className="mt-0.5 block text-xs text-slate-500">
+                              {row.remarks}
+                            </span>
+                          ) : null}
+                        </Td>
+                        <Td className="whitespace-nowrap text-sm">
+                          {row.effectiveFromBs}
+                          {row.effectiveUntilBs
+                            ? ` → ${row.effectiveUntilBs}`
+                            : " → open"}
+                        </Td>
+                        <Td>
+                          {row.isRevoked ? (
+                            <Badge className="bg-slate-200 text-slate-700">
+                              Revoked
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-emerald-100 text-emerald-800">
+                              Active
+                            </Badge>
+                          )}
+                        </Td>
+                        <Td className="text-xs text-slate-500">
+                          {row.createdByName || "—"}
+                        </Td>
+                        {canManage ? (
+                          <Td className="text-right">
+                            {!row.isRevoked ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={revokeException.isPending}
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      `Revoke +${row.additionalBooks} exception for ${name}?`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  revokeException.mutate(row._id);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : (
+                              "—"
+                            )}
+                          </Td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -756,21 +1013,23 @@ export const LibraryIssueLimitsPanel = ({
 };
 
 /** Compact borrow status banner for the Issue Books screen. */
-export const StudentBorrowStatusBanner = ({
-  studentId,
+export const BorrowStatusBanner = ({
+  borrowerType,
+  borrowerId,
 }: {
-  studentId: string;
+  borrowerType: LibraryBorrowerType;
+  borrowerId: string;
 }) => {
   const statusQuery = useQuery({
-    queryKey: ["library-borrow-status", studentId],
+    queryKey: ["library-borrow-status", borrowerType, borrowerId],
     queryFn: () =>
-      unwrap<LibraryStudentBorrowStatus>(
-        api.get(`/library/students/${studentId}/borrow-status`),
+      unwrap<LibraryBorrowStatus>(
+        api.get(`/library/borrow-status/${borrowerType}/${borrowerId}`),
       ),
-    enabled: Boolean(studentId),
+    enabled: Boolean(borrowerId),
   });
 
-  if (!studentId) return null;
+  if (!borrowerId) return null;
   if (statusQuery.isLoading) {
     return (
       <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -801,11 +1060,11 @@ export const StudentBorrowStatusBanner = ({
             Exception applied (+{s.exceptionAdditional})
           </Badge>
         ) : null}
-        {s.yearName ? (
-          <span className="text-xs opacity-80">
-            Year default: {s.yearDefaultLimit} ({s.yearName})
-          </span>
-        ) : null}
+        <span className="text-xs opacity-80">
+          {s.borrowerType === "STUDENT"
+            ? `Year default: ${s.yearDefaultLimit}${s.yearName ? ` (${s.yearName})` : ""}`
+            : `${libraryBorrowerTypeLabel(s.borrowerType)} default: ${s.yearDefaultLimit}`}
+        </span>
       </div>
       {atLimit && s.message ? (
         <p className="mt-1 text-xs font-medium">{s.message}</p>
@@ -817,3 +1076,10 @@ export const StudentBorrowStatusBanner = ({
     </div>
   );
 };
+
+/** Student-only shorthand kept for existing call sites. */
+export const StudentBorrowStatusBanner = ({
+  studentId,
+}: {
+  studentId: string;
+}) => <BorrowStatusBanner borrowerType="STUDENT" borrowerId={studentId} />;

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./styles/marksheet.css";
+@import "./styles/admit-card.css";
 
 @theme {
   --color-brand-50: #eef3fb;

@@ -1,0 +1,286 @@
+/**
+ * Examination admit card — compact A6-ish card, six to an A4 portrait sheet.
+ *
+ * Sizing is in millimetres so the printed sheet is exact: printUtils prints
+ * non-timetable roots with `@page { size: 210mm 297mm; margin: 8mm 6mm }`,
+ * leaving 198mm x 281mm usable. Three rows of 90mm cards plus two 3mm gaps
+ * comes to 276mm, so a full sheet always clears the page box.
+ *
+ * The same card is used for a single print — one card, identical size — so a
+ * card issued on its own is interchangeable with one from a bulk run.
+ */
+
+.ac-sheet {
+  --ac-ink: #14213d;
+  --ac-line: #14213d;
+  --ac-muted: #55607a;
+  --ac-soft: #f3f5f9;
+  --ac-accent: #a9812f;
+
+  box-sizing: border-box;
+  width: 198mm;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3mm;
+  align-content: start;
+  background: #ffffff;
+}
+
+.ac-sheet * {
+  box-sizing: border-box;
+}
+
+/* Each sheet after the first starts a new page — guarantees exactly 6 per page.
+   No margin here: the print clone drops the .ac-preview ancestor, and a top
+   margin on a fresh page would push 276mm of cards past the 281mm page box. */
+.ac-sheet + .ac-sheet {
+  page-break-before: always;
+  break-before: page;
+}
+
+.ac-card {
+  position: relative;
+  height: 90mm;
+  padding: 3.4mm 3.6mm 3mm;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  color: var(--ac-ink);
+  font-family: "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", "Segoe UI",
+    sans-serif;
+  font-size: 7.4pt;
+  line-height: 1.24;
+  border: 1.1px solid var(--ac-line);
+  box-shadow:
+    inset 0 0 0 1.6px #ffffff,
+    inset 0 0 0 2.3px var(--ac-accent);
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+/* —— Header —— */
+
+.ac-head {
+  display: flex;
+  align-items: center;
+  gap: 2.4mm;
+  padding-bottom: 1.6mm;
+  border-bottom: 0.9px solid var(--ac-line);
+}
+
+.ac-logo {
+  width: 11mm;
+  height: 11mm;
+  flex: 0 0 11mm;
+  object-fit: contain;
+}
+
+.ac-head-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: center;
+}
+
+.ac-college {
+  margin: 0;
+  font-size: 9pt;
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.ac-college-np {
+  margin: 0.4mm 0 0;
+  font-size: 7pt;
+  color: var(--ac-muted);
+  line-height: 1.15;
+}
+
+.ac-address {
+  margin: 0.5mm 0 0;
+  font-size: 6.4pt;
+  color: var(--ac-muted);
+  line-height: 1.18;
+}
+
+.ac-title {
+  margin: 1.8mm 0 0;
+  padding: 1mm 0;
+  text-align: center;
+  font-size: 8.4pt;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ffffff;
+  background: var(--ac-ink);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.ac-exam {
+  margin: 1.4mm 0 0;
+  text-align: center;
+  font-size: 7.8pt;
+  font-weight: 600;
+  line-height: 1.18;
+}
+
+.ac-session {
+  margin: 0.4mm 0 0;
+  text-align: center;
+  font-size: 6.6pt;
+  color: var(--ac-muted);
+}
+
+/* —— Body: details + photo —— */
+
+.ac-body {
+  margin-top: 1.8mm;
+  display: flex;
+  gap: 2.6mm;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ac-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 17mm 1fr;
+  row-gap: 0.9mm;
+  column-gap: 1.4mm;
+  align-content: start;
+}
+
+.ac-fields dt {
+  margin: 0;
+  font-size: 6.4pt;
+  font-weight: 600;
+  color: var(--ac-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+
+.ac-fields dd {
+  margin: 0;
+  font-size: 7.4pt;
+  font-weight: 600;
+  line-height: 1.24;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Name and symbol number carry the identity — give them weight. */
+.ac-fields dd.ac-strong {
+  font-size: 8.2pt;
+  font-weight: 700;
+}
+
+.ac-photo {
+  flex: 0 0 22mm;
+  width: 22mm;
+  height: 27mm;
+  border: 0.9px solid var(--ac-line);
+  background: var(--ac-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.ac-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ac-photo-empty {
+  font-size: 5.8pt;
+  color: var(--ac-muted);
+  text-align: center;
+  padding: 0 1mm;
+  line-height: 1.2;
+}
+
+/* —— Footer —— */
+
+.ac-note {
+  margin: 1.4mm 0 0;
+  padding-top: 1.2mm;
+  border-top: 0.6px dashed var(--ac-line);
+  font-size: 5.9pt;
+  color: var(--ac-muted);
+  line-height: 1.25;
+}
+
+.ac-signs {
+  margin-top: auto;
+  padding-top: 3.2mm;
+  display: flex;
+  justify-content: space-between;
+  gap: 3mm;
+}
+
+.ac-sign {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 6.1pt;
+  color: var(--ac-muted);
+  border-top: 0.8px solid var(--ac-line);
+  padding-top: 0.8mm;
+  line-height: 1.15;
+}
+
+/* —— Screen preview only —— */
+
+.ac-preview {
+  background: #eef1f6;
+  padding: 6mm 0;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+}
+
+.ac-preview .ac-sheet {
+  background: #ffffff;
+  padding: 8mm 6mm;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
+  width: 210mm;
+}
+
+/* Screen only: separate the simulated pages. */
+.ac-preview .ac-sheet + .ac-sheet {
+  margin-top: 6mm;
+}
+
+@media print {
+  /* Do not declare @page here — printUtils owns page size and margins, and a
+     rule here would leak into every other iframe print. */
+  .ac-preview {
+    background: transparent;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .ac-preview .ac-sheet {
+    width: 198mm;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .ac-preview .ac-sheet + .ac-sheet {
+    margin-top: 0;
+  }
+
+  .ac-card,
+  .ac-title,
+  .ac-photo {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

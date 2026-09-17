@@ -1,7 +1,11 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 
 /**
- * Student-specific extra borrowing allowance on top of year default limit.
+ * Borrower-specific extra allowance on top of the default limit.
+ *
+ * Students are addressed by `studentId`, teachers by `teacherId` and college
+ * staff by `staffId`. Documents written before teacher/staff support have no
+ * `borrowerType`; readers treat a missing value as "STUDENT".
  */
 const libraryIssueLimitExceptionSchema = new Schema(
   {
@@ -11,10 +15,25 @@ const libraryIssueLimitExceptionSchema = new Schema(
       required: true,
       index: true
     },
+    borrowerType: {
+      type: String,
+      enum: ["STUDENT", "TEACHER", "STAFF"],
+      default: "STUDENT",
+      index: true
+    },
     studentId: {
       type: Schema.Types.ObjectId,
       ref: "Student",
-      required: true,
+      index: true
+    },
+    teacherId: {
+      type: Schema.Types.ObjectId,
+      ref: "Teacher",
+      index: true
+    },
+    staffId: {
+      type: Schema.Types.ObjectId,
+      ref: "CollegeStaff",
       index: true
     },
     additionalBooks: { type: Number, required: true, min: 1, max: 20 },
@@ -35,6 +54,16 @@ const libraryIssueLimitExceptionSchema = new Schema(
 libraryIssueLimitExceptionSchema.index({
   schoolId: 1,
   studentId: 1,
+  isRevoked: 1
+});
+libraryIssueLimitExceptionSchema.index({
+  schoolId: 1,
+  teacherId: 1,
+  isRevoked: 1
+});
+libraryIssueLimitExceptionSchema.index({
+  schoolId: 1,
+  staffId: 1,
   isRevoked: 1
 });
 libraryIssueLimitExceptionSchema.index({ schoolId: 1, isRevoked: 1 });

@@ -13,6 +13,7 @@ import {
   type SyllabusOversightListRow
 } from "@phit-erp/shared";
 import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
+import { AcademicLogBook } from "../models/AcademicLogBook.js";
 import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
@@ -325,11 +326,57 @@ const collectDescendantLeafIds = async (
   return [...wanted];
 };
 
+const teacherExists = async (
+  schoolId: mongoose.Types.ObjectId,
+  teacherId: string
+): Promise<boolean> => {
+  const id = teacherId.trim();
+  if (!id || !mongoose.isValidObjectId(id)) return false;
+  const row = await Teacher.findOne({ _id: id, schoolId }).select("_id").lean();
+  return Boolean(row);
+};
+
+// A log book always needs a teacher to hang off, even when the work was done by
+// administration. When the subject has no active assignment for the year we
+// fall back to whoever already owns the subject instead of refusing the
+// completion — administration entries never count toward salary anyway.
+const fallbackLogBookTeacherId = async (params: {
+  schoolId: mongoose.Types.ObjectId;
+  subjectId: string;
+  syllabusTeacherId?: string;
+}): Promise<string> => {
+  const syllabusTeacher = (params.syllabusTeacherId || "").trim();
+  if (await teacherExists(params.schoolId, syllabusTeacher)) return syllabusTeacher;
+
+  const existingBook = await AcademicLogBook.findOne({
+    schoolId: params.schoolId,
+    subjectId: params.subjectId
+  })
+    .sort({ updatedAt: -1 })
+    .select("teacherId")
+    .lean();
+  const bookTeacher = existingBook ? idStr(existingBook.teacherId) : "";
+  if (await teacherExists(params.schoolId, bookTeacher)) return bookTeacher;
+
+  const anyAssignment = await SubjectAssignment.findOne({
+    schoolId: params.schoolId,
+    subjectId: params.subjectId
+  })
+    .sort({ updatedAt: -1 })
+    .select("teacherId")
+    .lean();
+  const assignmentTeacher = anyAssignment ? idStr(anyAssignment.teacherId) : "";
+  if (await teacherExists(params.schoolId, assignmentTeacher)) return assignmentTeacher;
+
+  return "";
+};
+
 const pickLogBookTeacherId = async (params: {
   schoolId: mongoose.Types.ObjectId;
   subjectId: string;
   academicYearBs: string;
   requestedTeacherId?: string;
+  syllabusTeacherId?: string;
   unitNos: number[];
 }): Promise<string> => {
   const requested = (params.requestedTeacherId || "").trim();
@@ -346,9 +393,15 @@ const pickLogBookTeacherId = async (params: {
     params.academicYearBs
   );
   if (assignments.length === 0) {
+    const fallback = await fallbackLogBookTeacherId({
+      schoolId: params.schoolId,
+      subjectId: params.subjectId,
+      syllabusTeacherId: params.syllabusTeacherId
+    });
+    if (fallback) return fallback;
     throw new ApiError(
       400,
-      "Select a teacher to file the log book against. Administration extra lectures still will not count toward salary."
+      "This subject has no teacher on record yet. Select a teacher to file the log book against. Administration extra lectures still will not count toward salary."
     );
   }
   if (assignments.length === 1) return idStr(assignments[0]!.teacherId);
@@ -652,6 +705,7 @@ export const completeSyllabusOversight = async (
     subjectId: existing.subjectId.toString(),
     academicYearBs: existing.academicYearBs,
     requestedTeacherId: payload.teacherId,
+    syllabusTeacherId: existing.teacherId ? existing.teacherId.toString() : undefined,
     unitNos: topics.map((t) => Number(t.unitNo) || 0)
   });
 

@@ -1,12 +1,17 @@
 import type { Request, Response } from "express";
 import {
+  LIBRARY_BORROWER_TYPES,
+  defaultLibraryIssueStaffLimits,
   libraryIssueLimitConfigUpdateSchema,
   libraryIssueLimitExceptionSchema,
-  libraryIssueLimitExceptionUpdateSchema
+  libraryIssueLimitExceptionUpdateSchema,
+  type LibraryBorrowerType
 } from "@phit-erp/shared";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { LibraryIssueLimitConfig } from "../models/LibraryIssueLimitConfig.js";
 import { LibraryIssueLimitException } from "../models/LibraryIssueLimitException.js";
 import { Student } from "../models/Student.js";
+import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -17,10 +22,45 @@ import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import {
   enrichException,
   getOrCreateIssueLimitConfig,
+  resolveBorrowStatus,
   resolveStudentBorrowStatus
 } from "../utils/libraryIssueLimits.js";
 
-/** GET year-wise issue limits (admin + library staff). */
+const asBorrowerType = (raw: unknown): LibraryBorrowerType => {
+  const value = String(raw ?? "STUDENT").toUpperCase();
+  if ((LIBRARY_BORROWER_TYPES as readonly string[]).includes(value)) {
+    return value as LibraryBorrowerType;
+  }
+  throw new ApiError(400, "Borrower type must be STUDENT, TEACHER, or STAFF");
+};
+
+/** Confirm the borrower belongs to this school before writing an exception. */
+const assertBorrowerExists = async (
+  req: Request,
+  borrowerType: LibraryBorrowerType,
+  borrowerId: string
+): Promise<void> => {
+  if (borrowerType === "STUDENT") {
+    const student = await Student.findOne(
+      withTenantScope(req, { _id: borrowerId })
+    ).lean();
+    if (!student) throw new ApiError(404, "Student not found");
+    return;
+  }
+  if (borrowerType === "TEACHER") {
+    const teacher = await Teacher.findOne(
+      withTenantScope(req, { _id: borrowerId })
+    ).lean();
+    if (!teacher) throw new ApiError(404, "Teacher not found");
+    return;
+  }
+  const staff = await CollegeStaff.findOne(
+    withTenantScope(req, { _id: borrowerId, isDeleted: false })
+  ).lean();
+  if (!staff) throw new ApiError(404, "Staff member not found");
+};
+
+/** GET issue limits — year-wise for students, flat for teachers and staff. */
 export const getIssueLimits = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req).toString();
   const config = await getOrCreateIssueLimitConfig(schoolId);
@@ -39,6 +79,7 @@ export const getIssueLimits = asyncHandler(async (req: Request, res: Response) =
     _id: config._id,
     schoolId,
     limits: config.limits,
+    staffLimits: config.staffLimits,
     updatedBy: config.updatedBy,
     updatedByName,
     updatedAt: config.updatedAt ?? null,
@@ -46,17 +87,22 @@ export const getIssueLimits = asyncHandler(async (req: Request, res: Response) =
   });
 });
 
-/** PUT year-wise issue limits (admin / super admin only). */
+/** PUT issue limits (admin / super admin only). */
 export const updateIssueLimits = asyncHandler(async (req: Request, res: Response) => {
   const payload = libraryIssueLimitConfigUpdateSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
   const before = await getOrCreateIssueLimitConfig(schoolId.toString());
+
+  // An older client may omit staffLimits — keep whatever is already stored.
+  const nextStaffLimits =
+    payload.staffLimits ?? before.staffLimits ?? defaultLibraryIssueStaffLimits();
 
   const doc = await LibraryIssueLimitConfig.findOneAndUpdate(
     { schoolId },
     {
       $set: {
         limits: payload.limits,
+        staffLimits: nextStaffLimits,
         updatedBy: req.user!.userId
       }
     },
@@ -69,8 +115,8 @@ export const updateIssueLimits = asyncHandler(async (req: Request, res: Response
     action: "library.issue_limits.update",
     entity: "LibraryIssueLimitConfig",
     entityId: doc._id.toString(),
-    before: { limits: before.limits },
-    after: { limits: doc.limits }
+    before: { limits: before.limits, staffLimits: before.staffLimits },
+    after: { limits: doc.limits, staffLimits: doc.staffLimits }
   });
 
   let updatedByName: string | undefined;
@@ -83,6 +129,7 @@ export const updateIssueLimits = asyncHandler(async (req: Request, res: Response
     _id: doc._id.toString(),
     schoolId: schoolId.toString(),
     limits: doc.limits,
+    staffLimits: doc.staffLimits,
     updatedBy: doc.updatedBy?.toString(),
     updatedByName,
     updatedAt: doc.updatedAt,
@@ -90,15 +137,43 @@ export const updateIssueLimits = asyncHandler(async (req: Request, res: Response
   });
 });
 
-/** GET student exceptions (admin full list; library staff may list for context if needed — admin only for management UI). */
+/**
+ * GET exceptions. `borrowerType` narrows to students / teachers / staff;
+ * `studentId` (legacy) and `borrowerId` both filter by a single borrower.
+ */
 export const listIssueLimitExceptions = asyncHandler(
   async (req: Request, res: Response) => {
     const schoolId = tenantObjectId(req);
     const filter: Record<string, unknown> = { schoolId };
 
-    if (typeof req.query.studentId === "string" && req.query.studentId.trim()) {
-      filter.studentId = req.query.studentId.trim();
+    const typeParam = String(req.query.borrowerType ?? "").trim();
+    const borrowerType = typeParam ? asBorrowerType(typeParam) : null;
+    if (borrowerType) {
+      if (borrowerType === "STUDENT") {
+        // Rows written before teacher/staff support have no borrowerType.
+        filter.$or = [
+          { borrowerType: "STUDENT" },
+          { borrowerType: { $exists: false } },
+          { borrowerType: null }
+        ];
+      } else {
+        filter.borrowerType = borrowerType;
+      }
     }
+
+    const borrowerId = String(
+      req.query.borrowerId ?? req.query.studentId ?? ""
+    ).trim();
+    if (borrowerId) {
+      const field =
+        borrowerType === "TEACHER"
+          ? "teacherId"
+          : borrowerType === "STAFF"
+            ? "staffId"
+            : "studentId";
+      filter[field] = borrowerId;
+    }
+
     if (req.query.includeRevoked !== "1" && req.query.includeRevoked !== "true") {
       filter.isRevoked = false;
     }
@@ -128,14 +203,19 @@ export const createIssueLimitException = asyncHandler(
     }
 
     const schoolId = tenantObjectId(req);
-    const student = await Student.findOne(
-      withTenantScope(req, { _id: payload.studentId })
-    ).lean();
-    if (!student) throw new ApiError(404, "Student not found");
+    const borrowerType = payload.borrowerType;
+    const borrowerId = (payload.borrowerId ?? payload.studentId ?? "").trim();
+    if (!borrowerId) {
+      throw new ApiError(400, "Select the student, teacher, or staff member");
+    }
+    await assertBorrowerExists(req, borrowerType, borrowerId);
 
     const created = await LibraryIssueLimitException.create({
       schoolId,
-      studentId: payload.studentId,
+      borrowerType,
+      studentId: borrowerType === "STUDENT" ? borrowerId : undefined,
+      teacherId: borrowerType === "TEACHER" ? borrowerId : undefined,
+      staffId: borrowerType === "STAFF" ? borrowerId : undefined,
       additionalBooks: payload.additionalBooks,
       reason: payload.reason.trim(),
       effectiveFromBs: payload.effectiveFromBs,
@@ -275,5 +355,24 @@ export const getStudentBorrowStatus = asyncHandler(
 
     const status = await resolveStudentBorrowStatus({ schoolId, studentId });
     return sendSuccess(res, "Student borrow status fetched", status);
+  }
+);
+
+/** Borrowing status for any borrower kind (issue screen banner). */
+export const getBorrowStatus = asyncHandler(
+  async (req: Request, res: Response) => {
+    const schoolId = tenantObjectId(req).toString();
+    const borrowerType = asBorrowerType(req.params.borrowerType);
+    const borrowerId = String(req.params.borrowerId ?? "").trim();
+    if (!borrowerId) throw new ApiError(400, "borrowerId is required");
+
+    await assertBorrowerExists(req, borrowerType, borrowerId);
+
+    const status = await resolveBorrowStatus({
+      schoolId,
+      borrowerType,
+      borrowerId
+    });
+    return sendSuccess(res, "Borrow status fetched", status);
   }
 );

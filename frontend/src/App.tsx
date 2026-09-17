@@ -13,6 +13,7 @@ import { isNativeApp } from "lib/platform";
 import { LoginPage } from "pages/LoginPage";
 import { AppUpdatePrompt } from "components/AppUpdatePrompt";
 import { NativeAppBridge } from "components/NativeAppBridge";
+import { NepaliCharPad } from "components/shared/NepaliCharPad";
 import SplashScreen from "components/SplashScreen";
 
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
@@ -149,6 +150,8 @@ export default function App() {
     {/* Android back button + notification-tap routing (no-op on web) */}
     <NativeAppBridge />
     <AppUpdatePrompt />
+    {/* Insert palette for Nepali fields (ऋ, ं, ः are unreachable on the layouts) */}
+    <NepaliCharPad />
     <ScrollToTop />
     <Routes>
       <Route path="/" element={<RootRedirect />} />
