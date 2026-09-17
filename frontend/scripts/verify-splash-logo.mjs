@@ -122,6 +122,36 @@ if (splashTs.includes("w-40") || splashTs.includes("160px")) {
   pass("SplashScreen no longer uses 160px logo");
 }
 
+/**
+ * The boot loader is the only thing covering the wait after a notification tap, and a
+ * logo it has to fetch is a logo that is not there for exactly that wait. Keep it inline.
+ */
+const indexHtml = fs.readFileSync(path.join(frontend, "index.html"), "utf8");
+const bootLogo = indexHtml.match(
+  /boot-logo:start[\s\S]*?<img src="data:image\/png;base64,([A-Za-z0-9+/=]+)"[\s\S]*?boot-logo:end/,
+);
+if (!bootLogo) {
+  fail("index.html boot loader does not inline its logo (run node scripts/generate-boot-logo.mjs)");
+} else {
+  const png = Buffer.from(bootLogo[1], "base64");
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const colorType = png[25];
+  pass(`boot loader logo inlined - ${width}x${height}, ${(png.length / 1024).toFixed(1)} KB`);
+  // The loader paints on white, so the mark must stay cut out, not sit on a tile.
+  if (colorType === 6) pass("boot loader logo keeps its alpha channel");
+  else fail(`boot loader logo has colour type ${colorType}, expected 6 (RGBA)`);
+  // 7rem at 2x is the largest the loader ever renders it; past that it is dead weight
+  // inlined into every page load.
+  if (width >= 224 && width <= 320) pass("boot loader logo is sized for the loader, not the source art");
+  else fail(`boot loader logo is ${width}px, expected 224-320`);
+}
+if (/boot-logo:start[\s\S]*?college-logo\.png[\s\S]*?boot-logo:end/.test(indexHtml)) {
+  fail("boot loader still requests /college-logo.png over the network");
+} else {
+  pass("boot loader makes no second request for its logo");
+}
+
 const splashXml = fs.readFileSync(path.join(res, "drawable/splash.xml"), "utf8");
 if (splashXml.includes("android:width") || splashXml.includes("android:height")) {
   fail("splash.xml uses item width/height which some MIUI builds drop");
