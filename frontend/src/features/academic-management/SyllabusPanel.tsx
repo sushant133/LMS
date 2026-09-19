@@ -91,7 +91,7 @@ import {
   blankSyllabusForm,
   formToPayload,
   recordToForm,
-  SUB_UNIT_STATUS_OPTIONS,
+  subUnitStatusOptionsFor,
   subUnitStatusBadgeClass,
   subUnitStatusLabel,
   type SyllabusFormState,
@@ -1121,7 +1121,11 @@ export const SyllabusPanel = ({
     canEditDelete &&
     (plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin);
 
-  /** Teachers may mark sub-unit progress while teaching; structure stays admin-only. */
+  /**
+   * Teachers may move a sub-unit between Not Started / In Progress / Skipped
+   * while teaching; structure stays admin-only, and "Completed" is reached only
+   * through an approved Log Book entry — see subUnitStatusOptionsFor.
+   */
   const canUpdateProgress = (plan: AcademicSyllabusRecord) =>
     writeAccess &&
     (isAdmin ||
@@ -1271,6 +1275,11 @@ export const SyllabusPanel = ({
             remainingPercent={plan.remainingPercent}
             nepaliText={planNepali}
           />
+          <p className="text-xs text-slate-500 no-print">
+            Completion counts only Log Book entries the administration has
+            verified and approved. A class filed but not yet approved does not
+            move this percentage.
+          </p>
           <div className="flex flex-wrap items-center gap-2 no-print">
             <Button
               size="sm"
@@ -1564,7 +1573,10 @@ export const SyllabusPanel = ({
                                               });
                                             }}
                                           >
-                                            {SUB_UNIT_STATUS_OPTIONS.map((opt) => (
+                                            {subUnitStatusOptionsFor(
+                                              isAdmin,
+                                              sub.status,
+                                            ).map((opt) => (
                                               <option key={opt.value} value={opt.value}>
                                                 {planNepali
                                                   ? opt.nepaliLabel

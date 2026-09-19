@@ -7,8 +7,13 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import type { ExamRecord, StudentRecord } from "@phit-erp/shared";
-import { IdCard, Printer, Search } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import type {
+  ExamRecord,
+  ExamSymbolNumberRecord,
+  StudentRecord,
+} from "@phit-erp/shared";
+import { Hash, IdCard, Printer, Save, Search, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { EmptyState } from "components/shared/EmptyState";
@@ -19,11 +24,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
+import { api, unwrap } from "lib/api";
 import { fetchAuthenticatedBlobUrl } from "lib/attachments";
 import { getPrintInstitutionBranding } from "lib/printBranding";
+import { queryClient } from "lib/queryClient";
 import { getPdfErrorMessage, printAdmitCardsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
-import { cn } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 
 /** Six cards per A4 sheet — the grid in admit-card.css is sized for exactly this. */
 const CARDS_PER_SHEET = 6;
@@ -88,6 +95,13 @@ const loadPhotoDataUrl = async (url: string): Promise<string> => {
   return dataUrl;
 };
 
+/**
+ * What the card prints when the office has not issued a symbol number by hand
+ * for this exam — the registration number, or the admission number behind it.
+ */
+const fallbackSymbolNo = (student: StudentRecord): string =>
+  student.registrationNumber?.trim() || student.admissionNumber || "";
+
 interface ScopeOption {
   _id: string;
   name: string;
@@ -116,6 +130,7 @@ const AdmitCard = ({
   exam,
   college,
   photo,
+  symbolNo,
   batchName,
   yearName,
   className,
@@ -126,13 +141,13 @@ const AdmitCard = ({
   college: { name: string; nameNp?: string; address?: string };
   /** Data URI of the student's profile photograph, "" while loading or absent. */
   photo: string;
+  /** Issued by hand for this exam, or the registration/admission fallback. */
+  symbolNo: string;
   batchName?: string;
   yearName?: string;
   className?: string;
   sectionName?: string;
 }) => {
-  const symbolNo = student.registrationNumber?.trim() || student.admissionNumber;
-
   /** Only the rows that actually have a value — a small card cannot carry blanks. */
   const rows: Array<{ label: string; value: string; strong?: boolean }> = [
     {
@@ -143,7 +158,13 @@ const AdmitCard = ({
     { label: "Symbol No.", value: symbolNo || "—", strong: true },
     { label: "Roll No.", value: String(student.rollNumber ?? "—") },
   ];
-  if (student.registrationNumber?.trim() && student.admissionNumber) {
+  // One identity row beyond the symbol number, never two — the card is small.
+  // A hand-issued symbol number leaves the registration number worth printing;
+  // when the symbol number *is* the registration number, the admission number is.
+  const regdNo = student.registrationNumber?.trim() ?? "";
+  if (regdNo && regdNo !== symbolNo) {
+    rows.push({ label: "Regd. No.", value: regdNo });
+  } else if (student.admissionNumber && student.admissionNumber !== symbolNo) {
     rows.push({ label: "Admission", value: student.admissionNumber });
   }
   if (batchName) rows.push({ label: "Batch", value: batchName });
@@ -235,6 +256,11 @@ export const AdmitCardPanel = ({
   const [sectionId, setSectionId] = useState("");
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /** Symbol numbers typed in the table but not yet saved, keyed by student id. */
+  const [symbolDrafts, setSymbolDrafts] = useState<Record<string, string>>({});
+  const [symbolPrefix, setSymbolPrefix] = useState("");
+  const [symbolStart, setSymbolStart] = useState("1");
+  const [symbolPadding, setSymbolPadding] = useState("3");
   /** Set while printing a single card so the print root holds only that one. */
   const [soloStudentId, setSoloStudentId] = useState("");
   const [printing, setPrinting] = useState(false);
@@ -283,6 +309,80 @@ export const AdmitCardPanel = ({
     () => exams.find((exam) => exam._id === examId) ?? null,
     [exams, examId],
   );
+
+  /**
+   * Symbol numbers are issued per exam, so this reloads whenever the exam
+   * changes — First Term and Final each carry their own block of numbers.
+   */
+  const symbolQuery = useQuery({
+    queryKey: ["exam-symbol-numbers", examId],
+    queryFn: () =>
+      unwrap<ExamSymbolNumberRecord[]>(
+        api.get(`/exams/${examId}/symbol-numbers`),
+      ),
+    enabled: Boolean(examId),
+  });
+
+  const savedSymbols = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of symbolQuery.data ?? []) {
+      map.set(String(row.studentId), String(row.symbolNumber ?? ""));
+    }
+    return map;
+  }, [symbolQuery.data]);
+
+  /** What the table input shows: an unsaved edit wins over what is stored. */
+  const issuedSymbolNo = useCallback(
+    (studentId: string) => symbolDrafts[studentId] ?? savedSymbols.get(studentId) ?? "",
+    [symbolDrafts, savedSymbols],
+  );
+
+  /** What the card prints — the issued number, else the registration fallback. */
+  const symbolNoFor = useCallback(
+    (student: StudentRecord) =>
+      issuedSymbolNo(student._id).trim() || fallbackSymbolNo(student),
+    [issuedSymbolNo],
+  );
+
+  /** Only the drafts that differ from what is stored — the save payload. */
+  const pendingSymbolEntries = useMemo(
+    () =>
+      Object.entries(symbolDrafts)
+        .filter(
+          ([studentId, value]) =>
+            value.trim() !== (savedSymbols.get(studentId) ?? ""),
+        )
+        .map(([studentId, value]) => ({ studentId, symbolNumber: value.trim() })),
+    [symbolDrafts, savedSymbols],
+  );
+
+  const saveSymbolsMutation = useMutation({
+    mutationFn: async (entries: Array<{ studentId: string; symbolNumber: string }>) =>
+      unwrap<ExamSymbolNumberRecord[]>(
+        api.post(`/exams/${examId}/symbol-numbers`, { entries }),
+      ),
+    // Drafts are kept rather than cleared: once the refetch lands they match
+    // what is stored, so `pendingSymbolEntries` empties on its own and the
+    // printed cards never blink back to the fallback number in between.
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["exam-symbol-numbers", examId],
+      });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const clearSymbolsMutation = useMutation({
+    mutationFn: async () => unwrap(api.delete(`/exams/${examId}/symbol-numbers`)),
+    onSuccess: async () => {
+      setSymbolDrafts({});
+      toast.success("Symbol numbers cleared for this exam");
+      await queryClient.invalidateQueries({
+        queryKey: ["exam-symbol-numbers", examId],
+      });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
 
   /** Default to the most recent exam so the panel is useful on open. */
   useEffect(() => {
@@ -368,11 +468,13 @@ export const AdmitCardPanel = ({
         const adm = (student.admissionNumber ?? "").toLowerCase();
         const reg = (student.registrationNumber ?? "").toLowerCase();
         const roll = String(student.rollNumber ?? "");
+        const symbol = (savedSymbols.get(student._id) ?? "").toLowerCase();
         return (
           name.includes(q) ||
           adm.includes(q) ||
           reg.includes(q) ||
-          roll.includes(q)
+          roll.includes(q) ||
+          (symbol !== "" && symbol.includes(q))
         );
       })
       .sort((a, b) => {
@@ -380,7 +482,7 @@ export const AdmitCardPanel = ({
         if (rollDiff !== 0) return rollDiff;
         return (a.user?.fullName ?? "").localeCompare(b.user?.fullName ?? "");
       });
-  }, [appearingStudents, batchId, yearId, classId, sectionId, search]);
+  }, [appearingStudents, batchId, yearId, classId, sectionId, search, savedSymbols]);
 
   /** Drop selections that the current filters hide, so the count never lies. */
   useEffect(() => {
@@ -415,6 +517,67 @@ export const AdmitCardPanel = ({
       for (const student of filteredStudents) merged.add(student._id);
       return [...merged];
     });
+  };
+
+  /** Returns false when the save failed, so callers can stop before printing. */
+  const saveSymbolNumbers = async (): Promise<boolean> => {
+    if (pendingSymbolEntries.length === 0) return true;
+    try {
+      await saveSymbolsMutation.mutateAsync(pendingSymbolEntries);
+      toast.success(
+        `Saved ${pendingSymbolEntries.length} symbol number${
+          pendingSymbolEntries.length === 1 ? "" : "s"
+        }`,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Fill the visible list (or just the selection) with prefix + a running
+   * number, zero-padded. Students who already carry a number keep it unless
+   * `overwrite`, so a partly issued block can be topped up; the counter only
+   * advances when a number is actually handed out.
+   */
+  const autoFillSymbolNumbers = (overwrite: boolean) => {
+    const targets =
+      selectedIds.length > 0
+        ? filteredStudents.filter((student) => selectedSet.has(student._id))
+        : filteredStudents;
+    if (targets.length === 0) {
+      toast.error("No students to number");
+      return;
+    }
+    const start = Number.parseInt(symbolStart, 10);
+    if (!Number.isFinite(start) || start < 0) {
+      toast.error("Enter a valid start number");
+      return;
+    }
+    const width = Math.min(Math.max(Number.parseInt(symbolPadding, 10) || 0, 0), 12);
+    const prefix = symbolPrefix.trim();
+
+    // Built outside the state updater so the count stays honest even when
+    // React replays the updater in development.
+    const next = { ...symbolDrafts };
+    let counter = start;
+    let filled = 0;
+    for (const student of targets) {
+      const existing = (
+        next[student._id] ?? savedSymbols.get(student._id) ?? ""
+      ).trim();
+      if (existing && !overwrite) continue;
+      next[student._id] = `${prefix}${String(counter).padStart(width, "0")}`;
+      counter += 1;
+      filled += 1;
+    }
+    setSymbolDrafts(next);
+    toast.success(
+      filled > 0
+        ? `Filled ${filled} symbol number${filled === 1 ? "" : "s"} — review, then save`
+        : "Every selected student already has a symbol number",
+    );
   };
 
   /** Cards currently in the print root: the solo card when set, else the selection. */
@@ -469,6 +632,8 @@ export const AdmitCardPanel = ({
       toast.error("Select at least one student");
       return;
     }
+    // Print what the office will hand out, not a half-saved draft.
+    if (!(await saveSymbolNumbers())) return;
     const cards = filteredStudents.filter((s) => selectedSet.has(s._id));
     // flushSync so the print root holds the full selection before it is cloned.
     flushSync(() => setSoloStudentId(""));
@@ -482,6 +647,7 @@ export const AdmitCardPanel = ({
     }
     const one = filteredStudents.find((s) => s._id === studentId);
     if (!one) return;
+    if (!(await saveSymbolNumbers())) return;
     flushSync(() => setSoloStudentId(studentId));
     try {
       await runPrint([one]);
@@ -497,6 +663,7 @@ export const AdmitCardPanel = ({
       exam={selectedExam!}
       college={college}
       photo={photoCache.get(studentPhotoSource(student)) ?? ""}
+      symbolNo={symbolNoFor(student)}
       batchName={
         student.batchId ? batchById.get(String(student.batchId)) : undefined
       }
@@ -571,6 +738,8 @@ export const AdmitCardPanel = ({
                 onChange={(e) => {
                   setExamId(e.target.value);
                   setSelectedIds([]);
+                  // Symbol numbers belong to one exam — never carry drafts over.
+                  setSymbolDrafts({});
                 }}
               >
                 <option value="">Select exam</option>
@@ -670,6 +839,142 @@ export const AdmitCardPanel = ({
             </div>
           </div>
 
+          {selectedExam ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                    <Hash className="h-4 w-4 text-brand-600" />
+                    Symbol numbers
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Type each student&apos;s symbol number in the table below, or
+                    fill a whole block at once. Saved against{" "}
+                    <span className="font-medium">{selectedExam.name}</span> only
+                    — every exam keeps its own numbers. A student left blank
+                    prints their registration number instead.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    className={
+                      pendingSymbolEntries.length > 0
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-slate-100 text-slate-600"
+                    }
+                  >
+                    {pendingSymbolEntries.length > 0
+                      ? `${pendingSymbolEntries.length} unsaved`
+                      : `${savedSymbols.size} issued`}
+                  </Badge>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={
+                      pendingSymbolEntries.length === 0 ||
+                      saveSymbolsMutation.isPending
+                    }
+                    onClick={() => void saveSymbolNumbers()}
+                  >
+                    <Save className="mr-1.5 h-4 w-4" />
+                    {saveSymbolsMutation.isPending ? "Saving…" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      clearSymbolsMutation.isPending || savedSymbols.size === 0
+                    }
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Remove every symbol number issued for ${selectedExam.name}? Cards will fall back to registration numbers.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      clearSymbolsMutation.mutate();
+                    }}
+                  >
+                    Clear all
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <FormField label="Prefix">
+                  <Input
+                    value={symbolPrefix}
+                    onChange={(e) => setSymbolPrefix(e.target.value)}
+                    placeholder="e.g. 2081-"
+                  />
+                </FormField>
+                <FormField label="Start from">
+                  <Input
+                    value={symbolStart}
+                    onChange={(e) => setSymbolStart(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="1"
+                  />
+                </FormField>
+                <FormField label="Digits">
+                  <Input
+                    value={symbolPadding}
+                    onChange={(e) => setSymbolPadding(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="3"
+                  />
+                </FormField>
+                <div className="flex items-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    disabled={filteredStudents.length === 0}
+                    onClick={() => autoFillSymbolNumbers(false)}
+                  >
+                    <Wand2 className="mr-1.5 h-4 w-4" />
+                    Fill blanks
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    disabled={filteredStudents.length === 0}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Overwrite the symbol numbers already entered for these students?",
+                        )
+                      ) {
+                        return;
+                      }
+                      autoFillSymbolNumbers(true);
+                    }}
+                  >
+                    Renumber all
+                  </Button>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Numbering follows the order shown below and covers the{" "}
+                {selectedIds.length > 0
+                  ? `${selectedIds.length} selected student${selectedIds.length === 1 ? "" : "s"}`
+                  : `${filteredStudents.length} student${filteredStudents.length === 1 ? "" : "s"} currently listed`}
+                . Example: {symbolPrefix.trim()}
+                {String(
+                  Number.isFinite(Number.parseInt(symbolStart, 10))
+                    ? Number.parseInt(symbolStart, 10)
+                    : 1,
+                ).padStart(
+                  Math.min(Math.max(Number.parseInt(symbolPadding, 10) || 0, 0), 12),
+                  "0",
+                )}
+              </p>
+            </div>
+          ) : null}
+
           {!selectedExam ? (
             <EmptyState
               title="Select an exam"
@@ -695,7 +1000,8 @@ export const AdmitCardPanel = ({
                     </Th>
                     <Th>Roll</Th>
                     <Th>Student</Th>
-                    <Th>Symbol / Admission</Th>
+                    <Th className="w-48">Symbol No.</Th>
+                    <Th>Registration / Admission</Th>
                     <Th>{isCollege ? labels.secondary : "Class"}</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Admit card</Th>
@@ -745,9 +1051,23 @@ export const AdmitCardPanel = ({
                             {student.user?.fullName ?? "Student"}
                           </span>
                         </Td>
+                        <Td>
+                          <Input
+                            className="h-9"
+                            value={issuedSymbolNo(student._id)}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setSymbolDrafts((current) => ({
+                                ...current,
+                                [student._id]: value,
+                              }));
+                            }}
+                            aria-label={`Symbol number for ${student.user?.fullName ?? "student"}`}
+                            placeholder={fallbackSymbolNo(student) || "Not issued"}
+                          />
+                        </Td>
                         <Td className="text-sm text-slate-600">
-                          {student.registrationNumber?.trim() ||
-                            student.admissionNumber}
+                          {fallbackSymbolNo(student) || "—"}
                         </Td>
                         <Td className="text-sm text-slate-600">
                           {cohort || "—"}
@@ -803,7 +1123,12 @@ export const AdmitCardPanel = ({
                 size="sm"
                 variant="outline"
                 disabled={printing}
-                onClick={() => void runPrint(cardStudents)}
+                onClick={() => {
+                  void (async () => {
+                    if (!(await saveSymbolNumbers())) return;
+                    await runPrint(cardStudents);
+                  })();
+                }}
               >
                 <Printer className="mr-1.5 h-4 w-4" />
                 Print this preview

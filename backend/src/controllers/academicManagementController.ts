@@ -30,7 +30,6 @@ import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { AcademicSyllabusChapter } from "../models/AcademicSyllabusChapter.js";
 import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
-import { markSubUnitsCompleted } from "../utils/syllabusCompletionAttribution.js";
 import {
   completeSyllabusOversight,
   getSyllabusOversightDetail,
@@ -106,7 +105,7 @@ import {
   syncSessionPlanProgress,
   resyncSessionPlanUnitProgress,
   resyncSessionPlansTouchedByLog,
-  syncSyllabusCompletionFromLogBook,
+  syncSyllabusCompletionForLogEntry,
   matchesKeyword
 } from "../utils/academicManagementService.js";
 import { exportAcademicReportCsv, generateAcademicReport, type AcademicReportType } from "../utils/academicManagementReports.js";
@@ -1397,6 +1396,21 @@ export const updateSyllabusSubUnitProgress = asyncHandler(async (req: Request, r
     );
   }
 
+  // Completion is earned through an approved log book entry, never claimed
+  // here. Administration keeps the manual switch for extra lectures and for
+  // correcting the record; a teacher marking their own syllabus complete would
+  // move the percentage with nobody having checked the class.
+  if (
+    payload.status === "COMPLETED" &&
+    subUnit.status !== "COMPLETED" &&
+    !isInstitutionAdmin(req.user?.role ?? "")
+  ) {
+    throw new ApiError(
+      403,
+      "Syllabus completion follows the Log Book. File the class in your Log Book — it counts once administration verifies and approves the entry."
+    );
+  }
+
   if (payload.status !== undefined) subUnit.status = payload.status;
   if (payload.teachingNotes !== undefined) subUnit.teachingNotes = payload.teachingNotes;
   if (payload.teacherAttachments !== undefined) {
@@ -2456,32 +2470,11 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
   }
 
-  // Mark all linked syllabus sub-units completed when a class log is recorded.
-  // Leaves already completed by administration stay attributed that way (no salary).
-  if (taughtSubUnitIds.length > 0) {
-    try {
-      await markSubUnitsCompleted({
-        schoolId: tenantObjectId(req),
-        subUnitIds: taughtSubUnitIds,
-        source: "TEACHER",
-        teacherId: payload.teacherId,
-        userId: req.user!.userId,
-        taughtDateBs: payload.dateBs,
-        todaysCoverage: payload.topicCovered || taughtTitles.join("; ") || "",
-        overwriteAttribution: false
-      });
-    } catch {
-      // Non-blocking — log book entry is still valid without syllabus progress
-    }
-  }
-
-  if (payload.syllabusId) {
-    await syncSyllabusCompletionFromLogBook(
-      tenantObjectId(req),
-      payload.syllabusId,
-      payload.subjectId
-    );
-  }
+  // Filing a class does NOT complete the syllabus. The entry starts PENDING and
+  // only reaches the percentage once administration has verified and approved
+  // it — see syncSyllabusCompletionFromLogBook. This still runs so that editing
+  // an entry that used to count can roll its leaves back.
+  await syncSyllabusCompletionForLogEntry(tenantObjectId(req), entry);
   await resyncSessionPlansTouchedByLog({
     schoolId: tenantObjectId(req).toString(),
     teacherId: payload.teacherId,
@@ -2689,29 +2682,15 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     existing.set("syllabusSubUnitIds", updatedSubIds);
     existing.set("syllabusSubUnitId", updatedSubIds[0]);
     await existing.save();
-    await markSubUnitsCompleted({
-      schoolId: tenantObjectId(req),
-      subUnitIds: updatedSubIds,
-      source: "TEACHER",
-      teacherId: existing.teacherId.toString(),
-      userId: req.user!.userId,
-      taughtDateBs: String(existing.dateBs || ""),
-      todaysCoverage: existing.topicCovered || updatedTitles.join("; ") || "",
-      overwriteAttribution: false
-    });
   }
 
   if (previousItemId) await syncLessonPlanItemProgress(previousItemId);
   if (existing.lessonPlanItemId) {
     await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
   }
-  if (existing.syllabusId) {
-    await syncSyllabusCompletionFromLogBook(
-      tenantObjectId(req),
-      existing.syllabusId.toString(),
-      existing.subjectId.toString()
-    );
-  }
+  // Edits change which leaves an approved entry covers, so the syllabus is
+  // recomputed from the approved log book rather than written to directly.
+  await syncSyllabusCompletionForLogEntry(tenantObjectId(req), existing);
   await resyncSessionPlansTouchedByLog({
     schoolId: tenantObjectId(req).toString(),
     teacherId: existing.teacherId.toString(),
@@ -2751,13 +2730,7 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (existing.lessonPlanItemId) await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
   // A deleted entry no longer counts as taught: roll the syllabus leaves and the
   // session plan back, exactly as create/update propagate them forward.
-  if (existing.syllabusId) {
-    await syncSyllabusCompletionFromLogBook(
-      tenantObjectId(req),
-      existing.syllabusId.toString(),
-      existing.subjectId.toString()
-    );
-  }
+  await syncSyllabusCompletionForLogEntry(tenantObjectId(req), existing);
   await resyncSessionPlansTouchedByLog({
     schoolId: tenantObjectId(req).toString(),
     teacherId: existing.teacherId.toString(),
@@ -2787,13 +2760,7 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (existing.lessonPlanItemId) await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
   // NEEDS_IMPROVEMENT excludes the entry from taught leaves, and approving it
   // includes it again — both directions must reach the syllabus and session plan.
-  if (existing.syllabusId) {
-    await syncSyllabusCompletionFromLogBook(
-      tenantObjectId(req),
-      existing.syllabusId.toString(),
-      existing.subjectId.toString()
-    );
-  }
+  await syncSyllabusCompletionForLogEntry(tenantObjectId(req), existing);
   await resyncSessionPlansTouchedByLog({
     schoolId: tenantObjectId(req).toString(),
     teacherId: existing.teacherId.toString(),

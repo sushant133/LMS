@@ -908,6 +908,21 @@ export interface ExamRoutineRecord {
 }
 
 /**
+ * A symbol number issued by hand for one student in one exam. Only students who
+ * were actually given a number have a row — the admit card falls back to the
+ * registration / admission number for everyone else.
+ */
+export interface ExamSymbolNumberRecord {
+  _id: string;
+  schoolId: string;
+  examId: string;
+  studentId: string;
+  symbolNumber: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
  * Exam Records — the administration's read-only view of completed exams.
  * One summary row per exam a cohort has sat, so First Term can be opened on its own
  * while a later term is still being prepared.

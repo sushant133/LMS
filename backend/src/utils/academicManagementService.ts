@@ -45,7 +45,8 @@ import {
 } from "./logBookContinuation.js";
 import {
   clearSubUnitAttributionSet,
-  clearSubUnitAttributionUnset
+  clearSubUnitAttributionUnset,
+  syncLegacyUnitStatusForTopic
 } from "./syllabusCompletionAttribution.js";
 import { recordAudit } from "./audit.js";
 import { getInstitutionType, isCollege } from "./institution.js";
@@ -1702,13 +1703,39 @@ export const resolveTaughtSyllabusSubUnitIds = async (
 };
 
 /**
- * Unique syllabus leaves actually taught in the log book (same leaf on two dates = 1).
+ * The only log book state that moves the official syllabus. Teachers file a
+ * class as PENDING; an academic verifier moves it to VERIFIED; an administrator
+ * then APPROVES it. Completion — and the percentage built on it — follows that
+ * last step, never the teacher's own claim.
  */
-export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
+export const SYLLABUS_COUNTING_REVIEW_STATUS = "APPROVED" as const;
+
+/**
+ * How a syllabus leaf came to be marked complete: the approved class that
+ * covered it. Carried onto the leaf so tender/salary reporting still knows
+ * which teacher taught it and on which BS date.
+ */
+export interface TaughtLeafAttribution {
+  teacherId: string;
+  userId: string;
+  taughtDateBs: string;
+  coverage: string;
+}
+
+/**
+ * Syllabus leaves the log book proves were taught, with who taught them
+ * (same leaf on two dates = 1).
+ *
+ * Only APPROVED entries count. A class the teacher has filed is not taught as
+ * far as the official syllabus is concerned until the administration has
+ * verified and then approved it — otherwise completion percentages climb on
+ * claims nobody has checked.
+ */
+export const taughtSyllabusLeafAttributionFromLogBook = async (
   schoolId: mongoose.Types.ObjectId,
   syllabusId: string,
   subjectId?: string
-): Promise<Set<string>> => {
+): Promise<Map<string, TaughtLeafAttribution>> => {
   const leaves = await loadSyllabusLeaves([syllabusId]);
   const leafById = new Map(leaves.map((leaf) => [leaf.id, leaf]));
   const byUnit = new Map<string, SyllabusLeaf[]>();
@@ -1729,19 +1756,32 @@ export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
   const entries = await AcademicLogBookEntry.find({
     schoolId,
     isDeleted: { $ne: true },
-    reviewStatus: { $ne: "NEEDS_IMPROVEMENT" },
+    reviewStatus: SYLLABUS_COUNTING_REVIEW_STATUS,
     $or: [
       { syllabusId },
       ...(subjectIds.length > 0 ? [{ subjectId: { $in: subjectIds } }] : [])
     ]
   })
     .select(
-      "subUnitTitles subUnitTitle syllabusSubUnitIds syllabusSubUnitId syllabusUnitId syllabusId unit"
+      "subUnitTitles subUnitTitle syllabusSubUnitIds syllabusSubUnitId syllabusUnitId syllabusId unit teacherId dateBs topicCovered audit.createdBy"
     )
+    // Oldest class first, so a leaf is credited to the lesson that first
+    // covered it rather than to a later revision class.
+    .sort({ dateBs: 1, createdAt: 1 })
     .lean();
 
-  const taught = new Set<string>();
+  const taught = new Map<string, TaughtLeafAttribution>();
   for (const entry of entries) {
+    const attribution: TaughtLeafAttribution = {
+      teacherId: entry.teacherId ? String(entry.teacherId) : "",
+      userId: entry.audit?.createdBy ? String(entry.audit.createdBy) : "",
+      taughtDateBs: String(entry.dateBs || "").trim(),
+      coverage: String(entry.topicCovered || "").trim()
+    };
+    /** Entries arrive oldest first, so the first credit for a leaf is kept. */
+    const credit = (leafId: string) => {
+      if (!taught.has(leafId)) taught.set(leafId, attribution);
+    };
     const entrySyllabus = entry.syllabusId ? String(entry.syllabusId) : "";
     if (entrySyllabus && entrySyllabus !== syllabusId) continue;
     const titles = expandTaughtTitles([
@@ -1766,7 +1806,7 @@ export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
     if (titles.length > 0) {
       const matched = matchLeavesByTitles(scope, titles);
       if (matched.length > 0) {
-        for (const id of matched) taught.add(id);
+        for (const id of matched) credit(id);
         continue;
       }
     }
@@ -1779,58 +1819,188 @@ export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
         (leaf.headingKey && blob.includes(leaf.headingKey)) ||
         (leaf.heading && blob.includes(leaf.heading.trim().toLowerCase()))
       ) {
-        taught.add(id);
+        credit(id);
       }
     }
   }
   return taught;
 };
 
-/** Align COMPLETED flags with unique log-book-taught leaves (deduped). */
+/** Ids only, for callers that do not care who taught the leaf. */
+export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
+  schoolId: mongoose.Types.ObjectId,
+  syllabusId: string,
+  subjectId?: string
+): Promise<Set<string>> =>
+  new Set(
+    (await taughtSyllabusLeafAttributionFromLogBook(schoolId, syllabusId, subjectId)).keys()
+  );
+
+/**
+ * Make the syllabus say exactly what the approved log book says.
+ *
+ * This is the only writer of teacher-taught completion: leaves backed by an
+ * approved class are COMPLETED and stamped with who taught them, and every
+ * other teacher-attributed leaf is rolled back to NOT_STARTED. That makes the
+ * sync idempotent and self-correcting — withdrawing an approval, deleting an
+ * entry or editing which sub-units it covered all reach the percentage on the
+ * next run. Administration extra lectures are stamped separately and are left
+ * untouched, or a class save would reopen them for salary.
+ */
 export const syncSyllabusCompletionFromLogBook = async (
   schoolId: mongoose.Types.ObjectId,
   syllabusId: string,
   subjectId?: string
 ): Promise<Set<string>> => {
-  const taught = await uniqueTaughtSyllabusLeafIdsFromLogBook(
+  const attributionByLeaf = await taughtSyllabusLeafAttributionFromLogBook(
     schoolId,
     syllabusId,
     subjectId
   );
+  const taught = new Set(attributionByLeaf.keys());
   const taughtList = [...taught];
-  /**
-   * Administration extra lectures are stamped on the leaf. Teacher log-book
-   * sync must not wipe those — otherwise a later class save would erase
-   * units already completed by extra lectures and reopen them for salary.
-   */
+
   const resettable: Record<string, unknown> = {
     syllabusId,
     status: "COMPLETED",
     completionSource: { $nin: ["ADMINISTRATION"] },
     countsTowardSalary: { $ne: false }
   };
-  if (taughtList.length === 0) {
-    await AcademicSyllabusSubUnit.updateMany(resettable, {
-      $set: { status: "NOT_STARTED", ...clearSubUnitAttributionSet() },
-      $unset: clearSubUnitAttributionUnset()
-    });
-    return taught;
-  }
-  await AcademicSyllabusSubUnit.updateMany(
-    {
-      ...resettable,
-      _id: { $nin: taughtList }
-    },
-    {
-      $set: { status: "NOT_STARTED", ...clearSubUnitAttributionSet() },
-      $unset: clearSubUnitAttributionUnset()
+  const rollback = {
+    $set: { status: "NOT_STARTED", ...clearSubUnitAttributionSet() },
+    $unset: clearSubUnitAttributionUnset()
+  };
+
+  const rolledBack = await AcademicSyllabusSubUnit.updateMany(
+    taughtList.length === 0 ? resettable : { ...resettable, _id: { $nin: taughtList } },
+    rollback
+  );
+  let changed = (rolledBack.modifiedCount ?? 0) > 0;
+
+  if (taughtList.length > 0) {
+    // serializeSyllabus runs this on every read, so only leaves that are
+    // actually out of step are written — otherwise every page view would churn
+    // completedAt and the updatedAt timestamps behind it.
+    const current = await AcademicSyllabusSubUnit.find({
+      syllabusId,
+      _id: { $in: taughtList }
+    })
+      .select(
+        "_id status completionSource countsTowardSalary completedByTeacherId completedByUserId taughtDateBs todaysCoverage completedAt"
+      )
+      .lean();
+
+    const operations: Parameters<typeof AcademicSyllabusSubUnit.bulkWrite>[0] = [];
+    for (const leaf of current) {
+      // Administration extra lectures keep their own attribution.
+      if (String(leaf.completionSource || "") === "ADMINISTRATION") {
+        if (leaf.status !== "COMPLETED") {
+          operations.push({
+            updateOne: { filter: { _id: leaf._id }, update: { $set: { status: "COMPLETED" } } }
+          });
+        }
+        continue;
+      }
+
+      const credit = attributionByLeaf.get(String(leaf._id));
+      const teacherId = credit?.teacherId || "";
+      const userId = credit?.userId || "";
+      const taughtDateBs = credit?.taughtDateBs || "";
+      // Coverage text already on the leaf was written by a person — admin
+      // oversight, or an earlier sync. Only fill it in when it is empty.
+      const coverage = String(leaf.todaysCoverage || "") || credit?.coverage || "";
+
+      const inStep =
+        leaf.status === "COMPLETED" &&
+        String(leaf.completionSource || "") === "TEACHER" &&
+        leaf.countsTowardSalary !== false &&
+        String(leaf.completedByTeacherId || "") === teacherId &&
+        String(leaf.taughtDateBs || "") === taughtDateBs &&
+        String(leaf.todaysCoverage || "") === coverage;
+      if (inStep) continue;
+
+      operations.push({
+        updateOne: {
+          filter: { _id: leaf._id },
+          update: {
+            $set: {
+              status: "COMPLETED",
+              todaysCoverage: coverage,
+              completionSource: "TEACHER",
+              countsTowardSalary: true,
+              taughtDateBs,
+              // The date the record was first completed, not every resync.
+              completedAt: leaf.completedAt ?? new Date(),
+              ...(teacherId
+                ? { completedByTeacherId: new mongoose.Types.ObjectId(teacherId) }
+                : {}),
+              ...(userId ? { completedByUserId: new mongoose.Types.ObjectId(userId) } : {})
+            },
+            ...(teacherId ? {} : { $unset: { completedByTeacherId: 1 } })
+          }
+        }
+      });
     }
-  );
-  await AcademicSyllabusSubUnit.updateMany(
-    { syllabusId, _id: { $in: taughtList } },
-    { $set: { status: "COMPLETED" } }
-  );
+
+    if (operations.length > 0) {
+      await AcademicSyllabusSubUnit.bulkWrite(operations);
+      changed = true;
+    }
+  }
+
+  // The legacy flat unit rows mirror their leaves, and nothing else updates
+  // them now that completion is no longer written at log-book save time.
+  if (changed) {
+    const topics = await AcademicSyllabusTopic.find({ syllabusId }).select("_id").lean();
+    for (const topic of topics) {
+      await syncLegacyUnitStatusForTopic(schoolId, String(topic._id));
+    }
+  }
+
   return taught;
+};
+
+/**
+ * Push one log book entry's effect onto the syllabus behind it.
+ *
+ * An entry does not always carry `syllabusId` — older rows, and entries filed
+ * straight against a lesson plan, only reference the sub-units they covered —
+ * so fall back to the sub-unit's own syllabus instead of silently skipping the
+ * sync and leaving an approved class invisible to the percentage.
+ */
+export const syncSyllabusCompletionForLogEntry = async (
+  schoolId: mongoose.Types.ObjectId,
+  entry: {
+    syllabusId?: unknown;
+    syllabusSubUnitIds?: unknown;
+    syllabusSubUnitId?: unknown;
+    subjectId?: unknown;
+  }
+): Promise<void> => {
+  const subjectId = entry.subjectId ? String(entry.subjectId) : undefined;
+  const syllabusIds = new Set<string>();
+  if (entry.syllabusId) syllabusIds.add(String(entry.syllabusId));
+
+  if (syllabusIds.size === 0) {
+    const leafIds = [
+      ...(Array.isArray(entry.syllabusSubUnitIds) ? entry.syllabusSubUnitIds : []),
+      entry.syllabusSubUnitId
+    ]
+      .map((id) => (id ? String(id) : ""))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (leafIds.length > 0) {
+      const leaves = await AcademicSyllabusSubUnit.find({ schoolId, _id: { $in: leafIds } })
+        .select("syllabusId")
+        .lean();
+      for (const leaf of leaves) {
+        if (leaf.syllabusId) syllabusIds.add(String(leaf.syllabusId));
+      }
+    }
+  }
+
+  for (const syllabusId of syllabusIds) {
+    await syncSyllabusCompletionFromLogBook(schoolId, syllabusId, subjectId);
+  }
 };
 
 export const assertNoDuplicateLogBookForItemDate = async (

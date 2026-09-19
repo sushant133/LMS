@@ -22,7 +22,9 @@
     "build:frontend": "npm run build --prefix ../frontend",
     "build:all": "npm run build && npm run build:frontend",
     "syllabus:taught-dates:report": "tsx src/scripts/backfillSyllabusTaughtDates.ts",
-    "syllabus:taught-dates:apply": "tsx src/scripts/backfillSyllabusTaughtDates.ts --apply"
+    "syllabus:taught-dates:apply": "tsx src/scripts/backfillSyllabusTaughtDates.ts --apply",
+    "syllabus:completion:report": "tsx src/scripts/resyncSyllabusCompletion.ts",
+    "syllabus:completion:reset": "tsx src/scripts/resyncSyllabusCompletion.ts --apply"
   },
   "dependencies": {
     "@phit-erp/shared": "file:./shared",

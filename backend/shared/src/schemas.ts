@@ -642,6 +642,19 @@ export const examRoutineSchema = z.object({
   remarks: z.string().optional().or(z.literal(""))
 });
 
+/**
+ * One hand-issued symbol number. A blank value clears any stored number for
+ * that student, so the admit card falls back to the registration number.
+ */
+export const examSymbolNumberEntrySchema = z.object({
+  studentId: objectIdSchema,
+  symbolNumber: z.string().trim().max(40, "Symbol number is too long")
+});
+
+export const examSymbolNumberBulkSchema = z.object({
+  entries: z.array(examSymbolNumberEntrySchema).min(1, "Add at least one symbol number")
+});
+
 export const resultMarkSchema = z
   .object({
     subjectId: objectIdSchema,
@@ -945,6 +958,8 @@ export type DailyAttendanceUpdateInput = z.infer<typeof dailyAttendanceUpdateSch
 export type DailyAttendanceUnlockInput = z.infer<typeof dailyAttendanceUnlockSchema>;
 export type ExamInput = z.infer<typeof examSchema>;
 export type ExamRoutineInput = z.infer<typeof examRoutineSchema>;
+export type ExamSymbolNumberEntryInput = z.infer<typeof examSymbolNumberEntrySchema>;
+export type ExamSymbolNumberBulkInput = z.infer<typeof examSymbolNumberBulkSchema>;
 export type ResultMarkInput = z.infer<typeof resultMarkSchema>;
 export type ResultInput = z.infer<typeof resultSchema>;
 export type ResultSubmissionScopeInput = z.infer<typeof resultSubmissionScopeSchema>;

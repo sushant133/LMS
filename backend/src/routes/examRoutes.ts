@@ -28,6 +28,11 @@ import {
   submitResultForReview
 } from "../controllers/resultSubmissionController.js";
 import {
+  clearExamSymbolNumbers,
+  listExamSymbolNumbers,
+  saveExamSymbolNumbers
+} from "../controllers/examSymbolNumberController.js";
+import {
   exportPrintResultsCsv,
   getPrintResultsGrid,
   listPublishedExams
@@ -93,6 +98,11 @@ router.post("/:examId/routines/unpublish", authorize("COLLEGE_ADMIN", "SUPER_ADM
  * class + section), so the office can open First Term on its own while Third Term is
  * still being scheduled.
  */
+/** Symbol numbers — issued by hand, per exam, and printed on the admit card. */
+router.get("/:examId/symbol-numbers", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listExamSymbolNumbers);
+router.post("/:examId/symbol-numbers", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), saveExamSymbolNumbers);
+router.delete("/:examId/symbol-numbers", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), clearExamSymbolNumbers);
+
 router.get("/records/exams", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listCohortExamRecords);
 router.get("/records/sheet", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getCohortExamSheet);
 router.get("/records/sheet/export", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), exportCohortExamSheetCsv);

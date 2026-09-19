@@ -26,7 +26,7 @@ import {
   serializeLogBookEntry,
   serializeSessionPlan,
   syncLessonPlanItemProgress,
-  syncSyllabusCompletionFromLogBook
+  syncSyllabusCompletionForLogEntry
 } from "./academicManagementService.js";
 import { getTodayBs } from "./nepaliDate.js";
 import { User } from "../models/User.js";
@@ -324,13 +324,8 @@ const approveLogBookDoc = async (
   if (existing.lessonPlanItemId) {
     await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
   }
-  if (existing.syllabusId) {
-    await syncSyllabusCompletionFromLogBook(
-      tenantObjectId(req),
-      existing.syllabusId.toString(),
-      existing.subjectId.toString()
-    );
-  }
+  // Approval is the moment the class reaches the official syllabus.
+  await syncSyllabusCompletionForLogEntry(tenantObjectId(req), existing);
   await resyncSessionPlansTouchedByLog({
     schoolId: tenantObjectId(req).toString(),
     teacherId: existing.teacherId.toString(),

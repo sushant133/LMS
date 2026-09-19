@@ -841,6 +841,25 @@ export const SUB_UNIT_STATUS_OPTIONS: Array<{
   },
 ];
 
+/**
+ * Statuses a teacher may set by hand.
+ *
+ * "Completed" is missing on purpose: a sub-unit is completed by an approved Log
+ * Book entry, never by claiming it here, so the completion percentage only ever
+ * reflects classes administration has verified and approved. Administration
+ * keeps the full list — it still files extra lectures and corrects the record.
+ * A sub-unit that is already completed keeps showing its status.
+ */
+export const subUnitStatusOptionsFor = (
+  isAdmin: boolean,
+  currentStatus?: string,
+): typeof SUB_UNIT_STATUS_OPTIONS =>
+  isAdmin
+    ? SUB_UNIT_STATUS_OPTIONS
+    : SUB_UNIT_STATUS_OPTIONS.filter(
+        (option) => option.value !== "COMPLETED" || currentStatus === "COMPLETED",
+      );
+
 /** Status label for a syllabus sub-unit, Devanagari for Nepali subjects. */
 export const subUnitStatusLabel = (
   status: string,

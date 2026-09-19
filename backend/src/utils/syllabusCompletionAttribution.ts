@@ -143,7 +143,12 @@ export const markSubUnitsCompleted = async (params: MarkParams): Promise<string[
   return marked.map((row) => String(row._id));
 };
 
-const syncLegacyUnitStatusForTopic = async (
+/**
+ * Keep the legacy flat `AcademicSyllabusUnit.status` in step with the leaves of
+ * one topic. Exported because completion is now written in two places: admin
+ * oversight (markSubUnitsCompleted) and the approved-log-book sync.
+ */
+export const syncLegacyUnitStatusForTopic = async (
   schoolId: Types.ObjectId,
   topicId: string
 ): Promise<void> => {
