@@ -16,6 +16,7 @@
   --ac-muted: #55607a;
   --ac-soft: #f3f5f9;
   --ac-accent: #a9812f;
+  --ac-cut: #9aa3b5;
 
   box-sizing: border-box;
   width: 198mm;
@@ -42,7 +43,7 @@
 .ac-card {
   position: relative;
   height: 138mm;
-  padding: 5mm 6mm 4.4mm;
+  padding: 4.6mm 5.6mm 4mm;
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -51,34 +52,53 @@
     sans-serif;
   font-size: 8.6pt;
   line-height: 1.26;
-  border: 1.1px solid var(--ac-line);
+  border: 0.9px solid var(--ac-line);
+  /* A white gutter, then a gold rule set in from the edge. Stated in mm so the
+     band stays visible at print resolution rather than collapsing to a hairline. */
   box-shadow:
-    inset 0 0 0 1.6px #ffffff,
-    inset 0 0 0 2.3px var(--ac-accent);
+    inset 0 0 0 1mm #ffffff,
+    inset 0 0 0 1.4mm var(--ac-accent);
   page-break-inside: avoid;
   break-inside: avoid;
 }
 
+/* Trim guide between the two cards on a sheet — the office cuts along it. */
+.ac-card + .ac-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2.2mm;
+  border-top: 0.5px dashed var(--ac-cut);
+}
+
 /* —— Header —— */
 
+/* The logo is taken out of flow so the institution name centres on the card
+   itself; in flow it would centre on the space left over and sit visibly right. */
 .ac-head {
+  position: relative;
+  min-height: 15mm;
   display: flex;
   align-items: center;
-  gap: 4mm;
-  padding-bottom: 2.2mm;
+  padding-bottom: 2mm;
   border-bottom: 0.9px solid var(--ac-line);
 }
 
 .ac-logo {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 15mm;
   height: 15mm;
-  flex: 0 0 15mm;
   object-fit: contain;
 }
 
 .ac-head-text {
-  min-width: 0;
   flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 17mm;
   text-align: center;
 }
 
@@ -99,15 +119,15 @@
 }
 
 .ac-address {
-  margin: 0.7mm 0 0;
-  font-size: 8pt;
+  margin: 0.6mm 0 0;
+  font-size: 7.6pt;
   color: var(--ac-muted);
   line-height: 1.18;
 }
 
 .ac-title {
-  margin: 2.4mm 0 0;
-  padding: 1.4mm 0;
+  margin: 2mm 0 0;
+  padding: 1.2mm 0;
   text-align: center;
   font-size: 11pt;
   font-weight: 700;
@@ -120,7 +140,7 @@
 }
 
 .ac-exam {
-  margin: 1.8mm 0 0;
+  margin: 1.6mm 0 0;
   text-align: center;
   font-size: 10pt;
   font-weight: 600;
@@ -128,73 +148,184 @@
 }
 
 .ac-session {
-  margin: 0.6mm 0 0;
+  margin: 0.5mm 0 0;
   text-align: center;
-  font-size: 8pt;
+  font-size: 7.8pt;
   color: var(--ac-muted);
 }
 
-/* —— Body: details + photo —— */
+/* —— Body: particulars | schedule | photo ——
+   Three columns rather than two: the schedule fills the band that otherwise
+   sits empty under a short list of particulars. */
 
 .ac-body {
-  margin-top: 2.4mm;
+  margin-top: 2mm;
   display: flex;
-  gap: 5mm;
+  gap: 4mm;
   align-items: flex-start;
 }
 
-/* Two label/value pairs per row — the half-page card is wide enough that a
-   single column would leave most of the width blank. */
-.ac-fields {
-  flex: 1 1 auto;
+.ac-particulars {
+  flex: 0 0 48mm;
+  width: 48mm;
   min-width: 0;
+}
+
+.ac-fields {
   margin: 0;
   display: grid;
-  grid-template-columns: 21mm 1fr 21mm 1fr;
-  row-gap: 1.6mm;
-  column-gap: 2.4mm;
+  grid-template-columns: 16mm 1fr;
+  row-gap: 1.1mm;
+  column-gap: 1.8mm;
   align-content: start;
 }
 
 .ac-fields dt {
   margin: 0;
-  font-size: 7.4pt;
+  font-size: 6.9pt;
   font-weight: 600;
   color: var(--ac-muted);
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  line-height: 1.32;
-  align-self: center;
+  line-height: 1.3;
+  align-self: end;
 }
 
 .ac-fields dd {
   margin: 0;
-  font-size: 8.8pt;
+  font-size: 8.2pt;
   font-weight: 600;
-  line-height: 1.26;
+  line-height: 1.24;
   word-break: break-word;
   overflow-wrap: anywhere;
   border-bottom: 0.6px dotted var(--ac-line);
-  padding-bottom: 0.5mm;
-  align-self: center;
+  padding-bottom: 0.4mm;
 }
 
-/* Name and symbol number carry the identity — give them weight and the full
-   width of the grid so a long name never wraps awkwardly. */
+/* Name and symbol number carry the identity — give them weight. */
 .ac-fields dd.ac-strong {
-  font-size: 10pt;
+  font-size: 9.4pt;
   font-weight: 700;
 }
 
-/* A full-width value — the candidate's name — runs to the end of the row. */
-.ac-fields dd.ac-wide {
-  grid-column: 2 / -1;
+/* —— Symbol-number barcode —— */
+
+.ac-barcode-wrap {
+  margin-top: 2mm;
 }
 
+/* JsBarcode writes px width/height; the component swaps those for a viewBox so
+   the symbol scales to the column. Stretching x keeps module ratios intact. */
+.ac-barcode {
+  display: block;
+  width: 100%;
+  height: 7mm;
+}
+
+.ac-barcode-caption {
+  margin: 0.5mm 0 0;
+  text-align: center;
+  font-size: 6.2pt;
+  letter-spacing: 0.16em;
+  color: var(--ac-muted);
+}
+
+/* —— Schedule —— */
+
+.ac-schedule {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ac-schedule-title,
+.ac-note-title {
+  margin: 0 0 1mm;
+  font-size: 7.6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ac-ink);
+}
+
+.ac-schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 6.9pt;
+  line-height: 1.22;
+}
+
+.ac-schedule-table th,
+.ac-schedule-table td {
+  padding: 0.5mm 1.2mm 0.5mm 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 0.5px solid #d5dae4;
+}
+
+.ac-schedule-table th {
+  font-size: 6.2pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ac-muted);
+  border-bottom: 0.8px solid var(--ac-line);
+}
+
+.ac-schedule-table tr:last-child td {
+  border-bottom: none;
+}
+
+.ac-sch-date {
+  width: 17mm;
+  white-space: nowrap;
+}
+
+.ac-sch-day {
+  width: 12mm;
+}
+
+.ac-sch-time {
+  width: 19mm;
+  white-space: nowrap;
+}
+
+.ac-sch-subject {
+  font-weight: 600;
+}
+
+/* Inline, not stacked: a second line per row would cost 20mm over a full routine. */
+.ac-sch-code {
+  font-size: 6.1pt;
+  font-weight: 400;
+  color: var(--ac-muted);
+}
+
+.ac-sch-hall {
+  width: 13mm;
+  font-weight: 400;
+  color: var(--ac-muted);
+}
+
+.ac-schedule-more {
+  margin: 0.8mm 0 0;
+  font-size: 6.2pt;
+  font-style: italic;
+  color: var(--ac-muted);
+}
+
+.ac-schedule-empty {
+  margin: 0;
+  font-size: 6.9pt;
+  color: var(--ac-muted);
+  line-height: 1.3;
+}
+
+/* —— Photo —— */
+
 .ac-photo {
-  flex: 0 0 30mm;
-  width: 30mm;
-  height: 37mm;
+  flex: 0 0 29mm;
+  width: 29mm;
+  height: 36mm;
   border: 0.9px solid var(--ac-line);
   background: var(--ac-soft);
   display: flex;
@@ -212,45 +343,42 @@
 }
 
 .ac-photo-empty {
-  font-size: 7pt;
+  font-size: 6.6pt;
   color: var(--ac-muted);
   text-align: center;
   padding: 0 1.5mm;
   line-height: 1.2;
 }
 
-/* —— Instructions: fills the space the bigger card opens up —— */
+/* —— Instructions —— */
 
 .ac-note {
-  margin: 2.6mm 0 0;
-  padding-top: 1.8mm;
+  margin: 2.2mm 0 0;
+  padding-top: 1.6mm;
   border-top: 0.6px dashed var(--ac-line);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 
-.ac-note-title {
-  margin: 0 0 1.2mm;
-  font-size: 8pt;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ac-ink);
-}
-
+/* Tailwind's preflight clears list markers globally, so the numbering has to be
+   asked for again — without it the two columns read as loose paragraphs. */
 .ac-note-list {
   margin: 0;
   padding: 0 0 0 4.5mm;
+  list-style: decimal outside;
   columns: 2;
   column-gap: 6mm;
-  font-size: 7.2pt;
-  color: var(--ac-muted);
-  line-height: 1.34;
+  column-fill: balance;
+  font-size: 7pt;
+  /* Full ink, not the muted grey: these survive a photocopier, grey does not. */
+  color: var(--ac-ink);
+  line-height: 1.32;
 }
 
 .ac-note-list li {
-  margin: 0 0 0.9mm;
+  margin: 0 0 0.8mm;
+  padding-left: 0.5mm;
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -259,7 +387,7 @@
 
 .ac-signs {
   margin-top: auto;
-  padding-top: 6mm;
+  padding-top: 5.5mm;
   display: flex;
   justify-content: space-between;
   gap: 6mm;
@@ -268,11 +396,11 @@
 .ac-sign {
   flex: 1 1 0;
   text-align: center;
-  font-size: 7.4pt;
+  font-size: 7.2pt;
   font-weight: 600;
   color: var(--ac-muted);
   border-top: 0.8px solid var(--ac-line);
-  padding-top: 1mm;
+  padding-top: 0.9mm;
   line-height: 1.15;
 }
 

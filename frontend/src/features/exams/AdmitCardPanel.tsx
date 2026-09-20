@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,9 +11,12 @@ import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ExamRecord,
+  ExamRoutineRecord,
   ExamSymbolNumberRecord,
   StudentRecord,
 } from "@phit-erp/shared";
+import { getTodayBs } from "@munatech/nepali-datepicker";
+import JsBarcode from "jsbarcode";
 import { Hash, IdCard, Printer, Save, Search, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { CollegeLogo } from "components/shared/CollegeLogo";
@@ -54,8 +58,22 @@ const EXAM_INSTRUCTIONS = [
   "Report any error in the details printed above to the examination section at once.",
 ];
 
+/**
+ * How many papers the card prints before deferring to the published routine.
+ * Ten fills the schedule column without squeezing the instructions below it.
+ */
+const MAX_SCHEDULE_ROWS = 10;
+
 /** Parallel photo fetches — enough to fill a class quickly without flooding. */
 const PHOTO_FETCH_CONCURRENCY = 6;
+
+/** Today in BS as `YYYY-MM-DD`, for the card's issue date. */
+const todayBsString = (): string => {
+  const today = getTodayBs();
+  return `${today.year}-${String(today.month).padStart(2, "0")}-${String(
+    today.day,
+  ).padStart(2, "0")}`;
+};
 
 /**
  * The student's profile photograph.
@@ -143,6 +161,64 @@ interface AdmitCardPanelProps {
   students: StudentRecord[];
 }
 
+/**
+ * Code 128 of the symbol number, for scanning candidates in at the hall door.
+ *
+ * JsBarcode draws at a fixed pixel width; swapping that for a viewBox lets the
+ * symbol scale to the column instead of overflowing it. `preserveAspectRatio`
+ * is dropped so the stretch is purely horizontal — module *ratios* survive,
+ * which is all a scanner reads.
+ */
+const SymbolBarcode = ({ value }: { value: string }) => {
+  const ref = useRef<SVGSVGElement | null>(null);
+
+  // Layout, not passive: printOne flushSync-renders the solo card and prints in
+  // the same tick, and a passive effect would not have drawn the bars by then.
+  useLayoutEffect(() => {
+    const svg = ref.current;
+    if (!svg || !value) return;
+    try {
+      JsBarcode(svg, value, {
+        format: "CODE128",
+        width: 2,
+        height: 60,
+        margin: 0,
+        displayValue: false,
+      });
+      const width = svg.getAttribute("width");
+      const height = svg.getAttribute("height");
+      if (width && height) {
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute("preserveAspectRatio", "none");
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+      }
+    } catch {
+      // A symbol number Code 128 cannot express — print the card without it.
+    }
+  }, [value]);
+
+  if (!value) return null;
+
+  return (
+    <div className="ac-barcode-wrap">
+      <svg ref={ref} className="ac-barcode" aria-hidden="true" />
+      <p className="ac-barcode-caption">{value}</p>
+    </div>
+  );
+};
+
+/** One row of the printed schedule — flattened so the card stays presentational. */
+interface ScheduleSlot {
+  id: string;
+  dateBs: string;
+  day: string;
+  subject: string;
+  code: string;
+  time: string;
+  hall: string;
+}
+
 /** One printed card. Kept presentational so bulk and single print share it exactly. */
 const AdmitCard = ({
   student,
@@ -154,6 +230,8 @@ const AdmitCard = ({
   yearName,
   className,
   sectionName,
+  schedule,
+  issuedOnBs,
 }: {
   student: StudentRecord;
   exam: ExamRecord;
@@ -166,19 +244,21 @@ const AdmitCard = ({
   yearName?: string;
   className?: string;
   sectionName?: string;
+  /** This candidate's papers, already sorted and scoped to their year. */
+  schedule: ScheduleSlot[];
+  /** Today in BS — printed so a reissued card is distinguishable from the first. */
+  issuedOnBs: string;
 }) => {
   /** Only the rows that actually have a value — a small card cannot carry blanks. */
   const rows: Array<{
     label: string;
     value: string;
     strong?: boolean;
-    wide?: boolean;
   }> = [
     {
       label: "Name",
       value: student.user?.fullName ?? "—",
       strong: true,
-      wide: true,
     },
     { label: "Symbol No.", value: symbolNo || "—", strong: true },
   ];
@@ -195,6 +275,12 @@ const AdmitCard = ({
   if (yearName) rows.push({ label: "Year", value: yearName });
   if (className) rows.push({ label: "Class", value: className });
   if (sectionName) rows.push({ label: "Section", value: sectionName });
+  if (issuedOnBs) rows.push({ label: "Issued", value: issuedOnBs });
+
+  const shownSlots = schedule.slice(0, MAX_SCHEDULE_ROWS);
+  const hiddenSlots = schedule.length - shownSlots.length;
+  /** The hall column costs width, so it only appears when a hall was assigned. */
+  const showHall = shownSlots.some((slot) => slot.hall);
 
   const dateRange =
     exam.startDateBs && exam.endDateBs
@@ -228,21 +314,66 @@ const AdmitCard = ({
       </p>
 
       <div className="ac-body">
-        <dl className="ac-fields">
-          {rows.map((row) => (
-            <Fragment key={row.label}>
-              <dt>{row.label}</dt>
-              <dd
-                className={cn(
-                  row.strong && "ac-strong",
-                  row.wide && "ac-wide",
-                )}
-              >
-                {row.value}
-              </dd>
-            </Fragment>
-          ))}
-        </dl>
+        <div className="ac-particulars">
+          <dl className="ac-fields">
+            {rows.map((row) => (
+              <Fragment key={row.label}>
+                <dt>{row.label}</dt>
+                <dd className={cn(row.strong && "ac-strong")}>{row.value}</dd>
+              </Fragment>
+            ))}
+          </dl>
+          <SymbolBarcode value={symbolNo} />
+        </div>
+
+        <div className="ac-schedule">
+          <p className="ac-schedule-title">Examination Schedule</p>
+          {shownSlots.length > 0 ? (
+            <>
+              <table className="ac-schedule-table">
+                <thead>
+                  <tr>
+                    <th className="ac-sch-date">Date (BS)</th>
+                    <th className="ac-sch-day">Day</th>
+                    <th>Subject</th>
+                    <th className="ac-sch-time">Time</th>
+                    {showHall ? <th className="ac-sch-hall">Hall</th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shownSlots.map((slot) => (
+                    <tr key={slot.id}>
+                      <td className="ac-sch-date">{slot.dateBs || "—"}</td>
+                      <td className="ac-sch-day">{slot.day || "—"}</td>
+                      <td className="ac-sch-subject">
+                        {slot.subject}
+                        {slot.code ? (
+                          <span className="ac-sch-code"> ({slot.code})</span>
+                        ) : null}
+                      </td>
+                      <td className="ac-sch-time">{slot.time || "—"}</td>
+                      {showHall ? (
+                        <td className="ac-sch-hall">{slot.hall || "—"}</td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {hiddenSlots > 0 ? (
+                <p className="ac-schedule-more">
+                  + {hiddenSlots} more paper{hiddenSlots === 1 ? "" : "s"} — see
+                  the published routine.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="ac-schedule-empty">
+              The routine for this examination has not been published yet.
+              Candidates must follow the notice board for paper dates and times.
+            </p>
+          )}
+        </div>
+
         <div className="ac-photo">
           {photo ? (
             <img src={photo} alt={student.user?.fullName ?? "Candidate"} />
@@ -353,6 +484,68 @@ export const AdmitCardPanel = ({
       ),
     enabled: Boolean(examId),
   });
+
+  /**
+   * The published routine for this exam, printed on each card. Rows are scoped
+   * to a college year, so one fetch covers every year in the selection and the
+   * card picks out its own.
+   */
+  const routinesQuery = useQuery({
+    queryKey: ["exam-routines", examId],
+    queryFn: () =>
+      unwrap<ExamRoutineRecord[]>(
+        api.get("/exams/routines", { params: { examId } }),
+      ),
+    enabled: Boolean(examId),
+  });
+
+  /** Routine rows grouped by year, each group in sitting order. "" = no year. */
+  const slotsByYear = useMemo(() => {
+    const map = new Map<string, ScheduleSlot[]>();
+    for (const row of routinesQuery.data ?? []) {
+      const key = row.yearId ? String(row.yearId) : "";
+      const list = map.get(key) ?? [];
+      const time =
+        row.startTime && row.endTime
+          ? `${row.startTime}–${row.endTime}`
+          : row.startTime || row.endTime || "";
+      list.push({
+        id: String(row._id),
+        dateBs: row.examDateBs ?? "",
+        day: row.day ?? "",
+        subject: row.subjectName?.trim() || "Subject",
+        code: row.subjectCode?.trim() ?? "",
+        time,
+        hall: row.examHall?.trim() ?? "",
+      });
+      map.set(key, list);
+    }
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) =>
+          a.dateBs.localeCompare(b.dateBs) || a.time.localeCompare(b.time),
+      );
+    }
+    return map;
+  }, [routinesQuery.data]);
+
+  /**
+   * A student prints their own year's papers. School exams carry no year on the
+   * routine, so those rows apply to the whole cohort and serve as the fallback.
+   */
+  const scheduleFor = useCallback(
+    (student: StudentRecord): ScheduleSlot[] => {
+      const own = student.yearId
+        ? slotsByYear.get(String(student.yearId))
+        : undefined;
+      if (own && own.length > 0) return own;
+      return slotsByYear.get("") ?? [];
+    },
+    [slotsByYear],
+  );
+
+  /** Stable for the life of the panel so every card in a run prints one date. */
+  const issuedOnBs = useMemo(() => todayBsString(), []);
 
   const savedSymbols = useMemo(() => {
     const map = new Map<string, string>();
@@ -704,6 +897,8 @@ export const AdmitCardPanel = ({
       className={
         student.classId ? classById.get(String(student.classId)) : undefined
       }
+      schedule={scheduleFor(student)}
+      issuedOnBs={issuedOnBs}
       sectionName={
         student.sectionId
           ? sectionById.get(String(student.sectionId))
