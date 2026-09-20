@@ -1503,7 +1503,8 @@ export const printMarksheetElement = async (element: HTMLElement | null): Promis
 
 /**
  * Admit cards print A4 portrait; admit-card.css lays the sheet out as a fixed
- * 2 x 3 millimetre grid so every page carries exactly six cards.
+ * single-column millimetre grid so every page carries exactly two half-page
+ * cards.
  */
 export const printAdmitCardsElement = async (
   element: HTMLElement | null

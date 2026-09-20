@@ -32,8 +32,27 @@ import { getPdfErrorMessage, printAdmitCardsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 
-/** Six cards per A4 sheet — the grid in admit-card.css is sized for exactly this. */
-const CARDS_PER_SHEET = 6;
+/**
+ * Two cards per A4 sheet — one half-page card each. The grid in
+ * admit-card.css is sized for exactly this.
+ */
+const CARDS_PER_SHEET = 2;
+
+/**
+ * Printed on every card. The half-page layout leaves room the six-up card did
+ * not have, so the rules the exam section repeats each session live here
+ * rather than being handed out on a separate notice.
+ */
+const EXAM_INSTRUCTIONS = [
+  "Bring this admit card to every paper. Entry to the examination hall is refused without it.",
+  "Be seated 15 minutes before the paper begins. Late entry is not permitted after 30 minutes.",
+  "Mobile phones, smart watches and any printed or written material are strictly prohibited.",
+  "Use blue or black ink only, and write your symbol number clearly on the answer sheet.",
+  "Do not leave the hall before half of the allotted time has elapsed.",
+  "Use of unfair means results in cancellation of the examination.",
+  "Preserve this card until the results are published.",
+  "Report any error in the details printed above to the examination section at once.",
+];
 
 /** Parallel photo fetches — enough to fill a class quickly without flooding. */
 const PHOTO_FETCH_CONCURRENCY = 6;
@@ -149,14 +168,19 @@ const AdmitCard = ({
   sectionName?: string;
 }) => {
   /** Only the rows that actually have a value — a small card cannot carry blanks. */
-  const rows: Array<{ label: string; value: string; strong?: boolean }> = [
+  const rows: Array<{
+    label: string;
+    value: string;
+    strong?: boolean;
+    wide?: boolean;
+  }> = [
     {
       label: "Name",
       value: student.user?.fullName ?? "—",
       strong: true,
+      wide: true,
     },
     { label: "Symbol No.", value: symbolNo || "—", strong: true },
-    { label: "Roll No.", value: String(student.rollNumber ?? "—") },
   ];
   // One identity row beyond the symbol number, never two — the card is small.
   // A hand-issued symbol number leaves the registration number worth printing;
@@ -171,9 +195,6 @@ const AdmitCard = ({
   if (yearName) rows.push({ label: "Year", value: yearName });
   if (className) rows.push({ label: "Class", value: className });
   if (sectionName) rows.push({ label: "Section", value: sectionName });
-  if (student.dateOfBirthBs) {
-    rows.push({ label: "D.O.B (BS)", value: student.dateOfBirthBs });
-  }
 
   const dateRange =
     exam.startDateBs && exam.endDateBs
@@ -211,7 +232,12 @@ const AdmitCard = ({
           {rows.map((row) => (
             <Fragment key={row.label}>
               <dt>{row.label}</dt>
-              <dd className={row.strong ? "ac-strong" : undefined}>
+              <dd
+                className={cn(
+                  row.strong && "ac-strong",
+                  row.wide && "ac-wide",
+                )}
+              >
                 {row.value}
               </dd>
             </Fragment>
@@ -226,13 +252,18 @@ const AdmitCard = ({
         </div>
       </div>
 
-      <p className="ac-note">
-        Carry this card to every paper. Entry is refused without it. Candidates
-        must reach the hall 15 minutes before the paper begins.
-      </p>
+      <section className="ac-note">
+        <p className="ac-note-title">Examination Instructions</p>
+        <ol className="ac-note-list">
+          {EXAM_INSTRUCTIONS.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ol>
+      </section>
 
       <div className="ac-signs">
-        <span className="ac-sign">Candidate&apos;s Signature</span>
+        <span className="ac-sign">Director&apos;s Signature</span>
+        <span className="ac-sign">Principal / Vice Principal</span>
         <span className="ac-sign">Controller of Examinations</span>
       </div>
     </article>
@@ -590,7 +621,7 @@ export const AdmitCardPanel = ({
     return filteredStudents.filter((s) => selectedSet.has(s._id));
   }, [selectedExam, soloStudentId, filteredStudents, selectedSet]);
 
-  /** Chunked into sheets of six; admit-card.css page-breaks between sheets. */
+  /** Chunked into sheets of two; admit-card.css page-breaks between sheets. */
   const sheets = useMemo(() => {
     const out: StudentRecord[][] = [];
     for (let i = 0; i < cardStudents.length; i += CARDS_PER_SHEET) {
