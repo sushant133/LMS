@@ -181,7 +181,7 @@ const SymbolBarcode = ({ value }: { value: string }) => {
       JsBarcode(svg, value, {
         format: "CODE128",
         width: 2,
-        height: 60,
+        height: 34,
         margin: 0,
         displayValue: false,
       });
@@ -260,15 +260,18 @@ const AdmitCard = ({
       value: student.user?.fullName ?? "—",
       strong: true,
     },
-    { label: "Symbol No.", value: symbolNo || "—", strong: true },
   ];
-  // One identity row beyond the symbol number, never two — the card is small.
-  // A hand-issued symbol number leaves the registration number worth printing;
-  // when the symbol number *is* the registration number, the admission number is.
+  // Always a row, even with nothing to print in it: a blank leaves the office a
+  // ruled line to fill the registration number in by hand.
   const regdNo = student.registrationNumber?.trim() ?? "";
-  if (regdNo && regdNo !== symbolNo) {
-    rows.push({ label: "Regd. No.", value: regdNo });
-  } else if (student.admissionNumber && student.admissionNumber !== symbolNo) {
+  rows.push({ label: "Regd. No.", value: regdNo || "—" });
+  // The admission number only earns a line when it is neither of the two numbers
+  // already on the card.
+  if (
+    student.admissionNumber &&
+    student.admissionNumber !== symbolNo &&
+    student.admissionNumber !== regdNo
+  ) {
     rows.push({ label: "Admission", value: student.admissionNumber });
   }
   if (batchName) rows.push({ label: "Batch", value: batchName });
@@ -304,6 +307,7 @@ const AdmitCard = ({
             <p className="ac-address">{college.address}</p>
           ) : null}
         </div>
+        <SymbolBarcode value={symbolNo} />
       </header>
 
       <p className="ac-title">Admit Card</p>
@@ -312,6 +316,13 @@ const AdmitCard = ({
         Academic Session: {exam.academicYearBs}
         {dateRange ? ` · Exam: ${dateRange}` : ""}
       </p>
+
+      {/* The number a candidate is called by, at the top of the card so an
+          invigilator reads it without hunting for it. */}
+      <div className="ac-idstrip">
+        <span className="ac-id-label">Symbol No.</span>
+        <span className="ac-id-value">{symbolNo || "—"}</span>
+      </div>
 
       <div className="ac-body">
         <div className="ac-particulars">
@@ -323,7 +334,6 @@ const AdmitCard = ({
               </Fragment>
             ))}
           </dl>
-          <SymbolBarcode value={symbolNo} />
         </div>
 
         <div className="ac-schedule">
@@ -393,9 +403,9 @@ const AdmitCard = ({
       </section>
 
       <div className="ac-signs">
-        <span className="ac-sign">Director&apos;s Signature</span>
+        <span className="ac-sign">Examination Section</span>
         <span className="ac-sign">Principal / Vice Principal</span>
-        <span className="ac-sign">Controller of Examinations</span>
+        <span className="ac-sign">Director / Chairman</span>
       </div>
     </article>
   );
