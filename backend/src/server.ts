@@ -15,6 +15,7 @@ import { ensureDemoData } from "./seed/index.js";
 import { migrateLegacyDemoDisplayNames } from "./utils/migrateLegacyDemoDisplayNames.js";
 import { repairLaboratoryIndexes } from "./utils/repairLaboratoryIndexes.js";
 import { startAcademicManagementNotificationScheduler } from "./utils/academicManagementNotifications.js";
+import { startNoticeNotificationScheduler } from "./utils/noticeNotifications.js";
 import { configuredCorsOrigins, isOriginAllowed } from "./utils/allowedOrigins.js";
 import { logger } from "./utils/logger.js";
 import { ensureUploadDirectories } from "./services/fileStorage/index.js";
@@ -197,6 +198,7 @@ const startServer = async (): Promise<void> => {
   await ensureDemoData();
 
   startAcademicManagementNotificationScheduler();
+  startNoticeNotificationScheduler();
 
   httpServer = app.listen(env.PORT, env.HOST, () => {
     logger.info(

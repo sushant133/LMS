@@ -9,7 +9,7 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent } from "components/ui/card";
 import { Select } from "components/ui/select";
-import { api, unwrap } from "lib/api";
+import { api, resolveMediaUrl, unwrap } from "lib/api";
 import {
   applyNotificationReadLocally,
   invalidateNotificationQueries,
@@ -220,6 +220,18 @@ export const NotificationCenter = () => {
                   <p className="mt-1 text-sm text-slate-600">
                     {notification.message}
                   </p>
+                  {notification.metadata?.thumbnailUrl ||
+                  notification.metadata?.imageUrl ? (
+                    <img
+                      src={resolveMediaUrl(
+                        notification.metadata.thumbnailUrl ||
+                          notification.metadata.imageUrl,
+                      )}
+                      alt=""
+                      loading="lazy"
+                      className="mt-2 h-20 w-32 rounded-lg border border-slate-200 object-cover"
+                    />
+                  ) : null}
                   {notification.createdAt ? (
                     <p className="mt-2 text-xs text-slate-400">
                       {formatWhen(notification.createdAt)}

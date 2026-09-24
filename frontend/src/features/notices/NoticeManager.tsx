@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   canManageInstitution,
+  NOTICE_MAX_IMAGES,
   noticeSchema,
   USER_ROLES,
   type NoticeInput,
   type NoticeRecord,
 } from "@phit-erp/shared";
+import { ImagePlus, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { useCanEditOrDeleteRecords, useCanManageGrantedModule } from "hooks/useModuleAccess";
@@ -23,10 +25,12 @@ import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import {
+  NoticeImageGallery,
   StudentNoticeBoard,
   type EnrichedNoticeRecord,
 } from "features/notices/StudentNoticeBoard";
-import { api, unwrap } from "lib/api";
+import { BANNER_ACCEPT, uploadBannerImage } from "features/notices/bannerUtils";
+import { api, resolveMediaUrl, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import {
   filterSectionsByClass,
@@ -38,6 +42,7 @@ import { parseErrorMessage } from "lib/utils";
 const adminDefaultNoticeValue: NoticeInput = {
   title: "",
   content: "",
+  images: [],
   visibleTo: ["COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"],
   publishDateBs: "",
   expiresAtBs: "",
@@ -46,6 +51,7 @@ const adminDefaultNoticeValue: NoticeInput = {
 const teacherDefaultNoticeValue: NoticeInput = {
   title: "",
   content: "",
+  images: [],
   visibleTo: ["STUDENT"],
   publishDateBs: "",
   expiresAtBs: "",
@@ -61,6 +67,8 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const [form, setForm] = useState<NoticeInput>(adminDefaultNoticeValue);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const grantedNotices = useCanManageGrantedModule("notices");
   const canManageNotices =
     canManageInstitution(user?.role ?? "") || isTeacher || grantedNotices;
@@ -142,6 +150,83 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
+
+  const noticeImages = form.images ?? [];
+
+  const handleImageSelect = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    const remaining = NOTICE_MAX_IMAGES - noticeImages.length;
+    if (remaining <= 0) {
+      toast.error(`You can attach up to ${NOTICE_MAX_IMAGES} images`);
+      return;
+    }
+    if (files.length > remaining) {
+      toast.error(
+        `Only ${remaining} more image${remaining === 1 ? "" : "s"} can be attached`,
+      );
+    }
+
+    setIsUploadingImages(true);
+    try {
+      const results = await Promise.allSettled(
+        files
+          .slice(0, remaining)
+          .map((file) => uploadBannerImage(file, "/uploads/notices")),
+      );
+      const uploaded = results.flatMap((result) =>
+        result.status === "fulfilled" && result.value.imageUrl
+          ? [
+              {
+                url: result.value.imageUrl,
+                thumbnailUrl: result.value.thumbnailUrl,
+                originalName: result.value.originalFileName,
+                width: result.value.width,
+                height: result.value.height,
+                size: result.value.fileSizeBytes,
+              },
+            ]
+          : [],
+      );
+      const failed = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+
+      if (uploaded.length > 0) {
+        setForm((current) => ({
+          ...current,
+          images: [...(current.images ?? []), ...uploaded].slice(
+            0,
+            NOTICE_MAX_IMAGES,
+          ),
+        }));
+        toast.success(
+          `${uploaded.length} image${uploaded.length === 1 ? "" : "s"} uploaded`,
+        );
+      }
+      if (failed) {
+        toast.error(
+          failed.reason instanceof Error
+            ? failed.reason.message
+            : "Some images failed to upload",
+        );
+      }
+    } finally {
+      setIsUploadingImages(false);
+    }
+  };
+
+  const removeImage = (url: string) => {
+    setForm((current) => ({
+      ...current,
+      images: (current.images ?? []).filter((image) => image.url !== url),
+    }));
+  };
 
   const teacherClassMap = useMemo(
     () =>
@@ -237,6 +322,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                     }
                   : form;
                 const parsed = noticeSchema.safeParse(payload);
+                if (isUploadingImages) {
+                  toast.error("Please wait for the images to finish uploading");
+                  return;
+                }
                 if (!parsed.success) {
                   toast.error(
                     parsed.error.issues[0]?.message ?? "Validation failed",
@@ -436,6 +525,67 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                   }
                 />
               </FormField>
+              <FormField label={`Images (optional, up to ${NOTICE_MAX_IMAGES})`}>
+                <div className="space-y-3">
+                  {noticeImages.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                      {noticeImages.map((image) => (
+                        <div
+                          key={image.url}
+                          className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                        >
+                          <img
+                            src={resolveMediaUrl(image.thumbnailUrl || image.url)}
+                            alt={image.originalName ?? "Notice image"}
+                            className="aspect-video w-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            aria-label="Remove image"
+                            className="absolute right-1.5 top-1.5 rounded-full bg-white/90 p-1 text-slate-700 shadow hover:bg-rose-50 hover:text-rose-600"
+                            onClick={() => removeImage(image.url)}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                          {image.originalName ? (
+                            <p className="truncate px-2 py-1 text-xs text-slate-500">
+                              {image.originalName}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept={BANNER_ACCEPT}
+                    multiple
+                    className="hidden"
+                    onChange={(event) => void handleImageSelect(event)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={
+                      isUploadingImages ||
+                      noticeImages.length >= NOTICE_MAX_IMAGES
+                    }
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    {isUploadingImages ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                    )}
+                    {isUploadingImages ? "Uploading…" : "Upload Images"}
+                  </Button>
+                  <p className="text-xs text-slate-500">
+                    JPG, PNG or WEBP — optimized automatically. Recipients get a
+                    notification titled exactly as the notice title above.
+                  </p>
+                </div>
+              </FormField>
               <div className="flex justify-end gap-2">
                 {editingId ? (
                   <Button
@@ -453,7 +603,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                     Cancel
                   </Button>
                 ) : null}
-                <Button type="submit">
+                <Button
+                  type="submit"
+                  disabled={isUploadingImages || noticeMutation.isPending}
+                >
                   {editingId ? "Update Notice" : "Publish Notice"}
                 </Button>
               </div>
@@ -503,6 +656,9 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                         <div className="text-xs text-slate-500">
                           {notice.content}
                         </div>
+                        {notice.images?.length ? (
+                          <NoticeImageGallery images={notice.images} compact />
+                        ) : null}
                       </Td>
                       <Td>
                         {isTeacher
@@ -521,6 +677,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                 setForm({
                                   title: notice.title,
                                   content: notice.content,
+                                  images: notice.images ?? [],
                                   visibleTo: isTeacher
                                     ? ["STUDENT"]
                                     : notice.visibleTo,

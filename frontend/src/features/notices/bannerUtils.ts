@@ -30,11 +30,12 @@ export const formatResolution = (width?: number, height?: number): string => {
 
 export const uploadBannerImage = async (
   file: File,
+  endpoint: "/uploads/banners" | "/uploads/notices" = "/uploads/banners",
 ): Promise<UploadedBannerImage> => {
   const formData = new FormData();
   formData.append("image", file);
 
-  const response = await fetch(resolveApiUrl("/uploads/banners"), {
+  const response = await fetch(resolveApiUrl(endpoint), {
     method: "POST",
     body: formData,
     credentials: "include",

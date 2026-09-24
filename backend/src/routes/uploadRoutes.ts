@@ -134,9 +134,11 @@ router.post(
 );
 
 // ─── Notices / banners (alias) ──────────────────────────────────────────────
+// Notice board images: anyone who may create notices (teachers post to their students;
+// staff with a Notices module grant pass via the /uploads/notices module prefix).
 router.post(
   "/notices",
-  authorize(...adminRoles),
+  authorize(...adminRoles, "TEACHER"),
   uploadBannerImage,
   uploadBannerImageHandler
 );

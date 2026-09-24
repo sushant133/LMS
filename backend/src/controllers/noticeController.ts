@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
-import { hasInstitutionAccess, noticeSchema } from "@phit-erp/shared";
+import { hasInstitutionAccess, noticeSchema, type NoticeImage } from "@phit-erp/shared";
 import { Notice } from "../models/Notice.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
@@ -9,6 +9,8 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { getLinkedStudentIds } from "../utils/parentScope.js";
+import { deleteStoredMediaUrls } from "../utils/mediaCleanup.js";
+import { dispatchNoticeNotificationIfDue } from "../utils/noticeNotifications.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherClassSection,
@@ -25,6 +27,7 @@ type NoticeLean = {
   schoolId: Types.ObjectId;
   title: string;
   content: string;
+  images?: NoticeImage[];
   visibleTo: string[];
   publishDateBs: string;
   expiresAtBs?: string;
@@ -35,6 +38,33 @@ type NoticeLean = {
   createdBy: Types.ObjectId;
   createdAt?: Date;
   updatedAt?: Date;
+};
+
+/**
+ * Notice images must be files this school uploaded through /uploads/notices.
+ * Anything else is rejected so a notice can never point at (or later delete)
+ * another tenant's or another module's files.
+ */
+const assertNoticeImages = (req: Request, images: NoticeImage[] | undefined): NoticeImage[] => {
+  const prefix = `/uploads/${tenantObjectId(req).toString()}/notices/`;
+  const isOwnNoticeFile = (url?: string) => !url || (url.startsWith(prefix) && !url.includes(".."));
+
+  for (const image of images ?? []) {
+    if (!isOwnNoticeFile(image.url) || !isOwnNoticeFile(image.thumbnailUrl)) {
+      throw new ApiError(400, "Invalid notice image. Please upload the image again.");
+    }
+  }
+  return images ?? [];
+};
+
+const imageUrls = (images?: Array<{ url?: string | null; thumbnailUrl?: string | null }> | null) =>
+  (images ?? []).flatMap((image) => [image.url, image.thumbnailUrl]);
+
+/** Fire-and-forget: notification fan-out must never fail or slow the save itself. */
+const queueNoticeNotification = (noticeId: Types.ObjectId) => {
+  void dispatchNoticeNotificationIfDue(noticeId).catch((error) => {
+    console.error("Notice notification failed:", error);
+  });
 };
 
 const buildActiveNoticeFilter = (todayBs: string) => ({
@@ -205,6 +235,7 @@ export const createNotice = asyncHandler(async (req: Request, res: Response) => 
   const payload = noticeSchema.parse(req.body);
   ensureValidBsDate(payload.publishDateBs);
   if (payload.expiresAtBs) ensureValidBsDate(payload.expiresAtBs);
+  const images = assertNoticeImages(req, payload.images);
 
   let teacherId: string | undefined;
 
@@ -231,20 +262,29 @@ export const createNotice = asyncHandler(async (req: Request, res: Response) => 
 
   const notice = await Notice.create({
     ...payload,
+    images,
     schoolId: tenantObjectId(req),
     expiresAtBs: payload.expiresAtBs || undefined,
     teacherId,
-    createdBy: req.user?.userId
+    createdBy: req.user?.userId,
+    // Sent now if the publish date is today or earlier, otherwise by the scheduler.
+    notificationStatus: "PENDING"
   });
+
+  queueNoticeNotification(notice._id);
 
   return sendSuccess(res, "Notice created successfully", notice, 201);
 });
 
 export const updateNotice = asyncHandler(async (req: Request, res: Response) => {
+  const existing = await Notice.findOne(withTenantScope(req, { _id: req.params.id })).lean();
+  if (!existing) {
+    throw new ApiError(404, "Notice not found");
+  }
+
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
-    const existing = await Notice.findOne(withTenantScope(req, { _id: req.params.id })).lean();
-    if (!existing || existing.teacherId?.toString() !== scope.teacherId) {
+    if (existing.teacherId?.toString() !== scope.teacherId) {
       throw new ApiError(403, "You can only update your own notices");
     }
   }
@@ -252,6 +292,7 @@ export const updateNotice = asyncHandler(async (req: Request, res: Response) => 
   const payload = noticeSchema.parse(req.body);
   ensureValidBsDate(payload.publishDateBs);
   if (payload.expiresAtBs) ensureValidBsDate(payload.expiresAtBs);
+  const images = assertNoticeImages(req, payload.images);
 
   if (req.user?.role === "TEACHER") {
     payload.visibleTo = ["STUDENT"];
@@ -272,6 +313,7 @@ export const updateNotice = asyncHandler(async (req: Request, res: Response) => 
     withTenantScope(req, { _id: req.params.id }),
     {
       ...payload,
+      images,
       expiresAtBs: payload.expiresAtBs || undefined
     },
     { new: true }
@@ -280,6 +322,14 @@ export const updateNotice = asyncHandler(async (req: Request, res: Response) => 
   if (!notice) {
     throw new ApiError(404, "Notice not found");
   }
+
+  // Remove image files that were taken off the notice.
+  const keptUrls = new Set(imageUrls(images));
+  await deleteStoredMediaUrls(imageUrls(existing.images).filter((url) => url && !keptUrls.has(url)));
+
+  // A still-pending notice whose publish date was moved to today goes out now.
+  // Already-notified notices are not re-announced on every edit.
+  queueNoticeNotification(notice._id);
 
   return sendSuccess(res, "Notice updated successfully", notice);
 });
@@ -298,6 +348,8 @@ export const deleteNotice = asyncHandler(async (req: Request, res: Response) => 
   if (!notice) {
     throw new ApiError(404, "Notice not found");
   }
+
+  await deleteStoredMediaUrls(imageUrls(notice.images));
 
   return sendSuccess(res, "Notice deleted successfully");
 });

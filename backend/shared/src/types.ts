@@ -1220,6 +1220,14 @@ export interface NoticeRecord {
   schoolId: string;
   title: string;
   content: string;
+  images?: Array<{
+    url: string;
+    thumbnailUrl?: string;
+    originalName?: string;
+    width?: number;
+    height?: number;
+    size?: number;
+  }>;
   visibleTo: UserRole[];
   publishDateBs: string;
   expiresAtBs?: string;

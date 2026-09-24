@@ -748,9 +748,25 @@ export const feeCollectionSchema = z.object({
   notes: z.string().optional()
 });
 
+export const NOTICE_MAX_IMAGES = 10;
+
+export const noticeImageSchema = z.object({
+  url: z.string().min(1, "Image URL is required"),
+  thumbnailUrl: z.string().optional(),
+  originalName: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  size: z.number().optional()
+});
+
 export const noticeSchema = z.object({
-  title: z.string().min(1),
-  content: z.string().min(1),
+  // Not trimmed: the title is delivered verbatim as the notification title.
+  title: z.string().refine((value) => value.trim().length > 0, "Title is required"),
+  content: z.string().min(1, "Content is required"),
+  images: z
+    .array(noticeImageSchema)
+    .max(NOTICE_MAX_IMAGES, `You can attach up to ${NOTICE_MAX_IMAGES} images`)
+    .optional(),
   visibleTo: z.array(z.enum(USER_ROLES)).min(1),
   publishDateBs: bsDateSchema,
   expiresAtBs: bsDateSchema.optional().or(z.literal("")),
@@ -968,6 +984,7 @@ export type ResultSubmissionReviewInput = z.infer<typeof resultSubmissionReviewS
 export type FeeStructureInput = z.infer<typeof feeStructureSchema>;
 export type FeeCollectionInput = z.infer<typeof feeCollectionSchema>;
 export type NoticeInput = z.infer<typeof noticeSchema>;
+export type NoticeImage = z.infer<typeof noticeImageSchema>;
 export type BannerInput = z.infer<typeof bannerSchema>;
 export type InfrastructureInput = z.infer<typeof infrastructureSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;

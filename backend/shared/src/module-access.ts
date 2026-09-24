@@ -346,7 +346,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     key: "notices",
     label: "Notices",
     description: "Notice board management",
-    apiPrefixes: ["/notices"],
+    apiPrefixes: ["/notices", "/uploads/notices"],
     routePrefixes: ["/notices"],
     availableActions: ["view", "create", "edit", "delete", "publish"]
   },
