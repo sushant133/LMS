@@ -43,8 +43,6 @@ const PAGE_FOOTER_Y = PAGE_HEIGHT - 8;
 const SIGNATURE_LINE_Y = PAGE_FOOTER_Y - 13;
 /** Rows stop here, leaving room above the dotted lines to actually sign. */
 const TABLE_BOTTOM = SIGNATURE_LINE_Y - 16;
-/** Where the table starts on a continuation page (header + "continued" line), with slack. */
-const CONTINUATION_TABLE_TOP = 50;
 /** Room the Total / Present / Absent line needs under the last row. */
 const TOTALS_HEIGHT = 9;
 
@@ -289,20 +287,10 @@ export const buildAttendanceSheetPdf = async (input: AttendanceSheetInput): Prom
     let y = particularsBottom;
     pages.forEach((rowCount, pageIndex) => {
       if (pageIndex > 0) {
+        // Every page repeats page 1's header and particulars, so a loose page
+        // still says which subject, year, date and time it belongs to.
         doc.addPage();
-        y = drawHeader(doc, input, logo);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text(
-          fitText(
-            doc,
-            `Subject: ${subject.name}${subject.dateBs ? `   ·   Date: ${subject.dateBs} BS` : ""}   (continued)`,
-            CONTENT_WIDTH,
-          ),
-          MARGIN_X,
-          y,
-        );
-        y = Math.max(y + 4, CONTINUATION_TABLE_TOP - 0.01);
+        y = drawParticulars(doc, input, subject, drawHeader(doc, input, logo));
       }
       y = drawTableHeader(doc, y);
       for (let i = 0; i < rowCount; i += 1) {
