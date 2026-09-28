@@ -6,7 +6,9 @@ import {
   applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
   expandModuleAccessMap,
+  getDepartmentModuleAccess,
   getInstitutionPermissions,
+  isDepartmentAccountType,
   loginSchema,
   normalizeUserRole,
   parentSelfRegisterSchema,
@@ -120,6 +122,12 @@ const getSafeUser = async (userId: string) => {
       ...secondaryRoles
     ]);
   }
+  // Department Accounts: the department type alone decides the module map
+  const rawDepartment = (user as { departmentAccount?: unknown }).departmentAccount;
+  const departmentAccount = isDepartmentAccountType(rawDepartment) ? rawDepartment : null;
+  if (departmentAccount) {
+    rawAccess = getDepartmentModuleAccess(departmentAccount);
+  }
   const moduleAccess = expandModuleAccessMap(rawAccess);
   const moduleAccessConfigured = Object.keys(rawAccess).length > 0;
 
@@ -143,7 +151,8 @@ const getSafeUser = async (userId: string) => {
     secondaryRoles,
     personalFinanceAccess: Boolean(
       (user as { personalFinanceAccess?: boolean }).personalFinanceAccess
-    )
+    ),
+    departmentAccount
   };
 };
 

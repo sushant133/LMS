@@ -279,6 +279,14 @@ export const updateUserModuleAccess = async (
     throw new ApiError(400, "Module access cannot be restricted for System Administrator accounts");
   }
 
+  // Department Accounts get their access from the department type (Settings → Department Accounts)
+  if (user.departmentAccount) {
+    throw new ApiError(
+      400,
+      "Department Account access is fixed by its department. Manage it from Settings → Department Accounts."
+    );
+  }
+
   /**
    * No self-granting. "User Management" WRITE is a delegated grant, so without
    * this a staff account holding it could PUT its own id and switch every

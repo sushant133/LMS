@@ -26,10 +26,14 @@ import {
   canAccessAttendanceAdminHub,
   canAccessExaminationManagement,
   canAccessModule,
+  canDepartmentAccessRoute,
   canUseAcademicManagementAdminHub,
+  DEPARTMENT_ACCOUNT_DESCRIPTIONS,
+  DEPARTMENT_ACCOUNT_LABELS,
   hasExtraAdminModuleGrants,
   hasInstitutionAccess,
   type CollegeStaffCategory,
+  type DepartmentAccountType,
   type CollegeStaffRecord,
   type DashboardHighlight,
   type DashboardMetric,
@@ -1596,6 +1600,32 @@ const NoticesPanel = ({ notices, title }: { notices: NoticeRecord[]; title?: str
   </Card>
 );
 
+/** Landing shortcuts for Department Accounts (filtered again by department access). */
+const DEPARTMENT_QUICK_ACTIONS: Record<DepartmentAccountType, Array<{ label: string; href: string }>> = {
+  ACCOUNTING: [
+    { label: "Accounting", href: "/accounting" },
+    { label: "Finance Management", href: "/finance" },
+    { label: "HR & Payroll", href: "/hr" },
+    { label: "Academic Calendar", href: "/academic-calendar" }
+  ],
+  EXAMINATION: [
+    { label: "Examination Management", href: "/exams-view" },
+    { label: "Academic Calendar", href: "/academic-calendar" }
+  ],
+  ACADEMICS: [
+    { label: "Students", href: "/students" },
+    { label: "College Staff", href: "/college-staff" },
+    { label: "Attendance", href: "/attendance-view" },
+    { label: "Academic Structure", href: "/academics" },
+    { label: "Academic Management", href: "/academic-management-view" },
+    { label: "Timetable", href: "/timetable-view" },
+    { label: "Notices", href: "/notices" },
+    { label: "Academic Calendar", href: "/academic-calendar" },
+    { label: "Library", href: "/library" },
+    { label: "Reports", href: "/reports" }
+  ]
+};
+
 const QuickActions = ({ actions }: { actions: Array<{ label: string; href: string }> }) => (
   <div className="flex flex-wrap gap-2">
     {actions.map((action) => (
@@ -1986,6 +2016,31 @@ export const DashboardPage = () => {
           <NotificationsPanel notifications={data.notifications} unreadCount={unreadCount} />
           <NoticesPanel notices={data.notices} />
         </div>
+      </PageContent>
+    );
+  }
+
+  // Department Accounts (Settings → Department Accounts): department-only landing
+  if (user.departmentAccount) {
+    const department = user.departmentAccount;
+    const departmentActions = DEPARTMENT_QUICK_ACTIONS[department].filter((action) =>
+      canDepartmentAccessRoute(department, action.href, "nav"),
+    );
+    return (
+      <PageContent className="space-y-5 sm:space-y-6">
+        <DashboardBannerPopup banners={data.banners} />
+        <DashboardHero
+          title={`${DEPARTMENT_ACCOUNT_LABELS[department]} Department`}
+          description={DEPARTMENT_ACCOUNT_DESCRIPTIONS[department]}
+          userName={user.fullName}
+          roleLabel={`${DEPARTMENT_ACCOUNT_LABELS[department]} Account`}
+          roleSubtitle={roleSubtitle}
+          institutionName={institutionName}
+          unreadCount={unreadCount}
+        />
+        <StatGrid stats={statsWithLiveUnread} />
+        <AcademicCalendarWidgets />
+        <QuickActions actions={departmentActions} />
       </PageContent>
     );
   }

@@ -12,6 +12,7 @@ import { env } from "../config/env.js";
 import { User } from "../models/User.js";
 import { enforceInstitutionReadOnly } from "./readOnlyGuard.js";
 import { enforceModuleAccess } from "./moduleAccessGuard.js";
+import { enforceDepartmentAccountScope } from "./departmentAccountGuard.js";
 import { ApiError } from "../utils/apiError.js";
 import {
   getUserModuleAccessMap,
@@ -38,7 +39,7 @@ const loadUserFromCookie = async (req: Request): Promise<boolean> => {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
 
     const dbUser = await User.findById(decoded.userId)
-      .select("isActive role email schoolId")
+      .select("isActive role email schoolId departmentAccount")
       .lean();
 
     if (!dbUser || !dbUser.isActive) {
@@ -50,7 +51,8 @@ const loadUserFromCookie = async (req: Request): Promise<boolean> => {
       userId: decoded.userId,
       role: normalizeUserRole(dbUser.role as string),
       email: dbUser.email || decoded.email,
-      schoolId: dbUser.schoolId ? dbUser.schoolId.toString() : null
+      schoolId: dbUser.schoolId ? dbUser.schoolId.toString() : null,
+      departmentAccount: dbUser.departmentAccount ?? null
     };
     return true;
   } catch {
@@ -70,9 +72,12 @@ export const protect = (req: Request, _res: Response, next: NextFunction): void 
       return next(new ApiError(401, "Authentication required"));
     }
 
-    return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
-      if (err) return next(err);
-      void enforceModuleAccess(req, _res, next);
+    return enforceDepartmentAccountScope(req, _res, (scopeErr?: unknown) => {
+      if (scopeErr) return next(scopeErr);
+      return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
+        if (err) return next(err);
+        void enforceModuleAccess(req, _res, next);
+      });
     });
   })();
 };

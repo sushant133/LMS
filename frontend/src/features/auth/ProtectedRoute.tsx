@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import {
+  canDepartmentAccessRoute,
   normalizeUserRole,
   type ModuleAccessMap,
   type UserRole,
@@ -86,6 +87,18 @@ export const ProtectedRoute = ({
     location.pathname.startsWith("/finance") &&
     !["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"].includes(normalizedRole) &&
     !user.personalFinanceAccess
+  ) {
+    const fallback = getRoleRedirectPath(user.role);
+    if (!fallback || fallback === location.pathname) {
+      return <PageLoadingState />;
+    }
+    return <Navigate to={fallback} replace />;
+  }
+
+  // Department Accounts (Settings → Department Accounts) stay inside their department
+  if (
+    user.departmentAccount &&
+    !canDepartmentAccessRoute(user.departmentAccount, location.pathname)
   ) {
     const fallback = getRoleRedirectPath(user.role);
     if (!fallback || fallback === location.pathname) {

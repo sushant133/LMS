@@ -82,7 +82,8 @@ const findManagedAdmin = async (req: Request, adminId: string) => {
   const admin = await User.findOne({
     _id: adminId,
     schoolId,
-    role: "COLLEGE_ADMIN"
+    role: "COLLEGE_ADMIN",
+    departmentAccount: null
   });
 
   if (!admin) {

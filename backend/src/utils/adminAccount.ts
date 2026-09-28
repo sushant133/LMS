@@ -23,7 +23,9 @@ export const restoreDeletedAdminEmail = (email: string): string => fromDeletedAd
 export const buildAdminListFilter = (schoolId: Types.ObjectId, includeDeleted = false) => {
   const filter: Record<string, unknown> = {
     schoolId,
-    role: "COLLEGE_ADMIN" as UserRole
+    role: "COLLEGE_ADMIN" as UserRole,
+    // Department Accounts are managed from Settings, not Admin Management
+    departmentAccount: null
   };
 
   if (!includeDeleted) {

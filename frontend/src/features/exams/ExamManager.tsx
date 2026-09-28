@@ -61,6 +61,12 @@ const AdmitCardPanel = lazy(() =>
   })),
 );
 
+const AttendanceSheetPanel = lazy(() =>
+  import("features/exams/AttendanceSheetPanel").then((module) => ({
+    default: module.AttendanceSheetPanel,
+  })),
+);
+
 const PrintResultsPanel = lazy(() =>
   import("features/exams/PrintResultsPanel").then((module) => ({
     default: module.PrintResultsPanel,
@@ -476,6 +482,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const [adminSection, setAdminSection] = useState<
     | "manage"
     | "admit-card"
+    | "attendance-sheet"
     | "print-results"
     | "exam-records"
     | "enter-marks"
@@ -1290,6 +1297,14 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
             >
               Admit Card
             </Button>
+            {/* Per-subject candidate signature sheets for the exam hall. */}
+            <Button
+              size="sm"
+              variant={adminSection === "attendance-sheet" ? "default" : "outline"}
+              onClick={() => setAdminSection("attendance-sheet")}
+            >
+              Attendance Sheet
+            </Button>
             {/* Read-only history — open any past exam of any batch/year on its own. */}
             <Button
               size="sm"
@@ -1459,6 +1474,30 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                   name: String(row.name ?? ""),
                   classId: row.classId ? String(row.classId) : undefined,
                 }))}
+                students={studentsQuery.data ?? []}
+              />
+            </Suspense>
+          ) : null}
+
+          {adminSection === "attendance-sheet" ? (
+            <Suspense fallback={<LoadingState />}>
+              <AttendanceSheetPanel
+                isCollege={isCollege}
+                exams={examsQuery.data ?? []}
+                batches={(batchesQuery.data ?? []).map((batch) => ({
+                  _id: String(batch._id),
+                  name: String(batch.name ?? ""),
+                }))}
+                years={(yearsQuery.data ?? []).map((year) => ({
+                  _id: String(year._id),
+                  name: String(year.name ?? ""),
+                  batchId: year.batchId ? String(year.batchId) : undefined,
+                }))}
+                classes={(classesQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                }))}
+                subjects={subjectsQuery.data ?? []}
                 students={studentsQuery.data ?? []}
               />
             </Suspense>

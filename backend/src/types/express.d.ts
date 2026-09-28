@@ -1,4 +1,4 @@
-import type { UserRole } from "@phit-erp/shared";
+import type { DepartmentAccountType, UserRole } from "@phit-erp/shared";
 
 declare global {
   namespace Express {
@@ -7,6 +7,8 @@ declare global {
       role: UserRole;
       email: string;
       schoolId?: string | null;
+      /** Set only for Department Accounts (Settings → Department Accounts). */
+      departmentAccount?: DepartmentAccountType | null;
     }
 
     interface Request {

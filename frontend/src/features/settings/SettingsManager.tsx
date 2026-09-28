@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_DAILY_ATTENDANCE_CONFIG,
   hasInstitutionAccess,
+  isInstitutionAdmin,
   settingsSchema,
   type SchoolSettingsRecord,
   type SettingsInput,
@@ -22,6 +23,7 @@ import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
 import { useCanWriteModule } from "hooks/useModuleAccess";
+import { DepartmentAccountsPanel } from "./DepartmentAccountsPanel";
 
 const defaultSettingsValue: SettingsInput = {
   schoolName: "",
@@ -71,6 +73,9 @@ export const SettingsManager = () => {
   const readOnlyMessage = isReadOnly
     ? "Settings can only be changed when Module Access grants Manage on Settings."
     : "";
+  /** Department Accounts: institution Administrator / System Administrator only. */
+  const canManageDepartmentAccounts =
+    isInstitutionAdmin(user?.role ?? "") && !user?.departmentAccount;
   const [form, setForm] = useState<SettingsInput>(defaultSettingsValue);
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -656,6 +661,8 @@ export const SettingsManager = () => {
           </Button>
         </div>
       </form>
+
+      {canManageDepartmentAccounts ? <DepartmentAccountsPanel /> : null}
     </div>
   );
 };

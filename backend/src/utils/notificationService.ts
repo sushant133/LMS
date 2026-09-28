@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Request } from "express";
-import type { NotificationChannel, NotificationType } from "@phit-erp/shared";
+import {
+  isNotificationForDepartment,
+  type NotificationChannel,
+  type NotificationType
+} from "@phit-erp/shared";
 import { Notification } from "../models/Notification.js";
 import { NotificationDedupe } from "../models/NotificationDedupe.js";
 import { User } from "../models/User.js";
@@ -106,8 +110,19 @@ export const sendNotification = async (input: SendNotificationInput) => {
     return null;
   }
 
-  const user = await User.findById(recipientId).select("phone schoolId isActive").lean();
+  const user = await User.findById(recipientId)
+    .select("phone schoolId isActive departmentAccount")
+    .lean();
   if (!user || user.isActive === false) {
+    return null;
+  }
+
+  // Department Accounts receive "notify the administrators" fan-outs as Administrators;
+  // keep only the ones that concern their own department.
+  if (
+    user.departmentAccount &&
+    !isNotificationForDepartment(user.departmentAccount, input.type ?? "GENERAL")
+  ) {
     return null;
   }
 

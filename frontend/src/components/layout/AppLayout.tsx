@@ -10,6 +10,7 @@ import {
   canAccessExaminationManagement,
   canAccessModule,
   canAccessStaffDirectory,
+  canDepartmentAccessRoute,
   canManageInstitution,
   canUseAcademicManagementAdminHub,
   hasInstitutionAccess,
@@ -807,6 +808,11 @@ export const AppLayout = () => {
   const isModuleAllowedForNav = (path: string): boolean => {
     if (isUnrestrictedAdmin) return true;
 
+    // Department Accounts: only their own department's menu items
+    if (user.departmentAccount) {
+      return canDepartmentAccessRoute(user.departmentAccount, path, "nav");
+    }
+
     // Parents: school-level portal access matrix (Parent Management)
     if (effectiveRoles.has("PARENT") && normalizedRole === "PARENT") {
       if (path.startsWith("/dashboard")) return true;
@@ -947,6 +953,12 @@ export const AppLayout = () => {
         }
         return isModuleAllowedForNav(item.path);
       })
+      // Department Accounts: special-cased items above must not slip through
+      .filter(
+        (item) =>
+          !user.departmentAccount ||
+          canDepartmentAccessRoute(user.departmentAccount, item.path, "nav"),
+      )
       .map((item) => ({
         ...item,
         path:
@@ -1015,6 +1027,7 @@ export const AppLayout = () => {
     JSON.stringify(moduleAccessMap),
     hasTeachingCapability,
     hasAdminCapability,
+    user.departmentAccount,
   ]);
 
   const generalItems = filteredItems.filter((i) => i.section === "general");

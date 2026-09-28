@@ -1,8 +1,10 @@
 import bcrypt from "bcryptjs";
 import mongoose, { Schema, type HydratedDocument, type Model } from "mongoose";
 import {
+  DEPARTMENT_ACCOUNT_TYPES,
   MODULE_PERMISSION_ACTIONS,
   USER_ROLES,
+  type DepartmentAccountType,
   type UserRole
 } from "@phit-erp/shared";
 
@@ -45,6 +47,11 @@ export interface UserDocument {
    * Default false — staff never see Finance until Admin enables it.
    */
   personalFinanceAccess?: boolean;
+  /**
+   * Department Account (Settings → Department Accounts): a shared Administrator
+   * login confined to one department. Null/unset for every other account.
+   */
+  departmentAccount?: DepartmentAccountType | null;
   /**
    * Mobile device FCM tokens for system push notifications.
    * Never expose in API user profiles — server-only.
@@ -96,6 +103,13 @@ const userSchema = new Schema<UserDocument, UserModel>(
     personalFinanceAccess: {
       type: Boolean,
       default: false,
+      index: true
+    },
+    /** Department Account scope; null for all regular accounts */
+    departmentAccount: {
+      type: String,
+      enum: [...DEPARTMENT_ACCOUNT_TYPES, null],
+      default: null,
       index: true
     },
     /** Mobile FCM device tokens (server-only; excluded from auth profile responses) */

@@ -4,6 +4,7 @@ import {
   canManageInstitution,
   NOTICE_MAX_IMAGES,
   noticeSchema,
+  USER_ROLE_LABELS,
   USER_ROLES,
   type NoticeInput,
   type NoticeRecord,
@@ -353,13 +354,14 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                   </FormField>
                 ) : (
                   <FormField label="Visible To">
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2">
                       {USER_ROLES.map((role) => (
                         <label
                           key={role}
-                          className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          className="flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm"
                         >
                           <input
+                            className="h-4 w-4 shrink-0"
                             checked={form.visibleTo.includes(role)}
                             type="checkbox"
                             onChange={(event) =>
@@ -373,7 +375,9 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                               }))
                             }
                           />
-                          {role}
+                          <span className="min-w-0 break-words leading-snug">
+                            {USER_ROLE_LABELS[role]}
+                          </span>
                         </label>
                       ))}
                     </div>
@@ -663,7 +667,9 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                       <Td>
                         {isTeacher
                           ? formatTeacherAudience(notice)
-                          : notice.visibleTo.join(", ")}
+                          : notice.visibleTo
+                              .map((role) => USER_ROLE_LABELS[role] ?? role)
+                              .join(", ")}
                       </Td>
                       <Td>{notice.publishDateBs}</Td>
                       <Td className="text-right">

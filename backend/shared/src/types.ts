@@ -281,6 +281,11 @@ export interface UserProfile {
    * (create/view own transactions only). Controlled by Admin / Superadmin.
    */
   personalFinanceAccess?: boolean;
+  /**
+   * Department Account scope (see department-accounts.ts). Set only for the
+   * shared Accounting / Examination / Academics logins created in Settings.
+   */
+  departmentAccount?: "ACCOUNTING" | "EXAMINATION" | "ACADEMICS" | null;
   createdAt?: string;
   updatedAt?: string;
 }
