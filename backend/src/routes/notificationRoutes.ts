@@ -1,5 +1,7 @@
 import { Router } from "express";
 import {
+  clearAllNotifications,
+  clearNotification,
   getUnreadNotificationCount,
   listNotifications,
   markAllNotificationsRead,
@@ -26,7 +28,9 @@ router.get("/unread-count", getUnreadNotificationCount);
 
 // Static write routes BEFORE parameterized /:id routes
 router.put("/read-all", markAllNotificationsRead);
+router.delete("/", clearAllNotifications);
 router.post("/send", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), sendManualNotification);
 router.put("/:id/read", markNotificationRead);
+router.delete("/:id", clearNotification);
 
 export default router;

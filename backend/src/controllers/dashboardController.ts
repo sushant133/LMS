@@ -622,6 +622,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       message: notification.message,
       type: notification.type,
       read: notification.read,
+      metadata: (notification.metadata as Record<string, string> | undefined) ?? undefined,
       createdAt: notification.createdAt?.toISOString()
     })),
     unreadNotificationCount,

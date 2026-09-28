@@ -10,7 +10,10 @@ import { ApiError } from "../utils/apiError.js";
 import { compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { getLinkedStudentIds } from "../utils/parentScope.js";
 import { deleteStoredMediaUrls } from "../utils/mediaCleanup.js";
-import { dispatchNoticeNotificationIfDue } from "../utils/noticeNotifications.js";
+import {
+  dispatchNoticeNotificationAfterEdit,
+  dispatchNoticeNotificationIfDue
+} from "../utils/noticeNotifications.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherClassSection,
@@ -61,8 +64,9 @@ const imageUrls = (images?: Array<{ url?: string | null; thumbnailUrl?: string |
   (images ?? []).flatMap((image) => [image.url, image.thumbnailUrl]);
 
 /** Fire-and-forget: notification fan-out must never fail or slow the save itself. */
-const queueNoticeNotification = (noticeId: Types.ObjectId) => {
-  void dispatchNoticeNotificationIfDue(noticeId).catch((error) => {
+const queueNoticeNotification = (noticeId: Types.ObjectId, afterEdit = false) => {
+  const dispatch = afterEdit ? dispatchNoticeNotificationAfterEdit : dispatchNoticeNotificationIfDue;
+  void dispatch(noticeId).catch((error) => {
     console.error("Notice notification failed:", error);
   });
 };
@@ -328,8 +332,8 @@ export const updateNotice = asyncHandler(async (req: Request, res: Response) => 
   await deleteStoredMediaUrls(imageUrls(existing.images).filter((url) => url && !keptUrls.has(url)));
 
   // A still-pending notice whose publish date was moved to today goes out now.
-  // Already-notified notices are not re-announced on every edit.
-  queueNoticeNotification(notice._id);
+  // Already-notified notices only reach people newly added to the audience.
+  queueNoticeNotification(notice._id, true);
 
   return sendSuccess(res, "Notice updated successfully", notice);
 });

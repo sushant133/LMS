@@ -1,5 +1,6 @@
 import type { Types } from "mongoose";
 import { Notice } from "../models/Notice.js";
+import { NotificationDedupe } from "../models/NotificationDedupe.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";
@@ -106,9 +107,65 @@ const resolveRecipientUserIds = async (notice: DispatchableNotice): Promise<stri
     }
   }
 
-  // The author does not need to be told about their own notice.
-  recipients.delete(notice.createdBy.toString());
+  // The author is included when their own role is in the audience, so the notice
+  // shows up in their inbox like everyone else's.
   return [...recipients];
+};
+
+const noticeDedupeKey = (noticeId: Types.ObjectId | string) => `notice:${noticeId.toString()}`;
+
+/** Send the notice notification to the given people (skipping any already notified). */
+const deliverNoticeNotification = async (notice: DispatchableNotice, onlyNewRecipients: boolean) => {
+  const dedupeKey = noticeDedupeKey(notice._id);
+  let recipientIds = await resolveRecipientUserIds(notice);
+
+  if (onlyNewRecipients && recipientIds.length > 0) {
+    // Every delivery leaves a dedupe row, so it doubles as "already received".
+    const alreadyNotified = await NotificationDedupe.find({
+      dedupeKey,
+      recipientUserId: { $in: recipientIds }
+    })
+      .select("recipientUserId")
+      .lean();
+    const seen = new Set(alreadyNotified.map((row) => row.recipientUserId.toString()));
+    recipientIds = recipientIds.filter((id) => !seen.has(id));
+  }
+
+  if (recipientIds.length === 0) return;
+
+  const schoolId = notice.schoolId.toString();
+  const message = buildMessage(notice);
+  const firstImage = notice.images?.[0];
+
+  const metadata: Record<string, string> = {
+    noticeId: notice._id.toString(),
+    path: "/notices"
+  };
+  if (firstImage?.url) metadata.imageUrl = firstImage.url;
+  if (firstImage?.thumbnailUrl) metadata.thumbnailUrl = firstImage.thumbnailUrl;
+
+  // allSettled: one bad recipient must not stop the rest of the fan-out.
+  const results = await Promise.allSettled(
+    recipientIds.map((recipientUserId) =>
+      sendNotification({
+        schoolId,
+        recipientUserId,
+        title: notice.title,
+        message,
+        type: "NOTICE",
+        metadata,
+        // One delivery per notice per person — the atomic claim / filter above is the main guard.
+        dedupeKey
+      })
+    )
+  );
+  const failed = results.filter((result) => result.status === "rejected");
+  if (failed.length > 0) {
+    console.error(
+      `Notice notification: ${failed.length} of ${recipientIds.length} deliveries failed`,
+      (failed[0] as PromiseRejectedResult).reason
+    );
+  }
 };
 
 /**
@@ -133,35 +190,28 @@ export const dispatchNoticeNotificationIfDue = async (noticeId: Types.ObjectId |
 
   if (!claimed) return false;
 
-  const notice = claimed as unknown as DispatchableNotice;
-  const schoolId = notice.schoolId.toString();
-  const recipientIds = await resolveRecipientUserIds(notice);
-  const message = buildMessage(notice);
-  const firstImage = notice.images?.[0];
-
-  const metadata: Record<string, string> = {
-    noticeId: notice._id.toString(),
-    path: "/notices"
-  };
-  if (firstImage?.url) metadata.imageUrl = firstImage.url;
-  if (firstImage?.thumbnailUrl) metadata.thumbnailUrl = firstImage.thumbnailUrl;
-
-  await Promise.all(
-    recipientIds.map((recipientUserId) =>
-      sendNotification({
-        schoolId,
-        recipientUserId,
-        title: notice.title,
-        message,
-        type: "NOTICE",
-        metadata,
-        // One delivery per notice per person — the atomic claim above is the main guard.
-        dedupeKey: `notice:${notice._id.toString()}`
-      })
-    )
-  );
-
+  await deliverNoticeNotification(claimed as unknown as DispatchableNotice, false);
   return true;
+};
+
+/**
+ * After a notice is edited: deliver it if it is now due, or — when it was already
+ * sent — notify only people newly added to its audience (e.g. an extra role, class
+ * or section). Existing recipients are never re-notified for an edit.
+ */
+export const dispatchNoticeNotificationAfterEdit = async (noticeId: Types.ObjectId | string): Promise<void> => {
+  if (await dispatchNoticeNotificationIfDue(noticeId)) return;
+
+  const todayBs = getTodayBs();
+  const notice = await Notice.findOne({
+    _id: noticeId,
+    notificationStatus: "SENT",
+    publishDateBs: { $lte: todayBs },
+    $or: [{ expiresAtBs: { $exists: false } }, { expiresAtBs: null }, { expiresAtBs: "" }, { expiresAtBs: { $gte: todayBs } }]
+  }).lean();
+  if (!notice) return;
+
+  await deliverNoticeNotification(notice as unknown as DispatchableNotice, true);
 };
 
 /** Periodic sweep: deliver future-dated notices once their publish date arrives. */

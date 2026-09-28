@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   BarChart3,
@@ -65,6 +65,7 @@ import { DashboardSchedulePanels } from "features/dashboard/DashboardSchedulePan
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { applyNotificationReadLocally, invalidateNotificationQueries } from "lib/notificationQueries";
+import { resolveNotificationTarget } from "lib/notificationTarget";
 import {
   buildPrintInstitutionHeaderHtml,
   getPrintInstitutionBranding,
@@ -1455,6 +1456,8 @@ const NotificationsPanel = ({
   unreadCount: number;
 }) => {
   const unreadNotifications = notifications.filter((notification) => !notification.read);
+  const navigate = useNavigate();
+  const { user } = useAuth();
 
   const markRead = useMutation({
     mutationFn: (id: string) => unwrap(api.put(`/notifications/${id}/read`)),
@@ -1493,7 +1496,7 @@ const NotificationsPanel = ({
             Latest Notifications
           </CardTitle>
           <p className="mt-1.5 text-sm text-slate-500">
-            Alerts clear from your inbox after you open them.
+            Tap an alert to open it. Clear alerts from the Notifications page.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1504,7 +1507,7 @@ const NotificationsPanel = ({
           ) : null}
           {unreadCount > 0 ? (
             <Button size="sm" variant="secondary" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
-              Clear all
+              Mark all read
             </Button>
           ) : null}
         </div>
@@ -1523,8 +1526,10 @@ const NotificationsPanel = ({
                 "w-full rounded-2xl border border-slate-200/90 bg-white px-4 py-3.5 text-left transition",
                 "hover:border-slate-300 hover:bg-slate-50/60 hover:shadow-sm",
               )}
-              onClick={() => markRead.mutate(notification._id)}
-              disabled={markRead.isPending}
+              onClick={() => {
+                markRead.mutate(notification._id);
+                navigate(resolveNotificationTarget(notification, user) ?? "/notifications");
+              }}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">

@@ -1347,6 +1347,7 @@ export interface DashboardNotificationItem {
   message: string;
   type: string;
   read: boolean;
+  metadata?: Record<string, string>;
   createdAt?: string;
 }
 

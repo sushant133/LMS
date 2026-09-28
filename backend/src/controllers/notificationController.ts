@@ -48,10 +48,44 @@ export const getUnreadNotificationCount = asyncHandler(async (req: Request, res:
 });
 
 /**
- * Mark one notification as read and remove it from the inbox.
- * Read notifications are cleared immediately (not kept as a "read" history list).
+ * Mark one notification as seen. It stays in the inbox (un-highlighted) until the
+ * user explicitly clears it.
  */
 export const markNotificationRead = asyncHandler(async (req: Request, res: Response) => {
+  const id = String(req.params.id ?? "");
+  if (!id) throw new ApiError(400, "Notification id is required");
+
+  const notification = await Notification.findOneAndUpdate(
+    buildPersonalNotificationFilter(req, { _id: id }),
+    { $set: { read: true } },
+    { new: true }
+  ).lean();
+
+  if (!notification) throw new ApiError(404, "Notification not found");
+  return sendSuccess(
+    res,
+    "Notification marked as read",
+    serializeNotification(notification as Parameters<typeof serializeNotification>[0])
+  );
+});
+
+/**
+ * Mark every notification in the personal inbox as seen (nothing is removed).
+ */
+export const markAllNotificationsRead = asyncHandler(async (req: Request, res: Response) => {
+  const result = await Notification.updateMany(
+    buildPersonalNotificationFilter(req, { read: false }),
+    { $set: { read: true } }
+  );
+  return sendSuccess(res, "All notifications marked as read", {
+    modifiedCount: result.modifiedCount ?? 0
+  });
+});
+
+/**
+ * Remove one notification from the inbox (explicit "Clear").
+ */
+export const clearNotification = asyncHandler(async (req: Request, res: Response) => {
   const id = String(req.params.id ?? "");
   if (!id) throw new ApiError(400, "Notification id is required");
 
@@ -62,19 +96,17 @@ export const markNotificationRead = asyncHandler(async (req: Request, res: Respo
   if (!notification) throw new ApiError(404, "Notification not found");
   return sendSuccess(res, "Notification cleared", {
     ...serializeNotification(notification as Parameters<typeof serializeNotification>[0]),
-    read: true,
     cleared: true
   });
 });
 
 /**
- * Clear the entire personal inbox (all notifications for this user).
+ * Clear the entire personal inbox (explicit "Clear all").
  */
-export const markAllNotificationsRead = asyncHandler(async (req: Request, res: Response) => {
+export const clearAllNotifications = asyncHandler(async (req: Request, res: Response) => {
   const result = await Notification.deleteMany(buildPersonalNotificationFilter(req, {}));
   return sendSuccess(res, "All notifications cleared", {
-    deletedCount: result.deletedCount ?? 0,
-    modifiedCount: result.deletedCount ?? 0
+    deletedCount: result.deletedCount ?? 0
   });
 });
 
