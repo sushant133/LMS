@@ -5,6 +5,7 @@ import {
   activeSchoolSchema,
   applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
+  withUnconfiguredTeacherDefault,
   expandModuleAccessMap,
   getDepartmentModuleAccess,
   getInstitutionPermissions,
@@ -97,7 +98,10 @@ const getSafeUser = async (userId: string) => {
       ? (user.schoolId as unknown as SchoolRecord)
       : null;
 
-  let rawAccess = mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess);
+  let rawAccess = withUnconfiguredTeacherDefault(
+    mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess),
+    normalizeUserRole(user.role as string)
+  );
   const rawActions = (() => {
     const raw = (user as { moduleActions?: unknown }).moduleActions;
     if (!raw) return {};

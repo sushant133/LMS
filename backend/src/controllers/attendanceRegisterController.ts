@@ -9,6 +9,7 @@ import {
   canApproveRecords,
   DAILY_ATTENDANCE_STATUSES,
   EMPLOYEE_ATTENDANCE_STATUSES,
+  hasConfiguredModuleAccess,
   hasInstitutionAccess,
   isSystemAdministrator,
   normalizeUserRole,
@@ -211,16 +212,18 @@ const resolveAccess = async (req: Request): Promise<AccessCtx> => {
     role === "TEACHER" ||
     role === "STUDENT";
 
-  const canTeacherRegister =
-    adminLike ||
-    canAccessModule(moduleAccess, "teacher-attendance") ||
-    canAccessModule(moduleAccess, "attendance") ||
-    role === "TEACHER";
+  /*
+   * Teacher / Staff registers are HR records: Administrators plus people an
+   * admin explicitly granted the module to. An unsaved (empty) Module Access
+   * map resolves to legacy full access, so it must not count as a grant, and
+   * classroom "attendance" (every teacher's baseline) is not an HR grant.
+   */
+  const hasSavedGrant = (key: "teacher-attendance" | "staff-attendance"): boolean =>
+    hasConfiguredModuleAccess(moduleAccess) && canAccessModule(moduleAccess, key);
 
-  const canStaffRegister =
-    adminLike ||
-    canAccessModule(moduleAccess, "staff-attendance") ||
-    role === "COLLEGE_STAFF";
+  const canTeacherRegister = adminLike || hasSavedGrant("teacher-attendance");
+
+  const canStaffRegister = adminLike || hasSavedGrant("staff-attendance");
 
   return {
     adminLike,
@@ -628,7 +631,6 @@ const loadEmployeeRegister = async (
   const department = q(req, "department");
   const designation = q(req, "designation");
   const search = q(req, "search").toLowerCase();
-  const role = normalizeUserRole(req.user?.role ?? "");
 
   type Person = {
     id: string;
@@ -646,13 +648,6 @@ const loadEmployeeRegister = async (
       schoolId,
       status: { $ne: "INACTIVE" }
     };
-    if (role === "TEACHER" && !access.adminLike) {
-      const t = await Teacher.findOne({ schoolId, user: req.user!.userId })
-        .select("_id")
-        .lean();
-      if (!t) throw new ApiError(404, "Teacher profile not found");
-      filter._id = t._id;
-    }
     const teachers = await Teacher.find(filter)
       .populate("user", "fullName profilePhotoUrl designation department")
       .select("user teacherCode qualification photoUrl")
@@ -680,13 +675,6 @@ const loadEmployeeRegister = async (
       schoolId,
       $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }]
     };
-    if (role === "COLLEGE_STAFF" && !access.adminLike) {
-      const s = await CollegeStaff.findOne({ schoolId, user: req.user!.userId })
-        .select("_id")
-        .lean();
-      if (!s) throw new ApiError(404, "Staff profile not found");
-      filter._id = s._id;
-    }
     const staff = await CollegeStaff.find(filter)
       .populate("user", "fullName profilePhotoUrl")
       .select("user staffId department designation photoUrl")
@@ -838,6 +826,13 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
 
     const schoolId = tenantObjectId(req);
     const tab = (q(req, "tab") || "STUDENT").toUpperCase() as AttendanceRegisterTab;
+    if (
+      (tab === "TEACHER" && !access.canTeacherRegister) ||
+      (tab === "STAFF" && !access.canStaffRegister) ||
+      (tab === "STUDENT" && !access.canStudentRegister)
+    ) {
+      throw new ApiError(403, "Access denied");
+    }
     const personId = q(req, "personId");
     const dateBs = q(req, "dateBs");
     if (!personId || !dateBs) {

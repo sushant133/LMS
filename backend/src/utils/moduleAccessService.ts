@@ -2,6 +2,7 @@ import type { Request } from "express";
 import {
   applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
+  withUnconfiguredTeacherDefault,
   expandModuleAccessMap,
   expandModuleActionsMap,
   hasConfiguredModuleAccess,
@@ -135,7 +136,7 @@ export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAcce
   if (isModuleAccessUnrestricted(user.role as string)) {
     return {};
   }
-  let map = mapFromUserDoc(user.moduleAccess);
+  let map = withUnconfiguredTeacherDefault(mapFromUserDoc(user.moduleAccess), user.role as string);
   const secondary = user.secondaryRoles as UserRole[] | undefined;
   // Teachers keep syllabus/plans/attendance tools even after an admin saves
   // module access (e.g. Principal designation + admin sections).
@@ -204,7 +205,10 @@ export const getFullPermissionStateForUser = async (
     };
   }
 
-  let map = mapFromUserDoc(user.moduleAccess);
+  let map = withUnconfiguredTeacherDefault(
+    mapFromUserDoc(user.moduleAccess),
+    effectiveRole as string
+  );
   const secondary = (user.secondaryRoles as UserRole[]) ?? [];
   if (
     userHasTeacherRole(effectiveRole, secondary) &&

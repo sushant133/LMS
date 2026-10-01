@@ -669,6 +669,23 @@ export const buildTeacherBaselineModuleAccess = (): Record<
 };
 
 /**
+ * Effective map for a login whose Module Access was never saved.
+ *
+ * An empty map otherwise means legacy full access to every module. For a
+ * primary TEACHER that exposed admin surfaces (exam office, HR registers, …),
+ * so they get the same teaching-tools default the Module Access editor shows
+ * for them. Other roles keep their current behaviour.
+ */
+export const withUnconfiguredTeacherDefault = (
+  map: ModuleAccessMap | null | undefined,
+  role: string | null | undefined
+): ModuleAccessMap => {
+  if (hasConfiguredModuleAccess(map)) return map ?? {};
+  if (String(role ?? "").trim().toUpperCase() !== "TEACHER") return map ?? {};
+  return buildTeacherBaselineModuleAccess();
+};
+
+/**
  * Admin-only departments (not teaching baseline). Granting any of these to a
  * teacher unlocks the Administration sidebar separately from My Work.
  */

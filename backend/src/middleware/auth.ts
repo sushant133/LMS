@@ -143,7 +143,14 @@ export const authorize =
          * even when their primary role is not in the route's role list.
          * READ_ONLY → GET only; WRITE → full methods (moduleAccessGuard still enforces).
          */
-        const moduleKey = resolveModuleForRequest(req);
+        const requestModule = resolveModuleForRequest(req);
+        /*
+         * /exams resolves to the teaching module "examinations", which every
+         * teacher holds. Routes that reach this fallback did not list TEACHER,
+         * i.e. they are exam-office actions, so they need the admin
+         * "Examination — College" grant instead.
+         */
+        const moduleKey = requestModule === "examinations" ? "examinations-college" : requestModule;
         const accessMap = await getUserModuleAccessMap(req.user!.userId);
         const isRead = ["GET", "HEAD", "OPTIONS"].includes(req.method);
 

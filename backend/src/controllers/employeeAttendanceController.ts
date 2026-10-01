@@ -1037,9 +1037,13 @@ export const getEmployeeAttendancePermissions = asyncHandler(
     }
 
     const state = await getFullPermissionStateForUser(userId, req.user?.role);
+    // Classroom "attendance" is every teacher's baseline module, not an HR grant —
+    // only let it stand in for teacher/staff sheets for non-teaching logins.
+    const isTeachingLogin = role === "TEACHER" || state.secondaryRoles.includes("TEACHER");
     const check = (key: "teacher-attendance" | "staff-attendance", action: ModulePermissionAction) =>
       hasModuleAction(state.moduleAccess, state.moduleActions, key, action) ||
-      hasModuleAction(state.moduleAccess, state.moduleActions, "attendance", action);
+      (!isTeachingLogin &&
+        hasModuleAction(state.moduleAccess, state.moduleActions, "attendance", action));
 
     return sendSuccess(res, "Permissions", {
       teacher: {
