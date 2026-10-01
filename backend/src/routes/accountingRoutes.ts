@@ -113,6 +113,7 @@ import {
   upsertBudget
 } from "../controllers/accountingAssetController.js";
 import { tenantGuard } from "../middleware/tenant.js";
+import { notifyAccountingActivity } from "../middleware/accountingActivityNotifier.js";
 
 const router = Router();
 
@@ -121,7 +122,7 @@ const cashiers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIE
 const readers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL");
 const approvers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN");
 const admins = authorize("SUPER_ADMIN", "COLLEGE_ADMIN");
-router.use(protect, tenantGuard);
+router.use(protect, tenantGuard, notifyAccountingActivity);
 
 // Dashboard & settings
 router.get("/dashboard", readers, requireAccountingPermission("read"), getAccountingDashboard);

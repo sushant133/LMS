@@ -10,10 +10,11 @@ import {
 } from "../controllers/feeController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
+import { notifyAccountingActivity } from "../middleware/accountingActivityNotifier.js";
 
 const router = Router();
 
-router.use(protect, tenantGuard);
+router.use(protect, tenantGuard, notifyAccountingActivity);
 
 router.get("/structures", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"), listFeeStructures);
 router.post("/structures", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), createFeeStructure);
