@@ -881,11 +881,81 @@ export interface ExamRecord {
   routinePublished: boolean;
   resultsPublished: boolean;
   resultsLocked: boolean;
+  /** Evaluators enter marks against confidential codes only (no student identity). */
+  confidentialMarking?: boolean;
   classIds: string[];
   batchIds: string[];
   yearIds: string[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+export const EXAM_CONFIDENTIAL_CODE_STATUSES = [
+  "CODE_NOT_ASSIGNED",
+  "CODE_ASSIGNED",
+  "MARK_PENDING",
+  "MARKS_ENTERED",
+  "MARKS_SUBMITTED"
+] as const;
+export type ExamConfidentialCodeStatus = (typeof EXAM_CONFIDENTIAL_CODE_STATUSES)[number];
+
+export const EXAM_CONFIDENTIAL_CODE_STATUS_LABELS: Record<ExamConfidentialCodeStatus, string> = {
+  CODE_NOT_ASSIGNED: "Code Not Assigned",
+  CODE_ASSIGNED: "Code Assigned",
+  MARK_PENDING: "Mark Pending",
+  MARKS_ENTERED: "Marks Entered",
+  MARKS_SUBMITTED: "Marks Submitted"
+};
+
+/** Admin-only row: the full student → symbol number → code → marks mapping. */
+export interface ExamConfidentialAdminRow {
+  studentId: string;
+  studentName: string;
+  rollNumber?: number;
+  symbolNumber?: string;
+  code?: string;
+  status: ExamConfidentialCodeStatus;
+  /** Marks for the selected subject (only when a subject is chosen). */
+  obtainedMarks?: number | null;
+  fullMarks?: number | null;
+  attendanceStatus?: string | null;
+  /** Subjects with marks recorded for this student in the exam. */
+  subjectsMarked: number;
+  codeUpdatedAt?: string;
+}
+
+export interface ExamConfidentialAdminSheet {
+  examId: string;
+  examName: string;
+  confidentialMarking: boolean;
+  subjectId?: string;
+  rows: ExamConfidentialAdminRow[];
+}
+
+/** Evaluator row: deliberately carries no student identity. */
+export interface ExamConfidentialMarkRow {
+  code: string;
+  hasMarks: boolean;
+  theoryMarks: number | null;
+  practicalMarks: number | null;
+  obtainedMarks: number | null;
+  grade: string | null;
+  passFail: string | null;
+  attendanceStatus: string | null;
+  teacherRemarks: string | null;
+}
+
+export interface ExamConfidentialMarkSheet {
+  examId: string;
+  examName: string;
+  subjectId: string;
+  submissionStatus: string;
+  fullMarks?: number;
+  passMarks?: number;
+  marksSchemeConfigured: boolean;
+  /** Students in this cohort the exam office has not coded yet. */
+  uncodedCount: number;
+  rows: ExamConfidentialMarkRow[];
 }
 
 export interface ExamRoutineRecord {

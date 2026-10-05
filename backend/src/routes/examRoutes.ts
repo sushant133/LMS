@@ -33,6 +33,13 @@ import {
   saveExamSymbolNumbers
 } from "../controllers/examSymbolNumberController.js";
 import {
+  getConfidentialMarkSheet,
+  listExamConfidentialCodes,
+  saveConfidentialMark,
+  saveExamConfidentialCodes,
+  setExamConfidentialMarking
+} from "../controllers/examConfidentialCodeController.js";
+import {
   exportPrintResultsCsv,
   getPrintResultsGrid,
   listPublishedExams
@@ -102,6 +109,16 @@ router.post("/:examId/routines/unpublish", authorize("COLLEGE_ADMIN", "SUPER_ADM
 router.get("/:examId/symbol-numbers", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listExamSymbolNumbers);
 router.post("/:examId/symbol-numbers", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), saveExamSymbolNumbers);
 router.delete("/:examId/symbol-numbers", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), clearExamSymbolNumbers);
+
+/**
+ * Confidential codes — the office maps each answer sheet to a hand-written code;
+ * evaluators see and mark codes only. The mapping itself is administrator-only.
+ */
+router.get("/:examId/confidential-codes", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listExamConfidentialCodes);
+router.put("/:examId/confidential-codes", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), saveExamConfidentialCodes);
+router.put("/:examId/confidential-marking", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), setExamConfidentialMarking);
+router.get("/:examId/confidential-sheet", marksEntryWriters, getConfidentialMarkSheet);
+router.post("/:examId/confidential-marks", marksEntryWriters, saveConfidentialMark);
 
 router.get("/records/exams", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listCohortExamRecords);
 router.get("/records/sheet", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getCohortExamSheet);

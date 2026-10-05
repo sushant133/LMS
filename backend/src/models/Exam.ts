@@ -16,6 +16,8 @@ const examSchema = new Schema(
     routinePublished: { type: Boolean, default: false },
     resultsPublished: { type: Boolean, default: false },
     resultsLocked: { type: Boolean, default: false },
+    /** Evaluators enter marks against confidential codes only (see ExamConfidentialCode). */
+    confidentialMarking: { type: Boolean, default: false },
     classIds: [{ type: Schema.Types.ObjectId, ref: "SchoolClass" }],
     batchIds: [{ type: Schema.Types.ObjectId, ref: "Batch" }],
     yearIds: [{ type: Schema.Types.ObjectId, ref: "Year" }]

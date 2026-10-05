@@ -34,7 +34,7 @@ import {
 } from "../utils/teacherScope.js";
 import { sendSuccess } from "../utils/response.js";
 import { recordAudit } from "../utils/audit.js";
-import { assertInstitutionWrite } from "../utils/institutionAccess.js";
+import { assertInstitutionWrite, isConfidentialEvaluator } from "../utils/institutionAccess.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import { buildResultTotals } from "../utils/examResults.js";
 
@@ -291,6 +291,13 @@ export const submitResultForReview = asyncHandler(async (req: Request, res: Resp
   const coverage = await getMarksCoverage(schoolId.toString(), scope, institutionType);
 
   if (coverage.missingStudents.length > 0) {
+    if (exam.confidentialMarking) {
+      // Never name students to the evaluator of a confidential exam.
+      throw new ApiError(
+        400,
+        `Marks are missing for ${coverage.missingStudents.length} answer sheet(s). Enter marks for every code (sheets without a code must be coded by the exam office first).`
+      );
+    }
     const names = coverage.missingStudents.map((item) => item.studentName).join(", ");
     throw new ApiError(
       400,
@@ -653,9 +660,14 @@ export const getSubmissionByScope = asyncHandler(async (req: Request, res: Respo
   }
 
   const institutionType = await getInstitutionType(req);
-  const coverage = await getMarksCoverage(schoolId.toString(), scope, institutionType);
+  const fullCoverage = await getMarksCoverage(schoolId.toString(), scope, institutionType);
   const scopeLabel = await buildScopeLabel(schoolId.toString(), scope, institutionType);
   const exam = await Exam.findOne({ _id: scope.examId, schoolId }).lean();
+  // Confidential exams: evaluators get counts only, never who is missing.
+  const coverage =
+    exam?.confidentialMarking && isConfidentialEvaluator(req)
+      ? { ...fullCoverage, missingStudents: [] }
+      : fullCoverage;
 
   const filter = buildSubmissionFilter(schoolId.toString(), scope);
   const submission = await ResultSubmission.findOne(filter).lean();

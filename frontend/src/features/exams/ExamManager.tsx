@@ -55,6 +55,16 @@ const TeacherRoutineList = lazy(() =>
     default: module.TeacherRoutineList,
   })),
 );
+const ConfidentialCodesPanel = lazy(() =>
+  import("features/exams/ConfidentialCodesPanel").then((module) => ({
+    default: module.ConfidentialCodesPanel,
+  })),
+);
+const ConfidentialMarksEntry = lazy(() =>
+  import("features/exams/ConfidentialMarksEntry").then((module) => ({
+    default: module.ConfidentialMarksEntry,
+  })),
+);
 const AdmitCardPanel = lazy(() =>
   import("features/exams/AdmitCardPanel").then((module) => ({
     default: module.AdmitCardPanel,
@@ -488,6 +498,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     | "enter-marks"
     | "passed-out"
     | "back-students"
+    | "confidential-codes"
   >("manage");
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
@@ -1324,6 +1335,18 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 Enter Marks
               </Button>
             ) : null}
+            {/* Student ↔ answer-sheet code mapping — administrators only. */}
+            {hasInstitutionRead ? (
+              <Button
+                size="sm"
+                variant={
+                  adminSection === "confidential-codes" ? "default" : "outline"
+                }
+                onClick={() => setAdminSection("confidential-codes")}
+              >
+                Confidential Codes
+              </Button>
+            ) : null}
             {/* Character certificates are Admin / Super Admin only, matching the
                 /character-certificates route guard. */}
             {canManage && isCollege ? (
@@ -1408,7 +1431,11 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
               <CardContent>
                 <Suspense fallback={<LoadingState />}>
                   <ExamMarksEntry
-                    exams={examsQuery.data ?? []}
+                    exams={(examsQuery.data ?? []).filter(
+                      // Teachers with an exam-office grant still evaluate
+                      // confidential exams by code only.
+                      (exam) => !(isTeacher && exam.confidentialMarking),
+                    )}
                     subjects={subjectsQuery.data ?? []}
                     students={studentsQuery.data ?? []}
                     batches={batchesQuery.data ?? []}
@@ -1446,6 +1473,36 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 }))}
                 students={studentsQuery.data ?? []}
                 isCollege={isCollege}
+              />
+            </Suspense>
+          ) : null}
+
+          {adminSection === "confidential-codes" && hasInstitutionRead ? (
+            <Suspense fallback={<LoadingState />}>
+              <ConfidentialCodesPanel
+                isCollege={isCollege}
+                canEdit={role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN"}
+                labels={labels}
+                exams={examsQuery.data ?? []}
+                subjects={subjectsQuery.data ?? []}
+                batches={(batchesQuery.data ?? []).map((batch) => ({
+                  _id: String(batch._id),
+                  name: String(batch.name ?? ""),
+                }))}
+                years={(yearsQuery.data ?? []).map((year) => ({
+                  _id: String(year._id),
+                  name: String(year.name ?? ""),
+                  batchId: year.batchId ? String(year.batchId) : undefined,
+                }))}
+                classes={(classesQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                }))}
+                sections={(sectionsQuery.data ?? []).map((row) => ({
+                  _id: String(row._id),
+                  name: String(row.name ?? ""),
+                  classId: row.classId ? String(row.classId) : undefined,
+                }))}
               />
             </Suspense>
           ) : null}
@@ -2403,7 +2460,9 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
             <CardContent>
               <Suspense fallback={<LoadingState />}>
                 <ExamMarksEntry
-                  exams={examsQuery.data ?? []}
+                  exams={(examsQuery.data ?? []).filter(
+                    (exam) => !exam.confidentialMarking,
+                  )}
                   subjects={subjects}
                   students={students}
                   batches={batches}
@@ -2426,6 +2485,34 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
               </Suspense>
             </CardContent>
           </Card>
+
+          {(examsQuery.data ?? []).some((exam) => exam.confidentialMarking) ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Confidential Mark Entry</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Suspense fallback={<LoadingState />}>
+                  <ConfidentialMarksEntry
+                    exams={(examsQuery.data ?? []).filter(
+                      (exam) => exam.confidentialMarking,
+                    )}
+                    subjects={subjects}
+                    batches={batches}
+                    years={years}
+                    classes={classes}
+                    sections={sections}
+                    isCollege={isCollege}
+                    labels={labels}
+                    assignments={teacherScopeQuery.data?.scope.assignments ?? []}
+                    assignedSubjectIds={
+                      teacherScopeQuery.data?.scope.subjectIds ?? []
+                    }
+                  />
+                </Suspense>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>

@@ -655,6 +655,47 @@ export const examSymbolNumberBulkSchema = z.object({
   entries: z.array(examSymbolNumberEntrySchema).min(1, "Add at least one symbol number")
 });
 
+/**
+ * Confidential code written on an answer sheet. Typed by the exam office —
+ * never generated — so only the shape is checked here. Blank clears the code.
+ */
+export const EXAM_CONFIDENTIAL_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9\-_/.]{0,29}$/;
+
+export const examConfidentialCodeBulkSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        studentId: objectIdSchema,
+        code: z
+          .string()
+          .trim()
+          .refine(
+            (value) => value === "" || EXAM_CONFIDENTIAL_CODE_PATTERN.test(value),
+            "Codes may use letters, numbers, - _ / . (max 30 characters)"
+          )
+      })
+    )
+    .min(1, "Add at least one confidential code")
+});
+
+export const examConfidentialMarkingSchema = z.object({
+  enabled: z.boolean()
+});
+
+/** Marks entered by an evaluator against a confidential code (no student identity). */
+export const examConfidentialMarkSchema = z.object({
+  subjectId: objectIdSchema,
+  code: z.string().trim().min(1, "Confidential code is required"),
+  classId: optionalObjectIdSchema,
+  sectionId: optionalObjectIdSchema,
+  batchId: optionalObjectIdSchema,
+  yearId: optionalObjectIdSchema,
+  theoryMarks: z.coerce.number().min(0).optional(),
+  practicalMarks: z.coerce.number().min(0).optional(),
+  attendanceStatus: z.enum(EXAM_ATTENDANCE_STATUSES).default("PRESENT"),
+  teacherRemarks: z.string().trim().max(500).optional()
+});
+
 export const resultMarkSchema = z
   .object({
     subjectId: objectIdSchema,
@@ -976,6 +1017,8 @@ export type ExamInput = z.infer<typeof examSchema>;
 export type ExamRoutineInput = z.infer<typeof examRoutineSchema>;
 export type ExamSymbolNumberEntryInput = z.infer<typeof examSymbolNumberEntrySchema>;
 export type ExamSymbolNumberBulkInput = z.infer<typeof examSymbolNumberBulkSchema>;
+export type ExamConfidentialCodeBulkInput = z.infer<typeof examConfidentialCodeBulkSchema>;
+export type ExamConfidentialMarkInput = z.infer<typeof examConfidentialMarkSchema>;
 export type ResultMarkInput = z.infer<typeof resultMarkSchema>;
 export type ResultInput = z.infer<typeof resultSchema>;
 export type ResultSubmissionScopeInput = z.infer<typeof resultSubmissionScopeSchema>;

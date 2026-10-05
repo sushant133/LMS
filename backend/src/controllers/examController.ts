@@ -42,7 +42,7 @@ import {
   requireTeacherScope
 } from "../utils/teacherScope.js";
 import { hasInstitutionAccess } from "@phit-erp/shared";
-import { assertInstitutionWrite } from "../utils/institutionAccess.js";
+import { assertInstitutionWrite, isConfidentialEvaluator } from "../utils/institutionAccess.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -69,6 +69,22 @@ const getExamOrThrow = async (req: Request, examId: string) => {
   return exam;
 };
 
+/**
+ * Confidential-marking exams: evaluators work by code only. Any teacher path
+ * that names a student (entry by studentId, marksheets) is closed for them.
+ */
+const assertNotConfidentialForTeacher = (
+  req: Request,
+  exam: { confidentialMarking?: boolean | null } | null | undefined
+): void => {
+  if (exam?.confidentialMarking && isConfidentialEvaluator(req)) {
+    throw new ApiError(
+      403,
+      "This exam uses confidential codes — enter marks against the code on the answer sheet"
+    );
+  }
+};
+
 type ResultPayload = z.infer<typeof resultSchema>;
 
 const buildSubmissionScopeFromPayload = (payload: ResultPayload): SubmissionScope => ({
@@ -80,7 +96,7 @@ const buildSubmissionScopeFromPayload = (payload: ResultPayload): SubmissionScop
   yearId: payload.yearId
 });
 
-const persistResultMarks = async (
+export const persistResultMarks = async (
   req: Request,
   payload: ResultPayload,
   options: { trackSubmission: boolean; skipScopeCheck: boolean; allowedSubjectIds?: string[] }
@@ -477,6 +493,20 @@ export const listResults = asyncHandler(async (req: Request, res: Response) => {
     query["marks.subjectId"] = { $in: teacherScope.subjectIds };
   }
 
+  // Name-bearing result rows of confidential exams would undo the anonymity
+  // of code-based evaluation; non-admin staff read those marks by code instead.
+  if (isConfidentialEvaluator(req)) {
+    const confidentialExamIds = await Exam.find({ schoolId: query.schoolId, confidentialMarking: true })
+      .distinct("_id");
+    if (confidentialExamIds.length > 0) {
+      const confidential = new Set(confidentialExamIds.map((id) => String(id)));
+      if (typeof query.examId === "string" && confidential.has(query.examId)) {
+        return sendSuccess(res, "Results fetched", []);
+      }
+      if (typeof query.examId !== "string") query.examId = { $nin: confidentialExamIds };
+    }
+  }
+
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
     query.studentId = studentProfile.studentId;
@@ -537,6 +567,10 @@ export const listResults = asyncHandler(async (req: Request, res: Response) => {
 
 export const upsertResult = asyncHandler(async (req: Request, res: Response) => {
   const payload = resultSchema.parse(req.body);
+  assertNotConfidentialForTeacher(
+    req,
+    await Exam.findOne(withTenantScope(req, { _id: payload.examId })).select("confidentialMarking").lean()
+  );
 
   if (req.user?.role === "TEACHER") {
     const scope = await assertTeacherAcademicScope(req, payload);
@@ -588,6 +622,7 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
   if (!exam) {
     throw new ApiError(404, "Exam not found");
   }
+  assertNotConfidentialForTeacher(req, exam);
 
   if (role === "TEACHER") {
     const student = await Student.findOne({ _id: studentId, schoolId }).lean();
@@ -1044,6 +1079,7 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     throw new ApiError(404, "Exam not found");
   }
 
+  assertNotConfidentialForTeacher(req, exam);
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
     const student = await Student.findOne({ _id: studentId, schoolId }).lean();
@@ -1159,6 +1195,7 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(404, "Exam not found");
   }
 
+  assertNotConfidentialForTeacher(req, exam);
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
     const student = await Student.findOne({ _id: studentId, schoolId }).lean();
