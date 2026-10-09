@@ -735,6 +735,48 @@
   }
 }
 
+/* Older Android System WebViews (pre-Chrome 105) in the mobile app ignore container
+   queries — fall back to the viewport width so the table still scrolls there. */
+@supports not (container-type: inline-size) {
+  @media screen and (max-width: 767px) {
+    .om-marks-table {
+      min-width: 760px;
+      font-size: 12px;
+    }
+
+    .om-marks-table th,
+    .om-marks-table td {
+      padding: 6px 5px;
+    }
+
+    .om-marks-table thead th {
+      font-size: 10.5px;
+      letter-spacing: 0.01em;
+    }
+
+    .om-badge {
+      font-size: 10px;
+      padding: 1px 5px;
+    }
+
+    .om-marks-table .col-sn { width: 36px; }
+    .om-marks-table .col-subject { width: 160px; }
+    .om-marks-table .col-full { width: 58px; }
+    .om-marks-table .col-pass { width: 58px; }
+    .om-marks-table .col-theory { width: 62px; }
+    .om-marks-table .col-practical { width: 78px; }
+    .om-marks-table .col-obtained { width: 80px; }
+    .om-marks-table .col-grade { width: 54px; }
+    .om-marks-table .col-status { width: 66px; }
+    .om-marks-table .col-remarks { width: 140px; }
+
+    .om-info-row,
+    .om-summary-table {
+      font-size: 12px;
+    }
+  }
+}
+
 @media screen and (max-width: 480px) {
   .official-marksheet {
     padding: 14px 12px 12px;
