@@ -205,7 +205,12 @@ export const ResultMarksheetView = ({
         </div>
       </section>
 
-      <div className="om-marks-table-wrap">
+      <div
+        className="om-marks-table-wrap"
+        role="region"
+        aria-label="Subject marks"
+        tabIndex={0}
+      >
         <table className="om-marks-table">
           <thead>
             <tr>

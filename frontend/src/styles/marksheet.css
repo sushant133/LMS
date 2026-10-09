@@ -615,3 +615,136 @@
     text-align: left;
   }
 }
+
+/* ——— Responsive screen layout ———
+ * Screen-only so the A4 print copy (printMarksheetElement) is untouched.
+ * Sized by the marksheet's own width (container query), not the viewport, so it
+ * also adapts when a sidebar narrows the page on tablets/laptops.
+ */
+@media screen {
+  .official-marksheet {
+    container-type: inline-size;
+    container-name: marksheet;
+  }
+
+  .om-marks-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .om-marks-table-wrap:focus-visible {
+    outline: 2px solid var(--om-accent);
+    outline-offset: 2px;
+  }
+
+  /* Never split words mid-way; wrap only between words. */
+  .om-marks-table thead th {
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: none;
+    line-height: 1.2;
+  }
+
+  .om-marks-table .col-subject,
+  .om-marks-table .col-remarks {
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+}
+
+/* Narrower than the A4 table needs: keep readable column widths and scroll sideways. */
+@container marksheet (max-width: 700px) {
+  .om-marks-table {
+    min-width: 760px;
+    font-size: 12px;
+  }
+
+  .om-marks-table th,
+  .om-marks-table td {
+    padding: 6px 5px;
+  }
+
+  .om-marks-table thead th {
+    font-size: 10.5px;
+    letter-spacing: 0.01em;
+  }
+
+  .om-marks-table .col-subject,
+  .om-marks-table .col-remarks {
+    padding-left: 6px;
+    line-height: 1.3;
+  }
+
+  .om-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+
+  .om-marks-table .col-sn { width: 36px; }
+  .om-marks-table .col-subject { width: 160px; }
+  .om-marks-table .col-full { width: 58px; }
+  .om-marks-table .col-pass { width: 58px; }
+  .om-marks-table .col-theory { width: 62px; }
+  .om-marks-table .col-practical { width: 78px; }
+  .om-marks-table .col-obtained { width: 80px; }
+  .om-marks-table .col-grade { width: 54px; }
+  .om-marks-table .col-status { width: 66px; }
+  .om-marks-table .col-remarks { width: 140px; }
+
+  .om-info-row {
+    grid-template-columns: 112px 1fr;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  .om-info-panel-title,
+  .om-summary-title {
+    font-size: 11px;
+  }
+
+  .om-summary-table {
+    font-size: 12.5px;
+  }
+
+  .om-summary-table th,
+  .om-summary-table td {
+    padding: 5px 8px;
+  }
+
+  .om-gpa-card {
+    padding: 12px 8px;
+  }
+
+  .om-gpa-label,
+  .om-gpa-meta,
+  .om-gpa-grade {
+    font-size: 11px;
+  }
+
+  .om-footer-line {
+    font-size: 10px;
+  }
+
+  .om-meta {
+    font-size: 10px;
+  }
+
+  .om-meta-note {
+    font-size: 9.5px;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .official-marksheet {
+    padding: 14px 12px 12px;
+  }
+
+  .om-college-name {
+    font-size: 15pt;
+  }
+
+  .om-doc-title {
+    letter-spacing: 0.14em;
+  }
+}
