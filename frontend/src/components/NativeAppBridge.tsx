@@ -14,12 +14,21 @@ import { attachPushNavigationListener } from "lib/pushNotifications";
 const EXIT_CONFIRM_WINDOW_MS = 2000;
 
 /**
+ * Background time after which a resume checks for a new deploy. Short app switches
+ * (copying a roll number, answering a call) never trigger an update-reload mid-form.
+ */
+const UPDATE_CHECK_AFTER_BACKGROUND_MS = 5 * 60 * 1000;
+
+/**
  * Native shell glue, mounted once inside the router.
  *
  * 1. Android back button: close an overlay, else step back through in-app history,
  *    else return to the role home, else exit on a confirmed second press.
  * 2. System notification taps: navigate inside the running app instead of reloading
  *    the whole site (which showed a blank white screen while it downloaded).
+ * 3. Resume from background: check for a new deploy. Android resumes the already-loaded
+ *    WebView, so without this a user who never fully closes the app stays on the old
+ *    build indefinitely.
  *
  * Renders nothing and does nothing at all in a browser.
  */
@@ -128,6 +137,50 @@ export const NativeAppBridge = () => {
       void handle?.remove();
     };
   }, [navigate]);
+
+  // —— New deploy on resume ——
+  // registration.update() fetches sw.js (served no-cache). If the build changed, the new
+  // worker installs, skipWaiting()/clientsClaim() take over, and the "controllerchange"
+  // listener in staleChunkRecovery reloads the page once onto the new build.
+  useEffect(() => {
+    if (!isNativeApp() || !("serviceWorker" in navigator)) return;
+
+    let handle: PluginListenerHandle | null = null;
+    let cancelled = false;
+    let backgroundedAt = 0;
+
+    void CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (!isActive) {
+        backgroundedAt = Date.now();
+        return;
+      }
+      if (!backgroundedAt || Date.now() - backgroundedAt < UPDATE_CHECK_AFTER_BACKGROUND_MS) {
+        return;
+      }
+      backgroundedAt = 0;
+      void navigator.serviceWorker
+        .getRegistration()
+        .then((registration) => registration?.update())
+        .catch(() => {
+          // Offline on resume — the next resume or cold start checks again
+        });
+    })
+      .then((registered) => {
+        if (cancelled) {
+          void registered.remove();
+          return;
+        }
+        handle = registered;
+      })
+      .catch(() => {
+        // Older shells without @capacitor/app: updates still apply on a cold start
+      });
+
+    return () => {
+      cancelled = true;
+      void handle?.remove();
+    };
+  }, []);
 
   return null;
 };
