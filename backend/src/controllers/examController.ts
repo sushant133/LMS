@@ -24,7 +24,7 @@ import {
   refreshResultPublishedFlagsForExam,
   type SubmissionScope
 } from "../utils/resultSubmission.js";
-import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import { compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { generateMarksheetPdfFromHtml } from "../utils/templates/marksheetTemplate.js";
 import { collegeLogoExists, getCollegeLogoPath } from "../utils/collegeLogo.js";
 import { resolveSchoolBranding } from "../utils/schoolBranding.js";
@@ -765,6 +765,23 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
     ...cohort
   }).lean();
 
+  // Already-published results held back by a future "Result Publish Date": re-publishing
+  // releases them now instead of failing with "no new approved subjects".
+  if (
+    approvedSubmissions.length === 0 &&
+    alreadyPublishedCount > 0 &&
+    exam.resultPublishDateBs &&
+    compareBsDates(exam.resultPublishDateBs, todayBs) > 0
+  ) {
+    exam.resultPublishDateBs = todayBs;
+    await exam.save();
+    await Result.updateMany(
+      { schoolId: tenantSchoolId, examId, ...cohort, publishedAtBs: { $gt: todayBs } },
+      { $set: { publishedAtBs: todayBs } }
+    );
+    return sendSuccess(res, "Published results are now visible to students", exam);
+  }
+
   if (approvedSubmissions.length === 0) {
     throw new ApiError(
       400,
@@ -795,7 +812,9 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
     exam.resultsLocked = true;
   }
   exam.status = "PUBLISHED";
-  if (!exam.resultPublishDateBs) {
+  // An explicit publish releases results now. A planned "Result Publish Date" still in the
+  // future would otherwise keep canViewPublishedResults() false and hide results from students.
+  if (!exam.resultPublishDateBs || compareBsDates(exam.resultPublishDateBs, todayBs) > 0) {
     exam.resultPublishDateBs = todayBs;
   }
   await exam.save();
@@ -840,7 +859,10 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
     const hasPublishedMark = result.marks.some((mark) =>
       matchingSubjects.some((submission) => mark.subjectId.toString() === submission.subjectId.toString())
     );
-    if (hasPublishedMark && !result.publishedAtBs) {
+    if (
+      hasPublishedMark &&
+      (!result.publishedAtBs || compareBsDates(result.publishedAtBs, publishDateBs) > 0)
+    ) {
       result.publishedAtBs = publishDateBs;
       await result.save();
     }
