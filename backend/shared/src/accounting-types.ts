@@ -355,6 +355,8 @@ export interface SalarySheetRow {
    */
   unrecordedDays?: number;
   workingDaysInMonth: number;
+  /** Calendar days in the BS month — the monthly per-day salary divisor. */
+  calendarDaysInMonth?: number;
   salaryPaymentId?: string;
   status?: SalaryPaymentStatus;
 }
@@ -380,9 +382,9 @@ export interface SalarySheetApproval {
 
 export interface SalarySheetResponse {
   monthBs: string;
-  /** Working days = calendar days - Saturdays - other holidays. The payroll per-day divisor. */
+  /** Working days = calendar days - Saturdays - other holidays. */
   workingDaysInMonth: number;
-  /** Every day of the BS month, holidays included. */
+  /** Every day of the BS month, holidays included. The monthly per-day salary divisor. */
   calendarDaysInMonth?: number;
   /** Saturday weekly offs (WORKING_DAY override excluded). */
   saturdayDaysInMonth?: number;

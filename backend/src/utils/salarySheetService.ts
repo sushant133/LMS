@@ -549,6 +549,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   };
 
   const workingDaysInMonth = attendance.workingDaysInMonth;
+  const monthCalendarDays = attendance.calendarDaysInMonth;
 
   const settleDays = (
     att: AttendanceBucket | undefined,
@@ -1204,6 +1205,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       leaveDays: d.leaveDays,
       extraDuty: d.extraDuty,
       workingDaysInMonth,
+      calendarDaysInMonth: monthCalendarDays,
       extraAmountOverrideNpr: d.extraAmountOverrideNpr,
       periodRateNpr: d.periodRateNpr,
       periodsAttended: d.periodsAttended,
@@ -1257,6 +1259,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       attendanceExpectedDays: d.attendanceExpectedDays,
       unrecordedDays: d.unrecordedDays,
       workingDaysInMonth,
+      calendarDaysInMonth: monthCalendarDays,
       salaryPaymentId: d.salaryPaymentId,
       status: d.status as
         | "DRAFT"
@@ -1297,7 +1300,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         ? `Attendance is incomplete for ${incompleteCount} of ${rows.length} employee(s) in ${monthBs}. ` +
           `${monthBs} has ${calendarDaysInMonth} calendar days − ${saturdayDaysInMonth} Saturday(s) − ${otherHolidayDaysInMonth} other holiday(s) = ${workingDaysInMonth} working days; ` +
           `registers were taken on ${teacherCoverageDays} teacher day(s) and ${staffCoverageDays} staff day(s). ` +
-          `Leave and absence deduct per working day. Saturdays and calendar holidays are excluded from working days. ` +
+          `Per-day salary = monthly ÷ month days; leave and absence on working days deduct at that rate. Saturdays and calendar holidays are never deducted. ` +
           `Working days with no attendance record are paid as present — review the flagged rows before submitting.`
         : undefined;
 

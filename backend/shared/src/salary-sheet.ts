@@ -14,6 +14,11 @@ export type SalarySheetCalcInput = {
   leaveDays?: number;
   extraDuty: number;
   workingDaysInMonth: number;
+  /**
+   * Calendar days in the BS month (29–32). Monthly per-day salary =
+   * monthly ÷ calendar days. Falls back to workingDaysInMonth when absent.
+   */
+  calendarDaysInMonth?: number;
   /** When set, use instead of extraDuty * per-unit rate */
   extraAmountOverrideNpr?: number;
   periodRateNpr?: number;
@@ -137,7 +142,8 @@ const applyTax = (
 };
 
 /**
- * Monthly: (monthly − absence/leave × per-day) + extra duty.
+ * Monthly: per-day = monthly ÷ calendar days of the BS month (e.g. 23000 ÷ 31);
+ *          (monthly − absence/leave × per-day) + extra duty × per-day.
  * Period: periods attended × rate + extra periods × rate.
  * Tender: syllabus-earned amount this month + optional extra amount (no day deduction).
  */
@@ -176,10 +182,11 @@ export const calculateSalarySheetLine = (input: SalarySheetCalcInput): SalaryShe
   }
 
   const days = Math.max(1, Number(input.workingDaysInMonth) || 30);
+  const perDayDivisor = Math.max(1, Number(input.calendarDaysInMonth) || days);
   const monthly = Math.max(0, Number(input.monthlySalaryNpr) || 0);
   const leave = Math.max(0, Number(input.leaveDays) || 0);
   const deducted = Math.min(deductedAttendanceDays(input.absentDays, leave), days);
-  const perDay = monthly / days;
+  const perDay = monthly / perDayDivisor;
   const absentDeductionNpr = roundSalaryNpr(perDay * deducted);
   const extraAmountNpr =
     extraOverride !== undefined ? extraOverride : roundSalaryNpr(perDay * extraDuty);

@@ -143,6 +143,7 @@ const calcLine = (
   leaveDays: number,
   extraDuty: number,
   workingDays: number,
+  calendarDays: number,
   extras?: {
     paymentType?: TeacherPaymentType | string;
     periodRateNpr?: number;
@@ -158,6 +159,7 @@ const calcLine = (
     leaveDays,
     extraDuty,
     workingDaysInMonth: workingDays,
+    calendarDaysInMonth: calendarDays,
     periodRateNpr: extras?.periodRateNpr,
     periodsAttended: extras?.periodsAttended,
     tenderThisMonthNpr: extras?.tenderThisMonthNpr,
@@ -424,6 +426,7 @@ export const fetchSalarySheetClientFallback = async (
       settled.leaveDays,
       extraDuty,
       workingDaysInMonth,
+      calendarDaysInMonth,
       {
         paymentType,
         periodRateNpr,
@@ -483,6 +486,7 @@ export const fetchSalarySheetClientFallback = async (
       settled.leaveDays,
       extraDuty,
       workingDaysInMonth,
+      calendarDaysInMonth,
     );
     drafts.push({
       employeeType: "STAFF",
@@ -529,6 +533,7 @@ export const fetchSalarySheetClientFallback = async (
         Number(s.leaveDays ?? 0),
         Number(s.extraDuty ?? 0),
         workingDaysInMonth,
+        calendarDaysInMonth,
       );
       drafts.push({
         employeeType: "TEACHER",
@@ -564,6 +569,7 @@ export const fetchSalarySheetClientFallback = async (
         Number(s.leaveDays ?? 0),
         Number(s.extraDuty ?? 0),
         workingDaysInMonth,
+        calendarDaysInMonth,
       );
       drafts.push({
         employeeType: "STAFF",
@@ -641,7 +647,7 @@ export const fetchSalarySheetClientFallback = async (
           ? `Attendance is incomplete for ${incompleteCount} of ${rows.length} employee(s) in ${monthBs}. ` +
             `${monthBs} has ${calendarDaysInMonth} calendar days − ${saturdayDates.size} Saturday(s) − ${otherHolidayDates.size} other holiday(s) = ${workingDaysInMonth} working days; ` +
             `registers were taken on ${teacherDateSet.size} teacher day(s) and ${staffDateSet.size} staff day(s). ` +
-            `Leave and absence deduct per working day. Saturdays and calendar holidays are excluded from working days. ` +
+            `Per-day salary = monthly ÷ month days; leave and absence on working days deduct at that rate. Saturdays and calendar holidays are never deducted. ` +
             `Working days with no attendance record are paid as present — review the flagged rows before submitting.`
           : undefined,
     rows,
@@ -958,6 +964,7 @@ export const saveSalarySheetClient = async (payload: {
           row.leaveDays ?? 0,
           row.extraDuty,
           workingDays,
+          calendarDays,
         );
     // Map sheet formula into fields the old endpoint understands
     (body as { taxNpr: number }).taxNpr = calc.tax1PercentNpr;

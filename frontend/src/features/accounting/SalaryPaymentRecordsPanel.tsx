@@ -95,6 +95,7 @@ const calcLine = (
     | "leaveDays"
     | "extraDuty"
     | "workingDaysInMonth"
+    | "calendarDaysInMonth"
     | "extraAmountNpr"
     | "paymentType"
     | "periodRateNpr"
@@ -146,6 +147,7 @@ const calcLine = (
     leaveDays: Number(row.leaveDays) || 0,
     extraDuty,
     workingDaysInMonth: row.workingDaysInMonth || 30,
+    calendarDaysInMonth: row.calendarDaysInMonth,
     extraAmountOverrideNpr: extraOverride,
     periodRateNpr: Number(row.periodRateNpr ?? row.monthlySalaryNpr) || 0,
     periodsAttended: Number(row.periodsAttended) || 0,
@@ -614,6 +616,7 @@ export const SalaryPaymentRecordsPanel = ({
       leaveDays,
       extraDuty,
       workingDaysInMonth,
+      calendarDaysInMonth,
       extraAmountNpr: 0,
       paymentType: src?.paymentType,
       periodRateNpr: src?.periodRateNpr ?? monthly,
@@ -627,7 +630,7 @@ export const SalaryPaymentRecordsPanel = ({
       tenderAlreadyPaidNpr: src?.tenderAlreadyPaidNpr ?? 0,
       tenderThisMonthNpr: src?.tenderThisMonthNpr ?? 0,
     });
-  }, [entry, workingDaysInMonth, selectedCatalogRow]);
+  }, [entry, workingDaysInMonth, calendarDaysInMonth, selectedCatalogRow]);
 
   const fillEntryFromCatalog = (key: string) => {
     const src =
@@ -700,6 +703,7 @@ export const SalaryPaymentRecordsPanel = ({
       leaveDays,
       extraDuty,
       workingDaysInMonth,
+      calendarDaysInMonth,
       extraAmountNpr: 0,
       paymentType: src.paymentType,
       periodRateNpr: payType === "PERIOD" ? monthly : src.periodRateNpr,
@@ -874,6 +878,7 @@ export const SalaryPaymentRecordsPanel = ({
                   extraDuty: next.extraDuty,
                   workingDaysInMonth:
                     next.workingDaysInMonth || workingDaysInMonth,
+                  calendarDaysInMonth,
                   extraAmountNpr: next.extraAmountNpr,
                   paymentType: next.paymentType,
                   periodRateNpr: next.periodRateNpr,
@@ -924,6 +929,7 @@ export const SalaryPaymentRecordsPanel = ({
             leaveDays: r.leaveDays,
             extraDuty: r.extraDuty,
             workingDaysInMonth: r.workingDaysInMonth || workingDaysInMonth,
+            calendarDaysInMonth,
             extraAmountNpr: 0,
             paymentType: r.paymentType,
             periodRateNpr: r.periodRateNpr,
@@ -1254,7 +1260,7 @@ export const SalaryPaymentRecordsPanel = ({
     <p class="sheet-title">Salary Sheet of ${escapeHtml(monthLabel)}</p>
     <p class="college-address">
       Month days ${calendarDaysInMonth} − Saturdays ${saturdayDaysInMonth} − other holidays ${otherHolidayDaysInMonth} = ${workingDaysInMonth} working days
-      · monthly: per-day = monthly ÷ ${workingDaysInMonth}, leave/absence deduct
+      · monthly: per-day = monthly ÷ ${calendarDaysInMonth} (month days), leave/absence deduct
       · tender: paid from syllabus completed · period: rate × periods taught
     </p>
   </div>
@@ -2145,7 +2151,7 @@ export const SalaryPaymentRecordsPanel = ({
                 −{otherHolidayDaysInMonth}
               </strong>
             </span>
-            <span title="Working days = month days − Saturdays − other holidays. Per-day salary = monthly salary ÷ working days. Leave and absence deduct against this.">
+            <span title="Working days = month days − Saturdays − other holidays. Per-day salary = monthly salary ÷ month days (e.g. 23000 ÷ 31). Leave and absence on working days deduct at this rate.">
               Working days:{" "}
               <strong className="text-slate-900">{workingDaysInMonth}</strong>
               <span className="text-slate-500">
@@ -2210,7 +2216,7 @@ export const SalaryPaymentRecordsPanel = ({
             </span>
             <span className="basis-full text-[11px] text-slate-500">
               Monthly teachers: Present + Absent + Leave = working days; leave
-              and absence deduct (monthly ÷ working days × days). Tender
+              and absence deduct (monthly ÷ month days × days). Tender
               teachers: paid from syllabus completed this year minus already
               paid. Period teachers: rate × periods taught (log book). Saturdays
               and holidays are not working days.

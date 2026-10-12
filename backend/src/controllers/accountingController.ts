@@ -87,6 +87,7 @@ import {
 import {
   bsToAdDate,
   ensureValidBsDate,
+  getDaysInBsMonth,
   getTodayBs,
   resolveAdBsDatePair
 } from "../utils/nepaliDate.js";
@@ -3098,6 +3099,17 @@ export const listSalaries = asyncHandler(async (req: Request, res: Response) => 
   return sendSuccess(res, "Salary payments fetched", normalized);
 });
 
+/** Calendar days (29–32) of a BS "YYYY-MM" month; undefined when unparseable. */
+const calendarDaysOfMonthBs = (monthBs?: string): number | undefined => {
+  const [year, month] = String(monthBs || "").split("-").map(Number);
+  if (!year || !month) return undefined;
+  try {
+    return getDaysInBsMonth(year, month);
+  } catch {
+    return undefined;
+  }
+};
+
 const resolvePayrollAmounts = (payload: {
   basicSalaryNpr: number;
   presentDays?: number;
@@ -3114,6 +3126,7 @@ const resolvePayrollAmounts = (payload: {
   loanDeductionNpr?: number;
   otherDeductionsNpr?: number;
   workingDaysInMonth?: number;
+  monthBs?: string;
   paymentType?: string;
   periodRateNpr?: number;
   periodsAttended?: number;
@@ -3160,6 +3173,7 @@ const resolvePayrollAmounts = (payload: {
       leaveDays: payload.leaveDays ?? 0,
       extraDuty: payload.extraDuty ?? 0,
       workingDaysInMonth: payload.workingDaysInMonth ?? 30,
+      calendarDaysInMonth: calendarDaysOfMonthBs(payload.monthBs),
       extraAmountOverrideNpr:
         payload.extraAmountNpr !== undefined &&
         (payload.extraDuty === undefined || payload.extraDuty === 0)
@@ -3328,7 +3342,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   const { resolveMonthHolidayDates } = await import(
     "../utils/academicCalendarService.js"
   );
-  const { workingDays: workingDaysInMonth } = await resolveMonthHolidayDates(
+  const { workingDays: workingDaysInMonth, calendarDays } = await resolveMonthHolidayDates(
     schoolId,
     payload.monthBs
   );
@@ -3412,6 +3426,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       leaveDays: row.leaveDays,
       extraDuty: row.extraDuty,
       workingDaysInMonth,
+      calendarDaysInMonth: calendarDays,
       extraAmountOverrideNpr:
         admin && row.extraAmountNpr !== undefined && row.extraDuty === 0
           ? row.extraAmountNpr
