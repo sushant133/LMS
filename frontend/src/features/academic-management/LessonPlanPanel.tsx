@@ -1460,6 +1460,71 @@ export const LessonPlanPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  /** Plan ids ticked in the admin table, used by the bulk Verify / Unlock actions. */
+  const [selectedPlanIds, setSelectedPlanIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const togglePlanSelection = (id: string, checked: boolean) =>
+    setSelectedPlanIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const setPlansSelected = (ids: string[], checked: boolean) =>
+    setSelectedPlanIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+
+  /**
+   * No bulk endpoint exists, so each plan goes through its own verify / unlock
+   * route one after another; failures are counted rather than aborting the run.
+   */
+  const bulkActionMutation = useMutation({
+    mutationFn: async ({
+      action,
+      ids,
+    }: {
+      action: "verify" | "unlock";
+      ids: string[];
+    }) => {
+      let ok = 0;
+      const errors: string[] = [];
+      for (const id of ids) {
+        try {
+          await unwrap(
+            api.post(`/academic-management/lesson-plans/${id}/${action}`, {}),
+          );
+          ok += 1;
+        } catch (error) {
+          errors.push(parseErrorMessage(error));
+        }
+      }
+      return { action, ok, errors };
+    },
+    onSuccess: ({ action, ok, errors }, { ids }) => {
+      const verb = action === "verify" ? "verified" : "unlocked";
+      if (ok > 0) {
+        toast.success(`${ok} lesson plan${ok === 1 ? "" : "s"} ${verb}`);
+      }
+      if (errors.length > 0) {
+        toast.error(
+          `${errors.length} of ${ids.length} could not be ${verb}: ${errors[0]}`,
+        );
+      }
+      setPlansSelected(ids, false);
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const filteredPlans = useMemo(
     () =>
       (plansQuery.data ?? []).filter((plan) =>
@@ -1573,6 +1638,11 @@ export const LessonPlanPanel = ({
       subject: selectedSubject,
     };
   }, [faculties, selectedSubject, selectedYearKey, selectedFacultyKey]);
+
+  // Ticks belong to the subject on screen; never carry them to another one.
+  useEffect(() => {
+    setSelectedPlanIds(new Set());
+  }, [selectedSubject?.subjectKey, selectedYearKey, selectedFacultyKey]);
 
   const selectedPlans = useMemo(() => {
     if (!selectedSubject) return [];
@@ -2386,6 +2456,26 @@ export const LessonPlanPanel = ({
                 const pendingPlans = group.items.filter((plan) =>
                   isLessonPlanPending(plan.status),
                 );
+                const showSelect = isAdmin;
+                const groupPlanIds = group.items.map((plan) => plan._id);
+                const groupSelected = group.items.filter((plan) =>
+                  selectedPlanIds.has(plan._id),
+                );
+                const allGroupSelected =
+                  groupPlanIds.length > 0 &&
+                  groupSelected.length === groupPlanIds.length;
+                // With ticks, act on the ticked plans; otherwise on every eligible plan.
+                const actionScope =
+                  groupSelected.length > 0 ? groupSelected : group.items;
+                const verifyIds = actionScope
+                  .filter((plan) => isLessonPlanPending(plan.status))
+                  .map((plan) => plan._id);
+                const unlockIds = actionScope
+                  .filter((plan) => plan.status === "APPROVED")
+                  .map((plan) => plan._id);
+                const scopeLabel = groupSelected.length > 0 ? "selected" : "all";
+                const bulkBusy = bulkActionMutation.isPending;
+                const columnCount = 8 + (showActions ? 1 : 0) + (showSelect ? 1 : 0);
                 return (
                 <div key={group.teacherId} className="space-y-3">
                   <Card>
@@ -2474,10 +2564,103 @@ export const LessonPlanPanel = ({
                             ))}
                         </div>
                       ) : null}
+                      {showSelect && group.items.length > 0 ? (
+                        <div className="no-print flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                          <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={allGroupSelected}
+                              onChange={(e) =>
+                                setPlansSelected(groupPlanIds, e.target.checked)
+                              }
+                            />
+                            Select all ({groupPlanIds.length})
+                          </label>
+                          {groupSelected.length > 0 ? (
+                            <span className="text-xs text-slate-500">
+                              {groupSelected.length} selected ·{" "}
+                              <button
+                                type="button"
+                                className="underline"
+                                onClick={() =>
+                                  setPlansSelected(groupPlanIds, false)
+                                }
+                              >
+                                Clear
+                              </button>
+                            </span>
+                          ) : null}
+                          <div className="ml-auto flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              disabled={bulkBusy || verifyIds.length === 0}
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `Verify ${verifyIds.length} pending lesson plan${verifyIds.length === 1 ? "" : "s"}?`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                bulkActionMutation.mutate({
+                                  action: "verify",
+                                  ids: verifyIds,
+                                });
+                              }}
+                            >
+                              Verify {scopeLabel} ({verifyIds.length})
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={
+                                !canPerformApprove ||
+                                bulkBusy ||
+                                unlockIds.length === 0
+                              }
+                              title={
+                                canPerformApprove
+                                  ? undefined
+                                  : APPROVE_ADMIN_ONLY_MESSAGE
+                              }
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `Unlock ${unlockIds.length} approved lesson plan${unlockIds.length === 1 ? "" : "s"}?`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                bulkActionMutation.mutate({
+                                  action: "unlock",
+                                  ids: unlockIds,
+                                });
+                              }}
+                            >
+                              Unlock {scopeLabel} ({unlockIds.length})
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
                       <div className="overflow-x-auto">
                         <Table className="min-w-[880px]">
                           <TableHead>
                             <tr>
+                              {showSelect ? (
+                                <Th className="w-10 text-center no-print">
+                                  <input
+                                    type="checkbox"
+                                    aria-label="Select all lesson plans"
+                                    checked={allGroupSelected}
+                                    onChange={(e) =>
+                                      setPlansSelected(
+                                        groupPlanIds,
+                                        e.target.checked,
+                                      )
+                                    }
+                                  />
+                                </Th>
+                              ) : null}
                               <Th className="w-12 text-center">S.N</Th>
                               <Th className="w-28">Date</Th>
                               <Th className="w-20 text-center">Unit No.</Th>
@@ -2495,7 +2678,7 @@ export const LessonPlanPanel = ({
                             {tableRows.length === 0 ? (
                               <tr>
                                 <Td
-                                  colSpan={showActions ? 9 : 8}
+                                  colSpan={columnCount}
                                   className="py-6 text-center text-slate-500"
                                 >
                                   No lesson plan rows yet.
@@ -2510,6 +2693,23 @@ export const LessonPlanPanel = ({
                                 if (isFirst) firstRowOfPlan.add(row.planId);
                                 return (
                                 <tr key={`${row.planId}-${i}`}>
+                                  {showSelect ? (
+                                    <Td className="text-center no-print">
+                                      {isFirst && plan ? (
+                                        <input
+                                          type="checkbox"
+                                          aria-label={`Select lesson plan ${row.dateBs || ""}`}
+                                          checked={selectedPlanIds.has(plan._id)}
+                                          onChange={(e) =>
+                                            togglePlanSelection(
+                                              plan._id,
+                                              e.target.checked,
+                                            )
+                                          }
+                                        />
+                                      ) : null}
+                                    </Td>
+                                  ) : null}
                                   <Td className="text-center tabular-nums">{i + 1}</Td>
                                   <Td className="whitespace-nowrap tabular-nums">
                                     {row.dateBs || "—"}

@@ -82,16 +82,6 @@ const PrintResultsPanel = lazy(() =>
     default: module.PrintResultsPanel,
   })),
 );
-const PassedOutStudentsPanel = lazy(() =>
-  import("features/exams/PassedOutStudentsPanel").then((module) => ({
-    default: module.PassedOutStudentsPanel,
-  })),
-);
-const BackStudentsPanel = lazy(() =>
-  import("features/exams/BackStudentsPanel").then((module) => ({
-    default: module.BackStudentsPanel,
-  })),
-);
 const ExamRecordsPanel = lazy(() =>
   import("features/exams/ExamRecordsPanel").then((module) => ({
     default: module.ExamRecordsPanel,
@@ -496,8 +486,6 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     | "print-results"
     | "exam-records"
     | "enter-marks"
-    | "passed-out"
-    | "back-students"
     | "confidential-codes"
   >("manage");
   const [adminTab, setAdminTab] = useState<
@@ -1347,71 +1335,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 Confidential Codes
               </Button>
             ) : null}
-            {/* Character certificates are Admin / Super Admin only, matching the
-                /character-certificates route guard. */}
-            {canManage && isCollege ? (
-              <Button
-                size="sm"
-                variant={adminSection === "passed-out" ? "default" : "outline"}
-                onClick={() => setAdminSection("passed-out")}
-              >
-                Passed-Out Students
-              </Button>
-            ) : null}
-            {isAdmin && isCollege ? (
-              <Button
-                size="sm"
-                variant={adminSection === "back-students" ? "default" : "outline"}
-                onClick={() => setAdminSection("back-students")}
-              >
-                Back Students
-              </Button>
-            ) : null}
           </div>
-
-          {adminSection === "passed-out" && canManage && isCollege ? (
-            <Suspense fallback={<LoadingState />}>
-              <PassedOutStudentsPanel
-                batches={(batchesQuery.data ?? []).map((batch) => ({
-                  ...batch,
-                  _id: String(batch._id),
-                }))}
-                years={(yearsQuery.data ?? []).map((year) => ({
-                  ...year,
-                  _id: String(year._id),
-                  batchId: year.batchId ? String(year.batchId) : undefined,
-                }))}
-              />
-            </Suspense>
-          ) : null}
-
-          {adminSection === "back-students" && isAdmin && isCollege ? (
-            <Suspense fallback={<LoadingState />}>
-              <BackStudentsPanel
-                batches={(batchesQuery.data ?? []).map((batch) => ({
-                  _id: String(batch._id),
-                  name: String(batch.name ?? ""),
-                }))}
-                years={(yearsQuery.data ?? []).map((year) => {
-                  const rawBatchId = year.batchId as
-                    | string
-                    | { _id?: string }
-                    | undefined;
-                  const batchId =
-                    rawBatchId == null
-                      ? undefined
-                      : typeof rawBatchId === "object"
-                        ? String(rawBatchId._id ?? "")
-                        : String(rawBatchId);
-                  return {
-                    _id: String(year._id),
-                    name: String(year.name ?? ""),
-                    batchId: batchId || undefined,
-                  };
-                })}
-              />
-            </Suspense>
-          ) : null}
 
           {adminSection === "enter-marks" && canManage ? (
             <Card>

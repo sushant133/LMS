@@ -3,12 +3,15 @@ import {
   Building2,
   ClipboardList,
   FileText,
+  GraduationCap,
+  RotateCcw,
   ScrollText,
 } from "lucide-react";
 import {
   canAccessExaminationCollege,
   canAccessExaminationCtevt,
   canAccessExaminationManagement,
+  canWriteExaminationCtevt,
   isSystemAdministrator,
   type ModuleAccessMap,
 } from "@phit-erp/shared";
@@ -19,6 +22,7 @@ import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { CtevtExamPanel } from "features/exams/CtevtExamPanel";
 import { CtevtRegistrationPanel } from "features/exams/CtevtRegistrationPanel";
+import { CtevtStudentListsPanel } from "features/exams/CtevtStudentListsPanel";
 import { ExamManager } from "features/exams/ExamManager";
 import { useAuth } from "features/auth/AuthProvider";
 import {
@@ -26,10 +30,15 @@ import {
   useIsTenantAdmin,
   useNormalizedRole,
 } from "hooks/useNormalizedRole";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { cn } from "lib/utils";
 
 type ExamSection = "college" | "ctevt";
-type CtevtSubSection = "registration" | "exam";
+type CtevtSubSection =
+  | "registration"
+  | "exam"
+  | "passed-out"
+  | "back-students";
 
 /**
  * Top-level Examination Management shell:
@@ -92,6 +101,15 @@ export const ExaminationManagementHub = () => {
   ]);
 
   const canOpenHub = canCollege || canCtevt;
+
+  const isCollege = useIsCollege();
+  /** Passed-Out Students issues character certificates, so it needs CTEVT write. */
+  const canWriteCtevt =
+    isSuperAdmin ||
+    (!moduleAccessConfigured && isAdmin) ||
+    canWriteExaminationCtevt(moduleAccessMap);
+  const canPassedOut = isCollege && canWriteCtevt;
+  const canBackStudents = isCollege && canCtevt;
 
   /** My Work: pure teaching/student portal — no admin College/CTEVT shell. */
   const isTeachingOrPortalRole =
@@ -250,10 +268,45 @@ export const ExaminationManagementHub = () => {
               <FileText className="mr-2 h-5 w-5" />
               Exam
             </Button>
+            {canPassedOut ? (
+              <Button
+                type="button"
+                size="lg"
+                variant={ctevtSub === "passed-out" ? "default" : "outline"}
+                className={cn(
+                  "min-w-[10rem] px-6 py-6 text-base font-semibold",
+                  ctevtSub === "passed-out" && "bg-brand-600 hover:bg-brand-700",
+                )}
+                onClick={() => setCtevtSub("passed-out")}
+              >
+                <GraduationCap className="mr-2 h-5 w-5" />
+                Passed-Out Students
+              </Button>
+            ) : null}
+            {canBackStudents ? (
+              <Button
+                type="button"
+                size="lg"
+                variant={ctevtSub === "back-students" ? "default" : "outline"}
+                className={cn(
+                  "min-w-[10rem] px-6 py-6 text-base font-semibold",
+                  ctevtSub === "back-students" &&
+                    "bg-brand-600 hover:bg-brand-700",
+                )}
+                onClick={() => setCtevtSub("back-students")}
+              >
+                <RotateCcw className="mr-2 h-5 w-5" />
+                Back Students
+              </Button>
+            ) : null}
           </div>
 
           {ctevtSub === "registration" ? (
             <CtevtRegistrationPanel />
+          ) : ctevtSub === "passed-out" && canPassedOut ? (
+            <CtevtStudentListsPanel view="passed-out" />
+          ) : ctevtSub === "back-students" && canBackStudents ? (
+            <CtevtStudentListsPanel view="back-students" />
           ) : (
             <CtevtExamPanel />
           )}
