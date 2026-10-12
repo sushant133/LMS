@@ -395,15 +395,14 @@ export const SalaryPaymentRecordsPanel = ({
     setEditingKey(null);
     setEntry(emptyEntryForm());
 
-    // Align sheet status with saved payroll rows for this month
-    if (saved.length > 0) {
-      const statuses = saved.map((r) => r.status).filter(Boolean) as SalaryPaymentStatus[];
-      if (statuses.includes("PAID")) setStatus("PAID");
-      else if (statuses.includes("APPROVED")) setStatus("APPROVED");
-      else if (statuses.includes("PENDING_APPROVAL")) setStatus("PENDING_APPROVAL");
-      else if (statuses.includes("PROCESSED")) setStatus("PROCESSED");
-      else setStatus("DRAFT");
-    }
+    // Align sheet status with saved payroll rows for this month. A month with no
+    // saved rows is a fresh Draft — never carry over the previous month's status.
+    const statuses = saved.map((r) => r.status).filter(Boolean) as SalaryPaymentStatus[];
+    if (statuses.includes("PAID")) setStatus("PAID");
+    else if (statuses.includes("APPROVED")) setStatus("APPROVED");
+    else if (statuses.includes("PENDING_APPROVAL")) setStatus("PENDING_APPROVAL");
+    else if (statuses.includes("PROCESSED")) setStatus("PROCESSED");
+    else setStatus("DRAFT");
   }, [sheetQuery.data]);
 
   const saveMutation = useMutation({
