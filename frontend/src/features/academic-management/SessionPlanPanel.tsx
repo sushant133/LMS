@@ -921,15 +921,31 @@ export const SessionPlanPanel = ({
                 </Button>
               </>
             ) : null}
-            {isAdmin && plan.status === "APPROVED" ? (
+            {/* Any locked status (submitted → approved) can be reopened as a draft. */}
+            {isAdmin &&
+            (plan.status === "SUBMITTED" ||
+              plan.status === "PENDING_APPROVAL" ||
+              String(plan.status) === "VERIFIED" ||
+              plan.status === "APPROVED") ? (
               <Button
                 size="sm"
                 variant="outline"
                 disabled={!canPerformApprove || unlockMutation.isPending}
                 title={
-                  canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE
+                  canPerformApprove
+                    ? "Reopen this plan as a draft so the teacher can edit it"
+                    : APPROVE_ADMIN_ONLY_MESSAGE
                 }
-                onClick={() => unlockMutation.mutate(plan._id)}
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      `Unlock the session plan for ${plan.subject?.name ?? "this subject"}? It will return to Draft so the teacher can edit it.`,
+                    )
+                  ) {
+                    return;
+                  }
+                  unlockMutation.mutate(plan._id);
+                }}
               >
                 Unlock
               </Button>

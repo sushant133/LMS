@@ -1641,7 +1641,12 @@ export const approveSyllabus = asyncHandler(async (req: Request, res: Response) 
     isDeleted: false
   });
   if (!existing) throw new ApiError(404, "Syllabus not found");
-  assertApprovableStatus(existing.status);
+  // Syllabi have no VERIFIED stage (see AcademicSyllabus status enum), so they
+  // are approved straight from submission — the plan-level "must be verified"
+  // check would make every submitted syllabus unapprovable.
+  if (!["SUBMITTED", "PENDING_APPROVAL"].includes(existing.status)) {
+    throw new ApiError(400, "Only submitted syllabi can be approved.");
+  }
 
   existing.status = "APPROVED";
   existing.adminRemarks = req.body?.remarks;

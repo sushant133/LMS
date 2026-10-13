@@ -34,7 +34,11 @@ import { useCanApproveRecords, useIsGrantedAdmin, useModuleAccess } from "hooks/
 import { getCollegeDisplayName } from "lib/auth";
 import { useWorkspaceMode } from "lib/workspace";
 import { api, unwrap } from "lib/api";
-import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
+import {
+  downloadPdfFromElementById,
+  printElementById,
+  type PageFormat,
+} from "lib/printUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 import { toast } from "sonner";
 import { AcademicManagementDashboardPanel } from "./AcademicManagementDashboard";
@@ -89,6 +93,10 @@ const printAreaIdForTab = (tab: Tab): string | null => {
       return null;
   }
 };
+
+/** Syllabus is flowing text and reads best portrait; the plan/log tabs are wide tables. */
+const pageFormatForTab = (tab: Tab): PageFormat =>
+  tab === "syllabus" ? "a4-portrait" : "a4-landscape";
 
 export const AcademicManagementHub = () => {
   const { user, availableSchools } = useAuth();
@@ -495,6 +503,7 @@ export const AcademicManagementHub = () => {
     void downloadPdfFromElementById(
       printId,
       `${activeTab}-${appliedFilters.academicYearBs || "export"}.pdf`,
+      pageFormatForTab(activeTab),
     ).then(
       () => toast.success("PDF export started"),
       (error) => toast.error(String(error?.message ?? error)),
@@ -507,7 +516,7 @@ export const AcademicManagementHub = () => {
       toast.message("Switch to Syllabus, Session Plan, Lesson Plan, Log Book, or Syllabus Completion to print");
       return;
     }
-    void printElementById(printId, `${activeTab}-print`);
+    void printElementById(printId, `${activeTab}-print`, pageFormatForTab(activeTab));
   };
 
   const hierarchyProps = {

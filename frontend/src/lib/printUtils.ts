@@ -1,7 +1,7 @@
 import { parseErrorMessage } from "lib/utils";
 
 export type PrintMode = "printing-bulk-results" | "printing-marksheet";
-type PageFormat = "a4-portrait" | "a4-landscape";
+export type PageFormat = "a4-portrait" | "a4-landscape";
 
 const PRINT_CLEANUP_MS = 60_000;
 
@@ -916,6 +916,18 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .font-nepali,
       [lang="ne"] {
         font-family: "Kanchan", "Preeti Unicode", "Noto Sans Devanagari", "Nirmala UI", "Mangal", "Arial Unicode MS", sans-serif !important;
+        /* Thin Devanagari strokes wash out on mono laser printers. */
+        color: #000000 !important;
+        line-height: 1.6;
+      }
+      /* Light on-screen greys (slate/gray 400–700) print as near-invisible
+         dots on black-and-white printers — darken them for paper. */
+      [class*="text-slate-400"], [class*="text-slate-500"], [class*="text-slate-600"], [class*="text-slate-700"],
+      [class*="text-gray-400"], [class*="text-gray-500"], [class*="text-gray-600"], [class*="text-gray-700"] {
+        color: #1f2937 !important;
+      }
+      [class*="text-slate-800"], [class*="text-slate-900"], [class*="text-gray-800"], [class*="text-gray-900"] {
+        color: #000000 !important;
       }
       .print-results-bulk-table {
         display: block !important;
@@ -1419,12 +1431,20 @@ const printElement = async (element: HTMLElement | null, pageFormat: PageFormat)
   await printViaIframe(element, pageFormat);
 };
 
-export const printElementById = async (elementId: string, _title?: string): Promise<void> => {
+export const printElementById = async (
+  elementId: string,
+  _title?: string,
+  pageFormat: PageFormat = "a4-landscape",
+): Promise<void> => {
   const element = document.getElementById(elementId);
-  await printElement(element, "a4-landscape");
+  await printElement(element, pageFormat);
 };
 
-export const downloadPdfFromElementById = async (elementId: string, filename: string): Promise<void> => {
+export const downloadPdfFromElementById = async (
+  elementId: string,
+  filename: string,
+  pageFormat: PageFormat = "a4-landscape",
+): Promise<void> => {
   const element = document.getElementById(elementId);
   if (!element) {
     throw new Error("Timetable print view is not ready. Refresh the page and try again.");
@@ -1439,7 +1459,7 @@ export const downloadPdfFromElementById = async (elementId: string, filename: st
     element,
     isTimetable
       ? { pageFormat: "a4-landscape", singlePage: true }
-      : "a4-landscape",
+      : pageFormat,
   );
   if (!blob || blob.size < 100) {
     throw new Error("PDF export failed (empty file). Try Print → Save as PDF.");

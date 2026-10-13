@@ -204,7 +204,7 @@ export const StudentSubjects = () => {
             window.requestAnimationFrame(() => resolve());
           });
         });
-        await printElementById("student-syllabus-print-area", "syllabus");
+        await printElementById("student-syllabus-print-area", "syllabus", "a4-portrait");
       } catch (error) {
         toast.error(parseErrorMessage(error) || "Could not print syllabus");
       } finally {

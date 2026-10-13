@@ -1099,7 +1099,7 @@ export const SyllabusPanel = ({
           window.requestAnimationFrame(() => resolve());
         });
       });
-      await printElementById("syllabus-print-area", "syllabus");
+      await printElementById("syllabus-print-area", "syllabus", "a4-portrait");
     } catch (error) {
       toast.error(parseErrorMessage(error) || "Could not print syllabus");
     } finally {

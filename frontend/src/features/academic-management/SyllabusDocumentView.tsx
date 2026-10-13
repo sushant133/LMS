@@ -129,13 +129,22 @@ export const SyllabusDocumentView = ({
     <div
       {...langProps}
       className={cn(
-        isPrint ? "mb-6 break-inside-avoid" : "space-y-3",
+        // A whole syllabus is usually longer than one page, so it must be
+        // allowed to break — "avoid" here pushed it to page 2 and left page 1
+        // blank under the header. Units/headings below keep themselves whole.
+        isPrint ? "mb-6 text-[13px] leading-relaxed text-black" : "space-y-3",
         nepali && nepaliTextClass,
         className,
       )}
     >
-      <div className={cn(isPrint ? "" : "space-y-1")}>
-        <h3 className={cn("font-semibold text-slate-900", nepali && nepaliTextClass)}>
+      <div className={cn(isPrint ? "break-after-avoid border-b border-slate-400 pb-1" : "space-y-1")}>
+        <h3
+          className={cn(
+            "font-semibold text-slate-900",
+            isPrint && "text-base",
+            nepali && nepaliTextClass,
+          )}
+        >
           {plan.subject?.name || "Subject"}
           {plan.subjectCode || plan.subject?.code
             ? ` (${plan.subjectCode || plan.subject?.code})`
@@ -162,9 +171,15 @@ export const SyllabusDocumentView = ({
         chapters.map((chapter) => (
           <div
             key={chapter._id}
-            className={cn(isPrint ? "mt-2" : "rounded-lg border border-slate-100 bg-slate-50/60 p-3")}
+            className={cn(isPrint ? "mt-3" : "rounded-lg border border-slate-100 bg-slate-50/60 p-3")}
           >
-            <p className={cn("font-medium text-slate-900", nepali && nepaliTextClass)}>
+            <p
+              className={cn(
+                "font-medium text-slate-900",
+                isPrint && "break-after-avoid font-semibold",
+                nepali && nepaliTextClass,
+              )}
+            >
               {chapter.sectionKind === "PART"
                 ? formatPartLabel(chapter.chapterNo, {
                     title: chapter.title,
@@ -185,7 +200,10 @@ export const SyllabusDocumentView = ({
               </p>
             ) : null}
             {(chapter.units ?? []).map((unit) => (
-              <div key={unit._id} className={cn(isPrint ? "ml-3 mt-1" : "mt-2 ml-1")}>
+              <div
+                key={unit._id}
+                className={cn(isPrint ? "ml-3 mt-1.5 break-inside-avoid" : "mt-2 ml-1")}
+              >
                 <p className={cn("text-sm font-medium text-slate-800", nepali && nepaliTextClass)}>
                   {formatUnitLabel(unit.unitNo, {
                     title: unit.title,
