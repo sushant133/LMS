@@ -10,6 +10,7 @@ import {
   createLogBookEntry,
   createSessionPlan,
   completeSyllabusOversightRecord,
+  revokeSyllabusOversightRecord,
   createSyllabus,
   deleteLessonPlan,
   deleteLogBookEntry,
@@ -85,6 +86,11 @@ router.post(
   "/syllabus-oversight/:id/complete",
   authorizeInstitutionAdmin,
   completeSyllabusOversightRecord
+);
+router.post(
+  "/syllabus-oversight/:id/revoke",
+  authorizeInstitutionAdmin,
+  revokeSyllabusOversightRecord
 );
 
 router.get("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), listSyllabi);

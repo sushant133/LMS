@@ -656,6 +656,21 @@ export type AcademicSyllabusOversightCompleteInput = z.infer<
   typeof academicSyllabusOversightCompleteSchema
 >;
 
+/** Undo completion on selected sub-units (or whole units) from Syllabus Completion. */
+export const academicSyllabusOversightRevokeSchema = z
+  .object({
+    subUnitIds: z.array(z.string()).optional().default([]),
+    unitIds: z.array(z.string()).optional().default([]),
+    reason: z.string().trim().max(500).optional().default("")
+  })
+  .refine((v) => v.subUnitIds.length > 0 || v.unitIds.length > 0, {
+    message: "Select at least one sub-unit or unit to revoke"
+  });
+
+export type AcademicSyllabusOversightRevokeInput = z.infer<
+  typeof academicSyllabusOversightRevokeSchema
+>;
+
 export type AcademicSyllabusInput = z.infer<typeof academicSyllabusSchema>;
 export type AcademicSyllabusChapterInput = z.infer<typeof academicSyllabusChapterSchema>;
 export type AcademicSyllabusTopicInput = z.infer<typeof academicSyllabusTopicSchema>;

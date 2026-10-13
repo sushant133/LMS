@@ -14,6 +14,7 @@ import {
   academicSyllabusSubUnitProgressSchema,
   academicSyllabusReorderSchema,
   academicSyllabusOversightCompleteSchema,
+  academicSyllabusOversightRevokeSchema,
   academicVerifyActionSchema,
   normalizeSubUnitSelection,
   isInstitutionAdmin,
@@ -32,6 +33,7 @@ import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import {
   completeSyllabusOversight,
+  revokeSyllabusOversight,
   getSyllabusOversightDetail,
   listSyllabusOversight
 } from "../utils/syllabusOversightService.js";
@@ -2859,6 +2861,12 @@ export const completeSyllabusOversightRecord = asyncHandler(async (req: Request,
   const payload = academicSyllabusOversightCompleteSchema.parse(req.body ?? {});
   const detail = await completeSyllabusOversight(req, routeParamId(req.params.id), payload);
   return sendSuccess(res, "Syllabus completion recorded", detail);
+});
+
+export const revokeSyllabusOversightRecord = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicSyllabusOversightRevokeSchema.parse(req.body ?? {});
+  const detail = await revokeSyllabusOversight(req, routeParamId(req.params.id), payload);
+  return sendSuccess(res, "Syllabus completion revoked", detail);
 });
 
 export const getSyllabusCoverage = asyncHandler(async (req: Request, res: Response) => {

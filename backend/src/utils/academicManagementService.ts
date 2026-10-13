@@ -1745,6 +1745,54 @@ export const taughtSyllabusLeafAttributionFromLogBook = async (
   syllabusId: string,
   subjectId?: string
 ): Promise<Map<string, TaughtLeafAttribution>> => {
+  const { entries, creditedLeafIds } = await loadApprovedLogCredits(
+    schoolId,
+    syllabusId,
+    subjectId
+  );
+
+  const taught = new Map<string, TaughtLeafAttribution>();
+  for (const entry of entries) {
+    const attribution: TaughtLeafAttribution = {
+      teacherId: entry.teacherId ? String(entry.teacherId) : "",
+      userId: entry.audit?.createdBy ? String(entry.audit.createdBy) : "",
+      taughtDateBs: String(entry.dateBs || "").trim(),
+      coverage: String(entry.topicCovered || "").trim()
+    };
+    // Entries arrive oldest first, so the first credit for a leaf is kept.
+    for (const id of creditedLeafIds(entry)) {
+      if (!taught.has(id)) taught.set(id, attribution);
+    }
+  }
+  return taught;
+};
+
+type ApprovedLogEntryRow = {
+  _id: mongoose.Types.ObjectId;
+  subUnitTitles?: string[];
+  subUnitTitle?: string;
+  syllabusSubUnitIds?: unknown[];
+  syllabusSubUnitId?: unknown;
+  syllabusUnitId?: unknown;
+  syllabusId?: unknown;
+  unit?: string;
+  teacherId?: unknown;
+  dateBs?: string;
+  topicCovered?: string;
+  lessonPlanItemId?: unknown;
+  audit?: { createdBy?: unknown };
+};
+
+/**
+ * Approved log book entries for one syllabus, plus the rule that decides which
+ * leaves each entry credits. Shared by the completion sync and by oversight
+ * revoke, so "what this entry marked complete" means the same thing in both.
+ */
+const loadApprovedLogCredits = async (
+  schoolId: mongoose.Types.ObjectId,
+  syllabusId: string,
+  subjectId?: string
+) => {
   const leaves = await loadSyllabusLeaves([syllabusId]);
   const leafById = new Map(leaves.map((leaf) => [leaf.id, leaf]));
   const byUnit = new Map<string, SyllabusLeaf[]>();
@@ -1762,7 +1810,7 @@ export const taughtSyllabusLeafAttributionFromLogBook = async (
       subjectIds = [subjectId];
     }
   }
-  const entries = await AcademicLogBookEntry.find({
+  const entries = (await AcademicLogBookEntry.find({
     schoolId,
     isDeleted: { $ne: true },
     reviewStatus: SYLLABUS_COUNTING_REVIEW_STATUS,
@@ -1772,67 +1820,137 @@ export const taughtSyllabusLeafAttributionFromLogBook = async (
     ]
   })
     .select(
-      "subUnitTitles subUnitTitle syllabusSubUnitIds syllabusSubUnitId syllabusUnitId syllabusId unit teacherId dateBs topicCovered audit.createdBy"
+      "subUnitTitles subUnitTitle syllabusSubUnitIds syllabusSubUnitId syllabusUnitId syllabusId unit teacherId dateBs topicCovered lessonPlanItemId audit.createdBy"
     )
     // Oldest class first, so a leaf is credited to the lesson that first
     // covered it rather than to a later revision class.
     .sort({ dateBs: 1, createdAt: 1 })
-    .lean();
+    .lean()) as unknown as ApprovedLogEntryRow[];
 
-  const taught = new Map<string, TaughtLeafAttribution>();
-  for (const entry of entries) {
-    const attribution: TaughtLeafAttribution = {
-      teacherId: entry.teacherId ? String(entry.teacherId) : "",
-      userId: entry.audit?.createdBy ? String(entry.audit.createdBy) : "",
-      taughtDateBs: String(entry.dateBs || "").trim(),
-      coverage: String(entry.topicCovered || "").trim()
-    };
-    /** Entries arrive oldest first, so the first credit for a leaf is kept. */
-    const credit = (leafId: string) => {
-      if (!taught.has(leafId)) taught.set(leafId, attribution);
-    };
+  /** Leaves in scope for an entry: its unit when known, else the whole syllabus. */
+  const scopeFor = (entry: Pick<ApprovedLogEntryRow, "syllabusUnitId" | "unit">) => {
+    const unitId = entry.syllabusUnitId ? String(entry.syllabusUnitId) : "";
+    const unitNo = parseUnitNo(String(entry.unit || ""));
+    if (unitId && byUnit.has(unitId)) return byUnit.get(unitId) ?? leaves;
+    if (unitNo > 0) {
+      const byNo = leaves.filter((leaf) => leaf.unitNo === unitNo);
+      if (byNo.length > 0) return byNo;
+    }
+    return leaves;
+  };
+
+  const creditedLeafIds = (entry: ApprovedLogEntryRow): string[] => {
     const entrySyllabus = entry.syllabusId ? String(entry.syllabusId) : "";
-    if (entrySyllabus && entrySyllabus !== syllabusId) continue;
+    if (entrySyllabus && entrySyllabus !== syllabusId) return [];
     const titles = expandTaughtTitles([
-      ...((entry.subUnitTitles as string[] | undefined) ?? []),
+      ...(entry.subUnitTitles ?? []),
       String(entry.subUnitTitle || "")
     ]);
-    const unitId = entry.syllabusUnitId ? String(entry.syllabusUnitId) : "";
-    const unitNo = parseUnitNo(String((entry as { unit?: string }).unit || ""));
-    let scope = leaves;
-    if (unitId && byUnit.has(unitId)) scope = byUnit.get(unitId) ?? leaves;
-    else if (unitNo > 0) {
-      const byNo = leaves.filter((leaf) => leaf.unitNo === unitNo);
-      if (byNo.length > 0) scope = byNo;
-    }
-
-    const ids = [
-      ...((entry.syllabusSubUnitIds ?? []) as Array<string | { toString(): string }>),
-      entry.syllabusSubUnitId
-    ]
-      .map((id) => (id ? String(id) : ""))
-      .filter(Boolean);
+    const scope = scopeFor(entry);
     if (titles.length > 0) {
       const matched = matchLeavesByTitles(scope, titles);
-      if (matched.length > 0) {
-        for (const id of matched) credit(id);
-        continue;
-      }
+      if (matched.length > 0) return matched;
     }
+    const ids = [...(entry.syllabusSubUnitIds ?? []), entry.syllabusSubUnitId]
+      .map((id) => (id ? String(id) : ""))
+      .filter(Boolean);
     const blob = titles.join(" ").toLowerCase();
-    for (const id of ids) {
+    return ids.filter((id) => {
       const leaf = leafById.get(id);
-      if (!leaf || !scope.some((row) => row.id === id)) continue;
-      if (
+      if (!leaf || !scope.some((row) => row.id === id)) return false;
+      return (
         titles.length === 0 ||
-        (leaf.headingKey && blob.includes(leaf.headingKey)) ||
-        (leaf.heading && blob.includes(leaf.heading.trim().toLowerCase()))
-      ) {
-        credit(id);
-      }
+        Boolean(leaf.headingKey && blob.includes(leaf.headingKey)) ||
+        Boolean(leaf.heading && blob.includes(leaf.heading.trim().toLowerCase()))
+      );
+    });
+  };
+
+  /** Does this one stored title credit any of the given leaves? */
+  const titleCreditsAny = (
+    entry: ApprovedLogEntryRow,
+    title: string,
+    leafIds: Set<string>
+  ): boolean =>
+    matchLeavesByTitles(scopeFor(entry), expandTaughtTitles([title])).some((id) =>
+      leafIds.has(id)
+    );
+
+  return { entries, creditedLeafIds, titleCreditsAny };
+};
+
+/**
+ * Detach syllabus leaves from every approved log book entry that credits them,
+ * so the completion sync stops marking them complete. Returns, per touched
+ * entry, whether it still credits anything afterwards — callers decide whether
+ * an emptied entry should be removed (oversight-created) or kept as a record
+ * of the class (teacher-filed).
+ */
+export const detachLeavesFromApprovedLogEntries = async (
+  schoolId: mongoose.Types.ObjectId,
+  syllabusId: string,
+  subjectId: string | undefined,
+  leafIds: string[]
+): Promise<Array<{ entryId: string; lessonPlanItemId?: string; stillCredits: number }>> => {
+  const revoke = new Set(leafIds);
+  const { entries, creditedLeafIds, titleCreditsAny } = await loadApprovedLogCredits(
+    schoolId,
+    syllabusId,
+    subjectId
+  );
+  const touched: Array<{ entryId: string; lessonPlanItemId?: string; stillCredits: number }> = [];
+
+  for (const entry of entries) {
+    const credited = creditedLeafIds(entry);
+    if (!credited.some((id) => revoke.has(id))) continue;
+
+    const keepTitles = (entry.subUnitTitles ?? []).filter(
+      (title) => !titleCreditsAny(entry, title, revoke)
+    );
+    const legacyTitles = String(entry.subUnitTitle || "")
+      .split(/[;\n|]+/)
+      .map((title) => title.trim())
+      .filter((title) => title && !titleCreditsAny(entry, title, revoke));
+    const keepIds = [...(entry.syllabusSubUnitIds ?? []), entry.syllabusSubUnitId]
+      .map((id) => (id ? String(id) : ""))
+      .filter((id) => id && !revoke.has(id));
+    const uniqueIds = [...new Set(keepIds)];
+
+    const next: ApprovedLogEntryRow = {
+      ...entry,
+      subUnitTitles: keepTitles,
+      subUnitTitle: (keepTitles.length > 0 ? keepTitles : legacyTitles).join("; "),
+      syllabusSubUnitIds: uniqueIds,
+      syllabusSubUnitId: uniqueIds[0]
+    };
+    let stillCredits = creditedLeafIds(next).filter((id) => !revoke.has(id)).length;
+    // With every title and id stripped, an entry with no titles would fall back
+    // to "credit its ids" — there are none left, so it credits nothing.
+    if (keepTitles.length === 0 && legacyTitles.length === 0 && uniqueIds.length === 0) {
+      stillCredits = 0;
     }
+
+    await AcademicLogBookEntry.updateOne(
+      { _id: entry._id },
+      {
+        $set: {
+          subUnitTitles: next.subUnitTitles,
+          subUnitTitle: next.subUnitTitle,
+          syllabusSubUnitIds: uniqueIds.map((id) => new mongoose.Types.ObjectId(id)),
+          ...(uniqueIds[0]
+            ? { syllabusSubUnitId: new mongoose.Types.ObjectId(uniqueIds[0]) }
+            : {})
+        },
+        ...(uniqueIds[0] ? {} : { $unset: { syllabusSubUnitId: 1 } })
+      }
+    );
+    touched.push({
+      entryId: String(entry._id),
+      lessonPlanItemId: entry.lessonPlanItemId ? String(entry.lessonPlanItemId) : undefined,
+      stillCredits
+    });
   }
-  return taught;
+  return touched;
 };
 
 /** Ids only, for callers that do not care who taught the leaf. */

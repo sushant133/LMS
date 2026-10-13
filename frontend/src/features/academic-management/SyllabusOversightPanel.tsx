@@ -19,6 +19,7 @@ import {
   ChevronRight,
   GraduationCap,
   ListChecks,
+  Undo2,
   UserRound,
 } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode } from "react";
@@ -172,9 +173,59 @@ export const SyllabusOversightPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const revokeMutation = useMutation({
+    mutationFn: (payload: { subUnitIds: string[]; reason?: string }) =>
+      unwrap<SyllabusOversightDetail>(
+        api.post(`/academic-management/syllabus-oversight/${selectedId}/revoke`, payload),
+      ),
+    onSuccess: (detail, payload) => {
+      toast.success(
+        `Completion revoked for ${payload.subUnitIds.length} sub-unit${
+          payload.subUnitIds.length === 1 ? "" : "s"
+        } — syllabus and progress updated`,
+      );
+      setSelectedLeaves(new Set());
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+      queryClient.setQueryData(
+        ["academic-management", "syllabus-oversight", selectedId],
+        detail,
+      );
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const rows = listQuery.data ?? [];
   const detail = detailQuery.data;
   const syllabus = detail?.syllabus;
+
+  const doneLeafIds = useMemo(
+    () =>
+      new Set(
+        (detail?.leaves ?? [])
+          .filter((leaf) => leaf.status === "COMPLETED" || leaf.status === "SKIPPED")
+          .map((leaf) => leaf.subUnitId),
+      ),
+    [detail?.leaves],
+  );
+  const selectedDoneIds = [...selectedLeaves].filter((id) => doneLeafIds.has(id));
+
+  /**
+   * Undo completion. Teacher log book rows stay as a record of the class with
+   * these topics taken off; entries this screen generated are removed.
+   */
+  const revokeLeaves = (ids: string[]) => {
+    if (!selectedId || ids.length === 0) return;
+    const reason = window.prompt(
+      `Revoke completion for ${ids.length} sub-unit${ids.length === 1 ? "" : "s"}?\n\n` +
+        "They return to Not started and the completion percentage drops. " +
+        "Log book entries created from this screen are removed; a teacher's own " +
+        "log book entries are kept with these topics taken off.\n\n" +
+        "Reason (optional) — press OK to revoke, Cancel to keep:",
+      "",
+    );
+    if (reason === null) return;
+    revokeMutation.mutate({ subUnitIds: ids, reason: reason.trim() || undefined });
+  };
 
   const assignedTeachers = detail?.assignedTeachers ?? [];
   const teacherOptions = useMemo(() => {
@@ -199,18 +250,10 @@ export const SyllabusOversightPanel = ({
     });
   };
 
-  const selectableLeaf = (sub: AcademicSyllabusSubUnitRecord): boolean => {
-    const done = sub.status === "COMPLETED" || sub.status === "SKIPPED";
-    return includeCompleted || !done;
-  };
-
+  // Completed leaves stay selectable so they can be revoked; "Mark complete"
+  // skips them unless "Include already completed" is ticked.
   const selectUnitLeaves = (unit: AcademicSyllabusTopicRecord, checked: boolean) => {
-    const ids = collectLeafIds(unit.subUnits ?? []).filter((id) => {
-      const leaf = (detail?.leaves ?? []).find((row) => row.subUnitId === id);
-      if (!leaf) return checked;
-      const done = leaf.status === "COMPLETED" || leaf.status === "SKIPPED";
-      return includeCompleted || !done;
-    });
+    const ids = collectLeafIds(unit.subUnits ?? []);
     setSelectedLeaves((current) => {
       const next = new Set(current);
       for (const id of ids) {
@@ -231,13 +274,22 @@ export const SyllabusOversightPanel = ({
       toast.error("Select the subject teacher so this counts toward their salary");
       return;
     }
+    const toMark = [...selectedLeaves].filter(
+      (id) => includeCompleted || !doneLeafIds.has(id),
+    );
+    if (toMark.length === 0) {
+      toast.error(
+        "The selected sub-units are already complete. Use Revoke to undo them, or tick “Include already completed” to re-attribute.",
+      );
+      return;
+    }
     completeMutation.mutate({
       source,
       teacherId: teacherId || undefined,
       deliveredByName: source === "ADMINISTRATION" ? deliveredByName : undefined,
       dateBs,
       note,
-      subUnitIds: [...selectedLeaves],
+      subUnitIds: toMark,
     });
   };
 
@@ -265,7 +317,7 @@ export const SyllabusOversightPanel = ({
                 type="checkbox"
                 className="mt-0.5 h-4 w-4 rounded border-slate-300"
                 checked={selectedLeaves.has(node._id)}
-                disabled={!writeAccess || !selectableLeaf(node)}
+                disabled={!writeAccess}
                 onChange={(event) => toggleLeaf(node._id, event.target.checked)}
               />
             ) : (
@@ -309,6 +361,22 @@ export const SyllabusOversightPanel = ({
                     <CalendarDays className="h-3 w-3 text-slate-400" />
                     Taught {node.attribution.taughtDateBs}
                   </span>
+                ) : null}
+                {isLeaf && done && writeAccess ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded px-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                    disabled={revokeMutation.isPending}
+                    title="Unmark this sub-unit and remove its completion"
+                    onClick={(event) => {
+                      // Inside the row <label>: don't toggle the checkbox too.
+                      event.preventDefault();
+                      revokeLeaves([node._id]);
+                    }}
+                  >
+                    <Undo2 className="h-3 w-3" />
+                    Undo
+                  </button>
                 ) : null}
               </span>
             </span>
@@ -644,6 +712,25 @@ export const SyllabusOversightPanel = ({
                           {completeMutation.isPending
                             ? "Saving…"
                             : `Mark ${selectedLeaves.size || ""} selected complete`.trim()}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                          onClick={() => revokeLeaves(selectedDoneIds)}
+                          disabled={revokeMutation.isPending || selectedDoneIds.length === 0}
+                          title={
+                            selectedDoneIds.length === 0
+                              ? "Select completed sub-units to revoke"
+                              : "Unmark the selected completed sub-units"
+                          }
+                        >
+                          <Undo2 className="mr-2 h-4 w-4" />
+                          {revokeMutation.isPending
+                            ? "Revoking…"
+                            : selectedDoneIds.length > 0
+                              ? `Revoke ${selectedDoneIds.length} completed`
+                              : "Revoke completed"}
                         </Button>
                         <p className="text-xs text-slate-500">
                           The assigned teacher continues the log book from the next remaining
