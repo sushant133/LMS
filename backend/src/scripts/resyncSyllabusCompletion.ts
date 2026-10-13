@@ -8,7 +8,9 @@
  *
  * This script re-runs that rule over every syllabus, which rolls back leaves
  * that were completed by entries still sitting at PENDING, VERIFIED or
- * NEEDS_IMPROVEMENT, and leaves administration-completed ones alone.
+ * NEEDS_IMPROVEMENT, and leaves administration-completed ones alone. It then
+ * recounts Lesson Plan topic progress (and the Session Plans behind it) from
+ * approved entries only.
  *
  * Usage (from the backend folder):
  *
@@ -26,7 +28,11 @@ import { env } from "../config/env.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { Subject } from "../models/Subject.js";
+import { AcademicLessonPlanItem } from "../models/AcademicLessonPlanItem.js";
+import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
 import {
+  SYLLABUS_COUNTING_REVIEW_STATUS,
+  syncLessonPlanItemProgress,
   syncSyllabusCompletionFromLogBook,
   taughtSyllabusLeafAttributionFromLogBook
 } from "../utils/academicManagementService.js";
@@ -122,7 +128,46 @@ const main = async () => {
     `\n${touchedSyllabi} syllabus record(s) ${apply ? "reset" : "would be reset"} · ` +
       `${totalRolledBack} leaf/leaves rolled back · ${totalKept} approved completion(s) kept`
   );
-  if (!apply && touchedSyllabi > 0) {
+
+  // Lesson plan topics used to count PENDING/VERIFIED logs as taught classes,
+  // which marked Session Plan units complete before approval. Recount them
+  // from approved entries only (syncLessonPlanItemProgress also re-syncs the
+  // owning Session Plan's units and percentage).
+  const approvedCounts = new Map<string, number>();
+  for (const row of await AcademicLogBookEntry.aggregate<{ _id: unknown; n: number }>([
+    {
+      $match: {
+        isDeleted: false,
+        reviewStatus: SYLLABUS_COUNTING_REVIEW_STATUS,
+        lessonPlanItemId: { $ne: null }
+      }
+    },
+    { $group: { _id: "$lessonPlanItemId", n: { $sum: 1 } } }
+  ])) {
+    approvedCounts.set(String(row._id), row.n);
+  }
+  const items = await AcademicLessonPlanItem.find({ completedClasses: { $gt: 0 } })
+    .select("_id completedClasses plannedTopic")
+    .lean();
+  const staleItems = items.filter(
+    (item) => (approvedCounts.get(String(item._id)) ?? 0) !== item.completedClasses
+  );
+  for (const item of staleItems.slice(0, 10)) {
+    console.log(
+      `  lesson topic "${String(item.plannedTopic || item._id)}": ${item.completedClasses} → ${
+        approvedCounts.get(String(item._id)) ?? 0
+      } completed class(es)`
+    );
+  }
+  if (staleItems.length > 10) console.log(`  … and ${staleItems.length - 10} more`);
+  if (apply) {
+    for (const item of staleItems) await syncLessonPlanItemProgress(String(item._id));
+  }
+  console.log(
+    `${staleItems.length} lesson plan topic(s) ${apply ? "recounted" : "would be recounted"} from approved log book entries`
+  );
+
+  if (!apply && (touchedSyllabi > 0 || staleItems.length > 0)) {
     console.log("Re-run with --apply to write the reset.");
   }
 

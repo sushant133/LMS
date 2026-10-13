@@ -2147,11 +2147,14 @@ export const syncLessonPlanItemProgress = async (lessonPlanItemId: string): Prom
   const item = await AcademicLessonPlanItem.findById(lessonPlanItemId);
   if (!item) return;
 
-  // Count submitted teaching logs (pending admin review still means class was taught)
+  // Only admin-approved classes count. Pending or merely verified logs must not
+  // move lesson/session/syllabus progress — this count feeds unit completion
+  // (and through it the completion percentage), so counting them here let a
+  // verifier advance the syllabus before the Administrator approved anything.
   const completed = await AcademicLogBookEntry.countDocuments({
     lessonPlanItemId: item._id,
     isDeleted: false,
-    reviewStatus: { $ne: "NEEDS_IMPROVEMENT" }
+    reviewStatus: SYLLABUS_COUNTING_REVIEW_STATUS
   });
 
   item.completedClasses = completed;
