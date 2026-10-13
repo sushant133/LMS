@@ -524,6 +524,22 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
   );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
+  // Editing must not move this plan onto a subject/year that already has one.
+  if (payload.subjectId !== undefined || payload.academicYearBs !== undefined) {
+    await assertNoDuplicateOfficialSessionPlan(
+      req,
+      {
+        subjectId: payload.subjectId || existing.subjectId.toString(),
+        academicYearBs: payload.academicYearBs || existing.academicYearBs,
+        classId: payload.classId || existing.classId?.toString(),
+        sectionId: payload.sectionId || existing.sectionId?.toString(),
+        batchId: payload.batchId || existing.batchId?.toString(),
+        yearId: payload.yearId || existing.yearId?.toString()
+      },
+      existing._id.toString()
+    );
+  }
+
   const safePayload = await sanitizeTeacherOwnedUpdate(
     req,
     sanitizeSessionPlanScope(payload as Record<string, unknown> & {
@@ -1930,6 +1946,22 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
     teacherId,
     academicYearBs
   });
+
+  // One lesson plan per subject per teaching day — an edit must not land on a
+  // date (or subject) that already has its own plan.
+  await assertNoDuplicateOfficialLessonPlan(
+    req,
+    {
+      subjectId,
+      academicYearBs,
+      teachingDateBs,
+      classId: payload.classId || existing.classId?.toString(),
+      sectionId: payload.sectionId || existing.sectionId?.toString(),
+      batchId: payload.batchId || existing.batchId?.toString(),
+      yearId: payload.yearId || existing.yearId?.toString()
+    },
+    existing._id.toString()
+  );
 
   if (payload.items) {
     payload.items = mergeLessonPlanItemsByUnit(payload.items);

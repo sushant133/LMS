@@ -42,6 +42,7 @@ import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
   academicListApiParams,
+  curriculumKeyForSubject,
   dedupeYearsForSelect,
   ensureSubjectInOptions,
   filterSubjectsByClass,
@@ -955,6 +956,48 @@ export const LessonPlanPanel = ({
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
+
+  /**
+   * One Lesson Plan per subject (any batch-year copy) per teaching day. When a
+   * new plan is started for a day that already has one, open that plan so the
+   * edit lands in it instead of creating a duplicate.
+   */
+  useEffect(() => {
+    if (!showForm || editingId || !form.subjectId) return;
+    const date = (form.teachingDateBs || form.startDateBs || "").trim();
+    if (!date) return;
+    const year = (form.academicYearBs || "").trim();
+    const keyOf = (id: string, subject?: { name?: string; code?: string } | null) => {
+      const row = subjects.find((s) => s._id === id);
+      return curriculumKeyForSubject(
+        row ?? { _id: id, name: subject?.name, code: subject?.code },
+      );
+    };
+    const wanted = keyOf(form.subjectId);
+    const existing = (plansQuery.data ?? []).find(
+      (plan) =>
+        (plan.teachingDateBs || plan.startDateBs || "").trim() === date &&
+        (!year || (plan.academicYearBs || "").trim() === year) &&
+        (plan.subjectId === form.subjectId ||
+          keyOf(plan.subjectId, plan.subject) === wanted),
+    );
+    if (!existing) return;
+    openContinueDraft(existing);
+    toast.message(
+      `${existing.subject?.name ?? "This subject"} already has a Lesson Plan for ${date} — opened it so your changes go into that plan.`,
+    );
+    // openContinueDraft is a plain function; this is a one-shot switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    showForm,
+    editingId,
+    form.subjectId,
+    form.teachingDateBs,
+    form.startDateBs,
+    form.academicYearBs,
+    plansQuery.data,
+    subjects,
+  ]);
 
   const openContinueDraft = (plan: AcademicLessonPlanRecord) => {
     const teaching =

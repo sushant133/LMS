@@ -3,6 +3,10 @@ import {
   type AcademicLessonPlanRecord,
   type AcademicLogBookEntryInput,
   type AcademicLogBookEntryRecord,
+  type AcademicSessionPlanRecord,
+  type AcademicSyllabusRecord,
+  type AcademicSyllabusSubUnitRecord,
+  type AcademicSyllabusTopicRecord,
   type SubjectAssignmentRecord,
   type SubjectRecord,
   canManageInstitution,
@@ -208,12 +212,124 @@ const flattenLessonPlanPicks = (
   return out;
 };
 
+/** Leaf sub-units (the teachable rows) of one syllabus unit, depth-first. */
+const syllabusLeaves = (
+  nodes: AcademicSyllabusSubUnitRecord[] | undefined,
+): AcademicSyllabusSubUnitRecord[] =>
+  (nodes ?? []).flatMap((node) =>
+    node.children?.length ? syllabusLeaves(node.children) : [node],
+  );
+
+const syllabusUnitById = (syllabi: AcademicSyllabusRecord[]) => {
+  const map = new Map<string, { syllabus: AcademicSyllabusRecord; chapterId: string; unit: AcademicSyllabusTopicRecord }>();
+  for (const syllabus of syllabi) {
+    for (const chapter of syllabus.chapters ?? []) {
+      for (const unit of chapter.units ?? []) {
+        map.set(unit._id, { syllabus, chapterId: chapter._id, unit });
+      }
+    }
+  }
+  return map;
+};
+
+/** Sub-unit titles + their syllabus leaf ids for one syllabus unit. */
+const syllabusUnitSubs = (unit: AcademicSyllabusTopicRecord) => {
+  const titleToId: Record<string, string> = {};
+  const titles: string[] = [];
+  for (const leaf of syllabusLeaves(unit.subUnits)) {
+    const title = (leaf.heading || "").trim();
+    if (!title) continue;
+    titles.push(title);
+    titleToId[titleKey(title)] = leaf._id;
+  }
+  return { titles, titleToId, ids: Object.values(titleToId) };
+};
+
+/** Session Plan units the Lesson Plan may not cover (no date: any day). */
+const flattenSessionPlanPicks = (
+  plans: AcademicSessionPlanRecord[],
+  syllabi: AcademicSyllabusRecord[],
+): LessonPlanPick[] => {
+  const bySyllabusUnit = syllabusUnitById(syllabi);
+  const out: LessonPlanPick[] = [];
+  for (const plan of plans) {
+    for (const unit of plan.units ?? []) {
+      const unitNo = unit.unitNo != null ? String(unit.unitNo) : "";
+      const unitName = (unit.chapterName || "").trim();
+      const linked = unit.syllabusUnitId ? bySyllabusUnit.get(unit.syllabusUnitId) : undefined;
+      const subs = linked ? syllabusUnitSubs(linked.unit) : { titles: [], titleToId: {}, ids: [] };
+      const subUnitTitles = [
+        ...subs.titles,
+        ...parseSubUnitsFromTopics(unit.topicsCovered),
+      ].filter((t, i, arr) => arr.findIndex((x) => titleKey(x) === titleKey(t)) === i);
+      out.push({
+        unitId: unit._id,
+        label: formatLogUnitLabel(unitNo, unitName),
+        unitNo,
+        unitName,
+        dateBs: "",
+        lessonPlanId: "",
+        lessonPlanItemId: "",
+        sessionPlanUnitId: unit._id,
+        subUnitTitles,
+        teachingMethod: "",
+        syllabusId: unit.syllabusId || linked?.syllabus._id || "",
+        syllabusChapterId: unit.syllabusChapterId || linked?.chapterId || "",
+        syllabusUnitId: unit.syllabusUnitId || "",
+        syllabusSubUnitIds: subs.ids,
+        titleToId: subs.titleToId,
+      });
+    }
+  }
+  return out;
+};
+
+/** Official syllabus units, so a subject with only a syllabus can still be logged. */
+const flattenSyllabusPicks = (syllabi: AcademicSyllabusRecord[]): LessonPlanPick[] => {
+  const out: LessonPlanPick[] = [];
+  for (const syllabus of syllabi) {
+    for (const chapter of syllabus.chapters ?? []) {
+      for (const unit of chapter.units ?? []) {
+        const unitNo = unit.unitNo != null ? String(unit.unitNo) : "";
+        const unitName = (unit.title || "").trim();
+        const subs = syllabusUnitSubs(unit);
+        out.push({
+          // Not a Session Plan unit id — kept out of sessionPlanUnitId so it is never saved as one.
+          unitId: `syllabus:${unit._id}`,
+          label: formatLogUnitLabel(unitNo, unitName),
+          unitNo,
+          unitName,
+          dateBs: "",
+          lessonPlanId: "",
+          lessonPlanItemId: "",
+          sessionPlanUnitId: "",
+          subUnitTitles: subs.titles,
+          teachingMethod: "",
+          syllabusId: syllabus._id,
+          syllabusChapterId: chapter._id,
+          syllabusUnitId: unit._id,
+          syllabusSubUnitIds: subs.ids,
+          titleToId: subs.titleToId,
+        });
+      }
+    }
+  }
+  return out;
+};
+
 /**
- * The same syllabus unit appears once per teacher who planned it (each has their
- * own Session Plan unit id), so units are grouped by their visible label.
+ * One key per real unit across Lesson Plan / Session Plan / Syllabus and across
+ * teachers (each teacher's Session Plan has its own unit ids): the unit number
+ * plus its name with any "Unit N:" prefix and punctuation stripped.
  */
-const unitKeyOf = (pick: Pick<LessonPlanPick, "label">) =>
-  pick.label.replace(/\s+/g, " ").trim().toLowerCase();
+const unitKeyOf = (pick: Pick<LessonPlanPick, "label" | "unitNo" | "unitName">) => {
+  const name = (pick.unitName || pick.label)
+    .replace(/^\s*unit\s*\d+\s*[:.\-–]?\s*/i, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return `${(pick.unitNo || "").trim()}|${name}`;
+};
 
 const uniqueUnits = (picks: LessonPlanPick[]) => {
   const seen = new Map<string, LessonPlanPick>();
@@ -514,14 +630,56 @@ export const LogBookPanel = ({
     enabled: showForm,
   });
 
-  const matchedLessonPlans = useMemo(() => {
+  /**
+   * The log book is flexible: any unit of the subject may be logged on any
+   * date. Units come from the Lesson Plan first (so entries keep their topic
+   * link), then the Session Plan, then the official Syllabus — so a subject
+   * that has been planned never shows an empty unit picker.
+   */
+  const sessionPlansQuery = useQuery({
+    queryKey: ["academic-management", "session-plans-for-log", scope.subjectId],
+    queryFn: () =>
+      unwrap<AcademicSessionPlanRecord[]>(
+        api.get("/academic-management/session-plans", {
+          params: { subjectId: scope.subjectId },
+        }),
+      ),
+    enabled: showForm && Boolean(scope.subjectId),
+  });
+  const syllabiQuery = useQuery({
+    queryKey: ["academic-management", "syllabi-for-log", scope.subjectId],
+    queryFn: () =>
+      unwrap<AcademicSyllabusRecord[]>(
+        api.get("/academic-management/syllabi", {
+          params: { subjectId: scope.subjectId },
+        }),
+      ),
+    enabled: showForm && Boolean(scope.subjectId),
+  });
+
+  /**
+   * Records for the form's subject (any batch-year sibling, any teacher):
+   * not-rejected first when there are any, the teacher's own first, and the
+   * form's academic year when it has matches.
+   */
+  const pickSubjectRecords = <
+    T extends {
+      subjectId: string;
+      subject?: { name?: string; code?: string } | null;
+      status?: string;
+      teacherId?: string;
+      academicYearBs?: string;
+    },
+  >(
+    records: T[],
+  ): T[] => {
     // Rejected plans still list real syllabus units; use them only when the
     // subject has nothing else, so the unit picker is never empty for a planned subject.
-    const preferNotRejected = (plans: AcademicLessonPlanRecord[]) => {
-      const usable = plans.filter((plan) => plan.status !== "REJECTED");
-      return usable.length > 0 ? usable : plans;
+    const preferNotRejected = (rows: T[]) => {
+      const usable = rows.filter((row) => row.status !== "REJECTED");
+      return usable.length > 0 ? usable : rows;
     };
-    const all = lessonPlansQuery.data ?? [];
+    const all = records;
     if (!scope.subjectId) return preferNotRejected(all);
 
     const subjectSet = new Set(formCurriculumSubjectIds);
@@ -544,8 +702,8 @@ export const LogBookPanel = ({
     // limits this list to the teacher's subjects; own plans are ordered first.
     const matchedAny = all.filter((plan) => {
       if (subjectSet.has(plan.subjectId)) return true;
-      const planName = normText(plan.subject?.name);
-      const planCode = normText(plan.subject?.code);
+      const planName = normText(plan.subject?.name ?? undefined);
+      const planCode = normText(plan.subject?.code ?? undefined);
       if (planName && siblingNames.has(planName)) return true;
       if (planCode && siblingCodes.has(planCode)) return true;
       if (selectedName) {
@@ -558,13 +716,13 @@ export const LogBookPanel = ({
     });
     const matched = preferNotRejected(matchedAny);
 
-    const ownFirst = (plans: AcademicLessonPlanRecord[]) =>
+    const ownFirst = (rows: T[]) =>
       effectiveTeacherId
         ? [
-            ...plans.filter((plan) => plan.teacherId === effectiveTeacherId),
-            ...plans.filter((plan) => plan.teacherId !== effectiveTeacherId),
+            ...rows.filter((row) => row.teacherId === effectiveTeacherId),
+            ...rows.filter((row) => row.teacherId !== effectiveTeacherId),
           ]
-        : plans;
+        : rows;
 
     const formYear = (
       scope.academicYearBs ||
@@ -573,11 +731,26 @@ export const LogBookPanel = ({
     ).trim();
     if (!formYear) return ownFirst(matched);
     const sameYear = matched.filter(
-      (plan) => (plan.academicYearBs || "").trim() === formYear,
+      (row) => (row.academicYearBs || "").trim() === formYear,
     );
     return ownFirst(sameYear.length > 0 ? sameYear : matched);
+  };
+
+  const lessonPicks = useMemo(() => {
+    const matchedLessonPlans = pickSubjectRecords(lessonPlansQuery.data ?? []);
+    const matchedSyllabi = pickSubjectRecords(syllabiQuery.data ?? []);
+    const matchedSessionPlans = pickSubjectRecords(sessionPlansQuery.data ?? []);
+    return [
+      ...flattenLessonPlanPicks(matchedLessonPlans),
+      ...flattenSessionPlanPicks(matchedSessionPlans, matchedSyllabi),
+      ...flattenSyllabusPicks(matchedSyllabi),
+    ];
+    // pickSubjectRecords reads the scope/subject values listed below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     lessonPlansQuery.data,
+    sessionPlansQuery.data,
+    syllabiQuery.data,
     scope.subjectId,
     scope.academicYearBs,
     filters.academicYearBs,
@@ -587,25 +760,45 @@ export const LogBookPanel = ({
     effectiveTeacherId,
   ]);
 
-  const lessonPicks = useMemo(
-    () => flattenLessonPlanPicks(matchedLessonPlans),
-    [matchedLessonPlans],
-  );
+  const unitSourcesLoading =
+    lessonPlansQuery.isLoading ||
+    (Boolean(scope.subjectId) && (sessionPlansQuery.isLoading || syllabiQuery.isLoading));
 
+  /**
+   * Every unit of the subject is always offered (the log book may record any
+   * unit on any date); units the Lesson Plan scheduled for this date come first.
+   */
   const unitsForDate = (dateBs: string) => {
-    const onDate = uniqueUnits(lessonPicks.filter((p) => p.dateBs === dateBs));
-    if (onDate.length > 0) return { units: onDate, fromDate: true };
-    return { units: uniqueUnits(lessonPicks), fromDate: false };
+    const onDate = lessonPicks.filter((p) => dateBs && p.dateBs === dateBs);
+    return {
+      units: uniqueUnits([...onDate, ...lessonPicks]),
+      fromDate: onDate.length > 0,
+    };
   };
 
-  /** Every pick for the chosen unit, across all teachers' plans for the subject. */
+  /** The id the unit dropdown shows for this unit (equivalent ids collapse into one option). */
+  const displayedUnitId = (dateBs: string, unitId: string) => {
+    if (!unitId) return "";
+    const anchor = lessonPicks.find((p) => p.unitId === unitId);
+    if (!anchor) return unitId;
+    const key = unitKeyOf(anchor);
+    return unitsForDate(dateBs).units.find((u) => unitKeyOf(u) === key)?.unitId ?? unitId;
+  };
+
+  /**
+   * Every pick for the chosen unit across Lesson Plan, Session Plan and
+   * Syllabus, so all of its sub-units can be selected. The first pick (the
+   * Lesson Plan topic for this date when there is one) supplies the links.
+   */
   const picksForUnit = (dateBs: string, unitId: string) => {
     const anchor = lessonPicks.find((p) => p.unitId === unitId);
     if (!anchor) return [];
     const key = unitKeyOf(anchor);
     const sameUnit = lessonPicks.filter((p) => unitKeyOf(p) === key);
-    const onDate = sameUnit.filter((p) => p.dateBs === dateBs);
-    return onDate.length > 0 ? onDate : sameUnit;
+    return [
+      ...sameUnit.filter((p) => dateBs && p.dateBs === dateBs),
+      ...sameUnit.filter((p) => !(dateBs && p.dateBs === dateBs)),
+    ];
   };
 
   const saveMutation = useMutation({
@@ -709,8 +902,11 @@ export const LogBookPanel = ({
 
   const applyRowDate = (index: number, dateBs: string) => {
     const row = rows[index];
-    const { units } = unitsForDate(dateBs);
-    const stillValid = units.some((u) => u.unitId === row?.sessionPlanUnitId);
+    // Every unit is offered on every date, so a chosen unit stays chosen.
+    const stillValid = Boolean(
+      row?.sessionPlanUnitId &&
+        lessonPicks.some((p) => p.unitId === row.sessionPlanUnitId),
+    );
     if (stillValid && row) {
       const picks = picksForUnit(dateBs, row.sessionPlanUnitId);
       const first = picks[0];
@@ -1447,24 +1643,22 @@ export const LogBookPanel = ({
                             <p className="py-2 text-xs text-slate-400">
                               Select date first
                             </p>
-                          ) : lessonPlansQuery.isLoading ? (
+                          ) : unitSourcesLoading ? (
                             <p className="py-2 text-xs text-slate-400">
-                              Loading Lesson Plan…
-                            </p>
-                          ) : lessonPlansQuery.isError ? (
-                            <p className="py-2 text-xs text-rose-700">
-                              Could not load Lesson Plans. Try again.
+                              Loading units…
                             </p>
                           ) : dateUnits.units.length === 0 ? (
                             <p className="py-2 text-xs text-amber-700">
-                              {(lessonPlansQuery.data?.length ?? 0) > 0
-                                ? "No units on the Lesson Plan for this subject."
-                                : "No Lesson Plan units. Create a Lesson Plan first."}
+                              {lessonPlansQuery.isError ||
+                              sessionPlansQuery.isError ||
+                              syllabiQuery.isError
+                                ? "Could not load units. Try again."
+                                : "This subject has no units in its Syllabus, Session Plan or Lesson Plan yet."}
                             </p>
                           ) : (
                             <>
                               <Select
-                                value={row.sessionPlanUnitId}
+                                value={displayedUnitId(row.dateBs, row.sessionPlanUnitId)}
                                 onChange={(event) =>
                                   applyRowUnit(index, event.target.value)
                                 }
@@ -1476,12 +1670,11 @@ export const LogBookPanel = ({
                                   </option>
                                 ))}
                               </Select>
-                              {!dateUnits.fromDate && row.dateBs ? (
-                                <p className="mt-1 text-[11px] text-amber-700">
-                                  No Lesson Plan on this date. Units are from
-                                  the Lesson Plan so you can fill a missed day.
-                                </p>
-                              ) : null}
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {dateUnits.fromDate
+                                  ? "Units planned for this date are listed first; any unit can be chosen."
+                                  : "Any unit of this subject can be logged on any date."}
+                              </p>
                             </>
                           )}
                         </td>

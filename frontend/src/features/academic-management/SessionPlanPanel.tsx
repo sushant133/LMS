@@ -33,6 +33,7 @@ import { openAuthenticatedAttachment } from "lib/attachments";
 import { parseErrorMessage } from "lib/utils";
 import {
   academicListApiParams,
+  curriculumKeyForSubject,
   dedupeYearsForSelect,
   ensureSubjectInOptions,
   filterSubjectsByClass,
@@ -703,6 +704,37 @@ export const SessionPlanPanel = ({
   });
 
   const allPlans = plansQuery.data ?? [];
+
+  /**
+   * One Session Plan per subject (any batch-year copy) per academic year. When
+   * "New" is used for a subject that already has one, open that plan instead
+   * so every change lands in the same record rather than a duplicate.
+   */
+  useEffect(() => {
+    if (!showForm || editingId || !form.subjectId) return;
+    const year = (form.academicYearBs || "").trim();
+    if (!year) return;
+    const keyOf = (id: string, subject?: { name?: string; code?: string } | null) => {
+      const row = subjects.find((s) => s._id === id);
+      return curriculumKeyForSubject(
+        row ?? { _id: id, name: subject?.name, code: subject?.code },
+      );
+    };
+    const wanted = keyOf(form.subjectId);
+    const existing = allPlans.find(
+      (plan) =>
+        (plan.academicYearBs || "").trim() === year &&
+        (plan.subjectId === form.subjectId ||
+          keyOf(plan.subjectId, plan.subject) === wanted),
+    );
+    if (!existing) return;
+    openEditForm(existing);
+    toast.message(
+      `${existing.subject?.name ?? "This subject"} already has a Session Plan for ${year} — opened it so your changes go into that plan.`,
+    );
+    // openEditForm is stable enough for this one-shot switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, editingId, form.subjectId, form.academicYearBs, allPlans, subjects]);
 
   const keywordFilteredPlans = useMemo(
     () => allPlans.filter((plan) => matchSessionPlanKeyword(plan, filters.keyword ?? "")),

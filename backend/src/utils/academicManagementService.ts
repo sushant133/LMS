@@ -719,6 +719,19 @@ export const nextContinuedLogBookSerial = async (
   return (Number(latest[0]?.serialNo) || 0) + 1;
 };
 
+/**
+ * Duplicate checks match a scope field (batch/year/class/section) when it is
+ * equal OR unset on the stored plan. An exact match alone let a plan saved with
+ * a year sit beside an older one saved without it — the same subject planned twice.
+ */
+const sameOrUnsetScope = (filter: Record<string, unknown>): void => {
+  for (const key of ["batchId", "yearId", "classId", "sectionId"]) {
+    const value = filter[key];
+    if (value === undefined || value === null || value === "") continue;
+    filter[key] = { $in: [value, null] };
+  }
+};
+
 export const assertNoDuplicateOfficialSessionPlan = async (
   req: Request,
   payload: {
@@ -744,6 +757,7 @@ export const assertNoDuplicateOfficialSessionPlan = async (
   if (payload.classId) filter.classId = payload.classId;
   if (payload.sectionId) filter.sectionId = payload.sectionId;
   if (excludeId) filter._id = { $ne: excludeId };
+  sameOrUnsetScope(filter);
   const existing = await AcademicSessionPlan.findOne(filter).select("_id").lean();
   if (existing) {
     throw new ApiError(
@@ -782,6 +796,7 @@ export const assertNoDuplicateOfficialLessonPlan = async (
   if (payload.classId) filter.classId = payload.classId;
   if (payload.sectionId) filter.sectionId = payload.sectionId;
   if (excludeId) filter._id = { $ne: excludeId };
+  sameOrUnsetScope(filter);
   const existing = await AcademicLessonPlan.findOne(filter).select("_id").lean();
   if (existing) {
     throw new ApiError(
