@@ -380,8 +380,17 @@ export const applyOfficialPlanScopeToFilter = async (
     })
       .select("subjectId")
       .lean();
-    const ids = [...new Set(rows.map((row) => String(row.subjectId)))];
-    intersectSubjectFilter(filter, ids);
+    // Expand to curriculum siblings exactly like the teacher path below: a
+    // college provisions one Subject per batch year, so plans saved under a
+    // sibling instance were filtered out and the Log Book form reported
+    // "No units on the Lesson Plan for this subject".
+    const schoolId = tenantObjectId(req);
+    const ids = new Set<string>();
+    for (const id of new Set(rows.map((row) => String(row.subjectId)))) {
+      ids.add(id);
+      for (const sib of await expandCurriculumSubjectIds(schoolId, id)) ids.add(sib);
+    }
+    intersectSubjectFilter(filter, [...ids]);
     return;
   }
 
