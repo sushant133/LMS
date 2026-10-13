@@ -21,6 +21,7 @@ import {
   createSubjectAssignment,
   deleteSubjectAssignment,
   endSubjectAssignment,
+  reactivateSubjectAssignment,
   getAcademicYearBs,
   listSubjectAssignments,
   getAssignmentLeftover,
@@ -85,6 +86,11 @@ export const endAssignment = asyncHandler(async (req: Request, res: Response) =>
   const payload = subjectAssignmentEndSchema.parse(req.body);
   const result = await endSubjectAssignment(req, paramId(req), payload);
   return sendSuccess(res, "Subject assignment deactivated", { rows: [result.row], warnings: result.warnings });
+});
+
+export const reactivateAssignment = asyncHandler(async (req: Request, res: Response) => {
+  const result = await reactivateSubjectAssignment(req, paramId(req));
+  return sendSuccess(res, "Subject assignment activated", { rows: [result.row], warnings: result.warnings });
 });
 
 export const deleteAssignment = asyncHandler(async (req: Request, res: Response) => {

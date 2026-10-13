@@ -152,6 +152,8 @@ const labelById = (
   return items.find((item) => item._id === key)?.name ?? key;
 };
 
+const ALL_ASSIGNMENT_STATUSES = "ACTIVE,ENDED,SUPERSEDED";
+
 export const SubjectAssignmentManager = () => {
   const { user } = useAuth();
   const canManage = useIsTenantAdmin() || isDualRoleTeacher(user);
@@ -168,7 +170,9 @@ export const SubjectAssignmentManager = () => {
   const [filterSectionId, setFilterSectionId] = useState("");
   const [filterBatchId, setFilterBatchId] = useState("");
   const [filterYearId, setFilterYearId] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ACTIVE");
+  // Default to every status: a deactivated assignment must stay in the matrix
+  // so it can be activated again from there.
+  const [statusFilter, setStatusFilter] = useState(ALL_ASSIGNMENT_STATUSES);
 
   // Create form shared context
   const [formAy, setFormAy] = useState("");
@@ -582,6 +586,30 @@ export const SubjectAssignmentManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const reactivateMutation = useMutation({
+    mutationFn: (row: SubjectAssignmentRecord) =>
+      unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
+        api.post(`/academics/subject-assignments/${row._id}/reactivate`),
+      ),
+    onSuccess: async (data) => {
+      toast.success("Assignment activated");
+      for (const warning of data.warnings ?? []) toast.message(warning);
+      await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const confirmReactivate = (row: SubjectAssignmentRecord) => {
+    if (
+      !window.confirm(
+        `Activate this assignment again?\n\nTeacher: ${labelOfTeacher(row.teacherId)}\nSubject: ${labelOfSubject(row.subjectId)}\n\nThe teacher regains access to this subject.`,
+      )
+    ) {
+      return;
+    }
+    reactivateMutation.mutate(row);
+  };
+
   const deleteMutation = useMutation({
     mutationFn: async (row: SubjectAssignmentRecord) => {
       return unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
@@ -659,7 +687,10 @@ export const SubjectAssignmentManager = () => {
 
   const teachers = teachersQuery.data ?? [];
   const subjects = subjectsQuery.data ?? [];
-  const assignments = assignmentsQuery.data ?? [];
+  // Active rows first; deactivated ones follow so they are easy to find and re-activate.
+  const assignments = [...(assignmentsQuery.data ?? [])].sort(
+    (a, b) => Number(b.status === "ACTIVE") - Number(a.status === "ACTIVE"),
+  );
   const batches = batchesQuery.data ?? [];
   const years = yearsQuery.data ?? [];
   const classes = classesQuery.data ?? [];
@@ -1332,10 +1363,9 @@ export const SubjectAssignmentManager = () => {
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
                   >
-                    <option value="ACTIVE">ACTIVE</option>
-                    <option value="ENDED">ENDED</option>
-                    <option value="SUPERSEDED">SUPERSEDED</option>
-                    <option value="ACTIVE,ENDED,SUPERSEDED">All</option>
+                    <option value={ALL_ASSIGNMENT_STATUSES}>All (active + deactivated)</option>
+                    <option value="ACTIVE">Active only</option>
+                    <option value="ENDED,SUPERSEDED">Deactivated only</option>
                   </Select>
                 </FormField>
                 <FormField label="Teacher">
@@ -1492,7 +1522,9 @@ export const SubjectAssignmentManager = () => {
                             deactivatingRow?._id === row._id ||
                             continuingRow?._id === row._id
                               ? "bg-slate-50"
-                              : undefined
+                              : row.status !== "ACTIVE"
+                                ? "bg-slate-50/60 text-slate-500"
+                                : undefined
                           }
                         >
                           <Td>{labelOfTeacher(row.teacherId)}</Td>
@@ -1506,7 +1538,24 @@ export const SubjectAssignmentManager = () => {
                                 ? `${row.assignedPercentage}%`
                                 : `U${row.unitFrom}–${row.unitTo}`}
                           </Td>
-                          <Td>{row.status}</Td>
+                          <Td>
+                            {row.status === "ACTIVE" ? (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                                Active
+                              </span>
+                            ) : (
+                              <span
+                                className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700"
+                                title={
+                                  [row.effectiveToBs && `Ended ${row.effectiveToBs}`, row.endReason]
+                                    .filter(Boolean)
+                                    .join(" · ") || undefined
+                                }
+                              >
+                                {row.status === "SUPERSEDED" ? "Deactivated (replaced)" : "Deactivated"}
+                              </span>
+                            )}
+                          </Td>
                           <Td>{row.effectiveFromBs}</Td>
                           {canManage ? (
                             <Td className="text-right">
@@ -1560,7 +1609,21 @@ export const SubjectAssignmentManager = () => {
                                       Deactivate
                                     </Button>
                                   </>
-                                ) : null}
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                                    disabled={
+                                      reactivateMutation.isPending || deleteMutation.isPending
+                                    }
+                                    onClick={() => confirmReactivate(row)}
+                                    title="Activate this assignment again"
+                                  >
+                                    <Power className="mr-1 h-3.5 w-3.5" />
+                                    Activate
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"

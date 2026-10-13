@@ -41,7 +41,12 @@ const apply = process.argv.includes("--apply");
 
 /** Leaves are the sub-units nothing else hangs off — those carry the status. */
 const leafIdsOf = (
-  rows: Array<{ _id: unknown; parentSubUnitId?: unknown; status?: string; completionSource?: string }>
+  rows: Array<{
+    _id: unknown;
+    parentSubUnitId?: unknown;
+    status?: string | null;
+    completionSource?: string | null;
+  }>
 ) => {
   const parentIds = new Set(
     rows.map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : "")).filter(Boolean)

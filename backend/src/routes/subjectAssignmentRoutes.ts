@@ -10,6 +10,7 @@ import {
   leftoverAssignment,
   listAssignments,
   migrationReview,
+  reactivateAssignment,
   reassignAssignment,
   rejectMigrationToLegacy,
   updateAssignment,
@@ -39,6 +40,7 @@ router.get("/:id/leftover", authorizeInstitutionAdmin, leftoverAssignment);
 router.put("/:id", authorizeInstitutionAdmin, updateAssignment);
 router.delete("/:id", authorizeInstitutionAdmin, deleteAssignment);
 router.post("/:id/end", authorizeInstitutionAdmin, endAssignment);
+router.post("/:id/reactivate", authorizeInstitutionAdmin, reactivateAssignment);
 router.post("/:id/reassign", authorizeInstitutionAdmin, reassignAssignment);
 
 export default router;

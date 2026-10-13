@@ -746,6 +746,94 @@ export const endSubjectAssignment = async (
 };
 
 /**
+ * Undo a deactivation: put an ENDED (or SUPERSEDED) row back into the active
+ * set. The same coverage rules as create/edit apply, so it is refused if a
+ * replacement assignment now covers the same units / percentage / FULL slot.
+ */
+export const reactivateSubjectAssignment = async (
+  req: Request,
+  id: string
+): Promise<{ row: Record<string, unknown>; warnings: string[] }> => {
+  const schoolId = new mongoose.Types.ObjectId(String(req.tenantSchoolId));
+  const userId = new mongoose.Types.ObjectId(req.user!.userId);
+
+  return withTransaction(async (session) => {
+    const existing = await SubjectAssignment.findOne({
+      _id: id,
+      schoolId,
+      status: { $in: ["ENDED", "SUPERSEDED"] }
+    }).session(session);
+    if (!existing) {
+      throw new ApiError(404, "Deactivated assignment not found");
+    }
+
+    const institutionType = await getInstitutionType(req);
+    const college = isCollege(institutionType);
+    const group: GroupKeys = {
+      classId: existing.classId?.toString() ?? null,
+      sectionId: existing.sectionId?.toString() ?? null,
+      batchId: existing.batchId?.toString() ?? null,
+      yearId: existing.yearId?.toString() ?? null
+    };
+
+    const siblings = await loadActiveSet(
+      schoolId,
+      existing.academicYearBs,
+      existing.subjectId.toString(),
+      group,
+      college,
+      session
+    );
+    if (siblings.some((row) => String(row.teacherId) === existing.teacherId.toString())) {
+      throw new ApiError(
+        400,
+        "This teacher already has an active assignment for this subject and group — edit that one instead"
+      );
+    }
+    const merged = [...siblings.map(toDraft), toDraft(existing)];
+    const maxUnit = await resolveMaxUnit(
+      schoolId,
+      existing.academicYearBs,
+      existing.subjectId.toString(),
+      group,
+      college
+    );
+    let warnings: string[];
+    try {
+      warnings = validateMergedActiveSet(merged, {
+        maxUnit,
+        allowExceedMaxUnit: Boolean(existing.remarks?.trim())
+      });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw new ApiError(
+          400,
+          `Cannot activate: ${error.message}. End or edit the current assignment for this subject first.`
+        );
+      }
+      throw error;
+    }
+
+    existing.status = "ACTIVE";
+    existing.set("effectiveToBs", undefined);
+    existing.set("endedBy", undefined);
+    existing.set("endReason", undefined);
+    existing.updatedBy = userId;
+    await existing.save({ ...getSessionOption(session) });
+
+    await addTeacherToSubjectCache(schoolId, existing.subjectId, existing.teacherId, session, group);
+
+    const populated = await SubjectAssignment.findById(existing._id)
+      .populate("subjectId", "name code")
+      .populate({ path: "teacherId", populate: { path: "user", select: "fullName email" } })
+      .session(session)
+      .lean();
+
+    return { row: serializeAssignment(populated as Record<string, unknown>)!, warnings };
+  });
+};
+
+/**
  * Permanently remove a subject assignment row.
  * ACTIVE rows re-validate remaining coverage and refresh Subject.teacherIds cache.
  * ENDED/SUPERSEDED rows are removed for cleanup only.
