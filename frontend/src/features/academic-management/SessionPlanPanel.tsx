@@ -655,6 +655,53 @@ export const SessionPlanPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  /** Same rule as the per-card Delete button. */
+  const canDeletePlan = (plan: AcademicSessionPlanRecord) =>
+    canEditDelete &&
+    (plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin);
+
+  const [selectedPlanIds, setSelectedPlanIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const setPlansSelected = (ids: string[], checked: boolean) =>
+    setSelectedPlanIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+
+  /**
+   * No bulk endpoint: each plan goes through its own delete route (which
+   * re-checks permission); failures are counted rather than aborting the run.
+   */
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      let ok = 0;
+      const errors: string[] = [];
+      for (const id of ids) {
+        try {
+          await unwrap(api.delete(`/academic-management/session-plans/${id}`));
+          ok += 1;
+        } catch (error) {
+          errors.push(parseErrorMessage(error));
+        }
+      }
+      return { ok, errors };
+    },
+    onSuccess: ({ ok, errors }, ids) => {
+      if (ok > 0) toast.success(`${ok} session plan${ok === 1 ? "" : "s"} deleted`);
+      if (errors.length > 0) {
+        toast.error(`${errors.length} of ${ids.length} could not be deleted: ${errors[0]}`);
+      }
+      setPlansSelected(ids, false);
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const allPlans = plansQuery.data ?? [];
 
   const keywordFilteredPlans = useMemo(
@@ -801,7 +848,17 @@ export const SessionPlanPanel = ({
   const renderPlanCard = (plan: AcademicSessionPlanRecord, compact = false) => (
     <Card key={plan._id} className={compact ? "border-slate-200 shadow-none" : undefined}>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="flex items-start gap-3">
+          {canDeletePlan(plan) ? (
+            <input
+              type="checkbox"
+              className="no-print mt-1 h-4 w-4 rounded border-slate-300"
+              aria-label="Select this session plan"
+              checked={selectedPlanIds.has(plan._id)}
+              onChange={(event) => setPlansSelected([plan._id], event.target.checked)}
+            />
+          ) : null}
+          <div>
           <CardTitle className="text-base">
             {plan.subject?.name} · {plan.academicYearBs}
           </CardTitle>
@@ -813,6 +870,7 @@ export const SessionPlanPanel = ({
             completedPercent={plan.completedPercent}
             remainingPercent={plan.remainingPercent}
           />
+          </div>
         </div>
         <Badge className={statusBadgeClass(plan.status)}>{plan.status}</Badge>
       </CardHeader>
@@ -957,7 +1015,17 @@ export const SessionPlanPanel = ({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => deleteMutation.mutate(plan._id)}
+                disabled={deleteMutation.isPending}
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      `Delete the session plan for ${plan.subject?.name ?? "this subject"} (${plan.academicYearBs})?`,
+                    )
+                  ) {
+                    return;
+                  }
+                  deleteMutation.mutate(plan._id);
+                }}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
@@ -1866,6 +1934,64 @@ export const SessionPlanPanel = ({
                 </CardContent>
               </Card>
 
+              {(() => {
+                const deletable = selectedPlans.filter(canDeletePlan);
+                if (deletable.length === 0) return null;
+                const deletableIds = deletable.map((plan) => plan._id);
+                const ticked = deletableIds.filter((id) => selectedPlanIds.has(id));
+                const allTicked = ticked.length === deletableIds.length;
+                // With ticks, delete the ticked plans; otherwise every deletable one.
+                const deleteIds = ticked.length > 0 ? ticked : deletableIds;
+                return (
+                  <div className="no-print flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={allTicked}
+                        onChange={(event) =>
+                          setPlansSelected(deletableIds, event.target.checked)
+                        }
+                      />
+                      Select all ({deletableIds.length})
+                    </label>
+                    {ticked.length > 0 ? (
+                      <span className="text-xs text-slate-500">
+                        {ticked.length} selected ·{" "}
+                        <button
+                          type="button"
+                          className="underline"
+                          onClick={() => setPlansSelected(deletableIds, false)}
+                        >
+                          Clear
+                        </button>
+                      </span>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto border-rose-200 text-rose-700 hover:bg-rose-50"
+                      disabled={bulkDeleteMutation.isPending}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Delete ${deleteIds.length} session plan${deleteIds.length === 1 ? "" : "s"}${
+                              ticked.length > 0 ? "" : " (every plan in this list)"
+                            }?`,
+                          )
+                        ) {
+                          return;
+                        }
+                        bulkDeleteMutation.mutate(deleteIds);
+                      }}
+                    >
+                      <Trash2 className="mr-1 h-3.5 w-3.5" />
+                      {bulkDeleteMutation.isPending
+                        ? "Deleting…"
+                        : `Delete ${ticked.length > 0 ? "selected" : "all"} (${deleteIds.length})`}
+                    </Button>
+                  </div>
+                );
+              })()}
               {selectedPlans.map((plan) => renderPlanCard(plan))}
             </>
           )}

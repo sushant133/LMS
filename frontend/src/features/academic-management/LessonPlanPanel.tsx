@@ -1492,7 +1492,7 @@ export const LessonPlanPanel = ({
       action,
       ids,
     }: {
-      action: "verify" | "unlock";
+      action: "verify" | "unlock" | "delete";
       ids: string[];
     }) => {
       let ok = 0;
@@ -1500,7 +1500,9 @@ export const LessonPlanPanel = ({
       for (const id of ids) {
         try {
           await unwrap(
-            api.post(`/academic-management/lesson-plans/${id}/${action}`, {}),
+            action === "delete"
+              ? api.delete(`/academic-management/lesson-plans/${id}`)
+              : api.post(`/academic-management/lesson-plans/${id}/${action}`, {}),
           );
           ok += 1;
         } catch (error) {
@@ -1510,7 +1512,8 @@ export const LessonPlanPanel = ({
       return { action, ok, errors };
     },
     onSuccess: ({ action, ok, errors }, { ids }) => {
-      const verb = action === "verify" ? "verified" : "unlocked";
+      const verb =
+        action === "verify" ? "verified" : action === "unlock" ? "unlocked" : "deleted";
       if (ok > 0) {
         toast.success(`${ok} lesson plan${ok === 1 ? "" : "s"} ${verb}`);
       }
@@ -2456,7 +2459,7 @@ export const LessonPlanPanel = ({
                 const pendingPlans = group.items.filter((plan) =>
                   isLessonPlanPending(plan.status),
                 );
-                const showSelect = isAdmin;
+                const showSelect = isAdmin || canEditDelete;
                 const groupPlanIds = group.items.map((plan) => plan._id);
                 const groupSelected = group.items.filter((plan) =>
                   selectedPlanIds.has(plan._id),
@@ -2473,6 +2476,17 @@ export const LessonPlanPanel = ({
                 const unlockIds = actionScope
                   .filter((plan) => plan.status === "APPROVED")
                   .map((plan) => plan._id);
+                // Same rule as the per-row Delete button.
+                const deleteIds = canEditDelete
+                  ? actionScope
+                      .filter(
+                        (plan) =>
+                          isAdmin ||
+                          plan.status === "DRAFT" ||
+                          plan.status === "REJECTED",
+                      )
+                      .map((plan) => plan._id)
+                  : [];
                 const scopeLabel = groupSelected.length > 0 ? "selected" : "all";
                 const bulkBusy = bulkActionMutation.isPending;
                 const columnCount = 8 + (showActions ? 1 : 0) + (showSelect ? 1 : 0);
@@ -2591,6 +2605,8 @@ export const LessonPlanPanel = ({
                             </span>
                           ) : null}
                           <div className="ml-auto flex flex-wrap gap-2">
+                            {isAdmin ? (
+                            <>
                             <Button
                               size="sm"
                               disabled={bulkBusy || verifyIds.length === 0}
@@ -2639,6 +2655,34 @@ export const LessonPlanPanel = ({
                             >
                               Unlock {scopeLabel} ({unlockIds.length})
                             </Button>
+                            </>
+                            ) : null}
+                            {canEditDelete ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={bulkBusy || deleteIds.length === 0}
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      `Delete ${deleteIds.length} lesson plan${deleteIds.length === 1 ? "" : "s"}${
+                                        groupSelected.length > 0 ? "" : " (every plan in this list)"
+                                      }?\n\nThis removes them from the Lesson Plan and Log Book unit lists.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  bulkActionMutation.mutate({
+                                    action: "delete",
+                                    ids: deleteIds,
+                                  });
+                                }}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Delete {scopeLabel} ({deleteIds.length})
+                              </Button>
+                            ) : null}
                           </div>
                         </div>
                       ) : null}

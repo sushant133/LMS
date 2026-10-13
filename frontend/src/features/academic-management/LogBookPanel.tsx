@@ -208,10 +208,19 @@ const flattenLessonPlanPicks = (
   return out;
 };
 
+/**
+ * The same syllabus unit appears once per teacher who planned it (each has their
+ * own Session Plan unit id), so units are grouped by their visible label.
+ */
+const unitKeyOf = (pick: Pick<LessonPlanPick, "label">) =>
+  pick.label.replace(/\s+/g, " ").trim().toLowerCase();
+
 const uniqueUnits = (picks: LessonPlanPick[]) => {
   const seen = new Map<string, LessonPlanPick>();
+  // Picks arrive with the teacher's own plans first, so their unit id wins.
   for (const pick of picks) {
-    if (!seen.has(pick.unitId)) seen.set(pick.unitId, pick);
+    const key = unitKeyOf(pick);
+    if (!seen.has(key)) seen.set(key, pick);
   }
   return [...seen.values()].sort((a, b) => {
     const an = Number(a.unitNo);
@@ -506,10 +515,14 @@ export const LogBookPanel = ({
   });
 
   const matchedLessonPlans = useMemo(() => {
-    const all = (lessonPlansQuery.data ?? []).filter(
-      (plan) => plan.status !== "REJECTED",
-    );
-    if (!scope.subjectId) return all;
+    // Rejected plans still list real syllabus units; use them only when the
+    // subject has nothing else, so the unit picker is never empty for a planned subject.
+    const preferNotRejected = (plans: AcademicLessonPlanRecord[]) => {
+      const usable = plans.filter((plan) => plan.status !== "REJECTED");
+      return usable.length > 0 ? usable : plans;
+    };
+    const all = lessonPlansQuery.data ?? [];
+    if (!scope.subjectId) return preferNotRejected(all);
 
     const subjectSet = new Set(formCurriculumSubjectIds);
     const selectedName = normText(selectedFormSubject?.name);
@@ -525,10 +538,11 @@ export const LogBookPanel = ({
     if (selectedName) siblingNames.add(selectedName);
     if (selectedCode) siblingCodes.add(selectedCode);
 
-    const matched = all.filter((plan) => {
-      if (effectiveTeacherId && plan.teacherId !== effectiveTeacherId) {
-        return false;
-      }
+    // Lesson plans belong to the subject, not only to whoever wrote them: a
+    // subject shared by two teachers (or planned by admin under one name) must
+    // still offer its units to every assigned teacher. The server already
+    // limits this list to the teacher's subjects; own plans are ordered first.
+    const matchedAny = all.filter((plan) => {
       if (subjectSet.has(plan.subjectId)) return true;
       const planName = normText(plan.subject?.name);
       const planCode = normText(plan.subject?.code);
@@ -542,17 +556,26 @@ export const LogBookPanel = ({
       }
       return false;
     });
+    const matched = preferNotRejected(matchedAny);
+
+    const ownFirst = (plans: AcademicLessonPlanRecord[]) =>
+      effectiveTeacherId
+        ? [
+            ...plans.filter((plan) => plan.teacherId === effectiveTeacherId),
+            ...plans.filter((plan) => plan.teacherId !== effectiveTeacherId),
+          ]
+        : plans;
 
     const formYear = (
       scope.academicYearBs ||
       filters.academicYearBs ||
       ""
     ).trim();
-    if (!formYear) return matched;
+    if (!formYear) return ownFirst(matched);
     const sameYear = matched.filter(
       (plan) => (plan.academicYearBs || "").trim() === formYear,
     );
-    return sameYear.length > 0 ? sameYear : matched;
+    return ownFirst(sameYear.length > 0 ? sameYear : matched);
   }, [
     lessonPlansQuery.data,
     scope.subjectId,
@@ -575,12 +598,14 @@ export const LogBookPanel = ({
     return { units: uniqueUnits(lessonPicks), fromDate: false };
   };
 
+  /** Every pick for the chosen unit, across all teachers' plans for the subject. */
   const picksForUnit = (dateBs: string, unitId: string) => {
-    const onDate = lessonPicks.filter(
-      (p) => p.unitId === unitId && p.dateBs === dateBs,
-    );
-    if (onDate.length > 0) return onDate;
-    return lessonPicks.filter((p) => p.unitId === unitId);
+    const anchor = lessonPicks.find((p) => p.unitId === unitId);
+    if (!anchor) return [];
+    const key = unitKeyOf(anchor);
+    const sameUnit = lessonPicks.filter((p) => unitKeyOf(p) === key);
+    const onDate = sameUnit.filter((p) => p.dateBs === dateBs);
+    return onDate.length > 0 ? onDate : sameUnit;
   };
 
   const saveMutation = useMutation({
