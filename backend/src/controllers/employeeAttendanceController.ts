@@ -126,9 +126,13 @@ const presentForPercent = (s: EmployeeAttendanceSummary) =>
   s.present + s.late + s.halfDay + s.officialDuty + s.holiday;
 
 const serializeRecord = (
-  doc: Record<string, unknown> & { _id: { toString(): string }; entries?: unknown[] }
+  doc: Record<string, unknown> & { _id: { toString(): string }; entries?: unknown[] },
+  activeIds?: Set<string>
 ): EmployeeAttendanceRecord => {
-  const entries = (doc.entries as EmployeeAttendanceRecord["entries"]) ?? [];
+  const allEntries = (doc.entries as EmployeeAttendanceRecord["entries"]) ?? [];
+  const entries = activeIds
+    ? allEntries.filter((e) => isActiveEntry(e, activeIds))
+    : allEntries;
   return {
     _id: doc._id.toString(),
     schoolId: String(doc.schoolId),
@@ -223,8 +227,11 @@ const assertEmployeeAttendanceAccess = async (
   }
 };
 
+/** Deactivated teachers/staff are hidden from every attendance screen and report. */
+const ACTIVE_TEACHER_FILTER = { status: { $ne: "INACTIVE" } };
+
 const listTeachers = async (schoolId: unknown) => {
-  const rows = await Teacher.find({ schoolId })
+  const rows = await Teacher.find({ schoolId, ...ACTIVE_TEACHER_FILTER })
     .populate("user", "fullName designation")
     .sort({ teacherCode: 1 })
     .lean();
@@ -264,6 +271,29 @@ const listStaff = async (schoolId: unknown) => {
     status: (s.status as "ACTIVE" | "INACTIVE") || "ACTIVE"
   }));
 };
+
+/** Ids (Teacher or CollegeStaff `_id`) of currently active employees in a category. */
+const activeEmployeeIds = async (
+  schoolId: unknown,
+  category: EmployeeAttendanceCategory
+): Promise<Set<string>> => {
+  const rows =
+    category === "TEACHER"
+      ? await Teacher.find({ schoolId, ...ACTIVE_TEACHER_FILTER }).select("_id").lean()
+      : await CollegeStaff.find({ schoolId, isDeleted: false, status: "ACTIVE" })
+          .select("_id")
+          .lean();
+  return new Set(rows.map((r) => r._id.toString()));
+};
+
+function isActiveEntry(
+  entry: { teacherId?: unknown; staffId?: unknown },
+  activeIds: Set<string>
+): boolean {
+  const id = entry.teacherId ?? entry.staffId;
+  // Entries without a profile id (e.g. legacy accountant punches) are kept.
+  return id ? activeIds.has(String(id)) : true;
+}
 
 const parseCategory = (raw: unknown): EmployeeAttendanceCategory => {
   const c = String(raw || "").toUpperCase();
@@ -319,7 +349,9 @@ export const getEmployeeAttendanceMarkContext = asyncHandler(
       category,
       dateBs,
       employees,
-      existingRecord: existing ? serializeRecord(existing as never) : null,
+      existingRecord: existing
+        ? serializeRecord(existing as never, new Set(employees.map((e) => e._id)))
+        : null,
       canMark: canMark && !locked,
       canEdit: canEdit && Boolean(existing && !locked),
       message: locked
@@ -353,10 +385,11 @@ export const listEmployeeAttendance = asyncHandler(async (req: Request, res: Res
     rows = rows.filter((r) => String(r.dateBs) <= to);
   }
 
+  const activeIds = await activeEmployeeIds(schoolId, category);
   return sendSuccess(
     res,
     "Employee attendance listed",
-    rows.map((r) => serializeRecord(r as never))
+    rows.map((r) => serializeRecord(r as never, activeIds))
   );
 });
 
@@ -372,7 +405,15 @@ export const getEmployeeAttendanceById = asyncHandler(async (req: Request, res: 
     row.category as EmployeeAttendanceCategory,
     "view"
   );
-  return sendSuccess(res, "Employee attendance fetched", serializeRecord(row as never));
+  const activeIds = await activeEmployeeIds(
+    row.schoolId,
+    row.category as EmployeeAttendanceCategory
+  );
+  return sendSuccess(
+    res,
+    "Employee attendance fetched",
+    serializeRecord(row as never, activeIds)
+  );
 });
 
 export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: Response) => {
@@ -444,6 +485,11 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     externalRef: emptyToUndef(e.externalRef) ?? "",
     geo: e.geo
   }));
+  // Keep (hidden) history of since-deactivated employees instead of wiping it on resubmit.
+  const hiddenEntries = (
+    (existing?.toObject().entries ?? []) as unknown as Array<Record<string, unknown>>
+  ).filter((e) => !isActiveEntry(e, validIds));
+  entries.push(...(hiddenEntries as never[]));
 
   const statusByPhase: Record<string, string> = {
     DRAFT: "DRAFT",
@@ -498,7 +544,7 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
   return sendSuccess(
     res,
     messages[phase] ?? "Attendance saved",
-    serializeRecord(saved.toObject() as never),
+    serializeRecord(saved.toObject() as never, validIds),
     existing ? 200 : 201
   );
 });
@@ -628,7 +674,7 @@ export const upsertEmployeeAttendanceEntry = asyncHandler(
     return sendSuccess(
       res,
       `${employee.fullName} saved`,
-      serializeRecord(sheet.toObject() as never)
+      serializeRecord(sheet.toObject() as never, new Set(employees.map((e) => e._id)))
     );
   }
 );
@@ -652,7 +698,15 @@ export const updateEmployeeAttendance = asyncHandler(async (req: Request, res: R
   }
   // DRAFT / CHECK_IN_SUBMITTED / CHECK_OUT_SUBMITTED remain editable
 
-  existing.entries = payload.entries.map((e) => ({
+  const activeIds = await activeEmployeeIds(
+    existing.schoolId,
+    existing.category as EmployeeAttendanceCategory
+  );
+  const hiddenEntries = (
+    existing.toObject().entries as unknown as Array<Record<string, unknown>>
+  ).filter((e) => !isActiveEntry(e, activeIds));
+
+  existing.entries = [...payload.entries.map((e) => ({
     teacherId: e.teacherId as never,
     staffId: e.staffId as never,
     employeeUserId: emptyToUndef(e.employeeUserId) as never,
@@ -674,14 +728,14 @@ export const updateEmployeeAttendance = asyncHandler(async (req: Request, res: R
     deviceId: emptyToUndef(e.deviceId) ?? "",
     externalRef: emptyToUndef(e.externalRef) ?? "",
     geo: e.geo
-  })) as never;
+  })), ...hiddenEntries] as never;
   if (payload.notes !== undefined) existing.notes = emptyToUndef(payload.notes) ?? "";
   await existing.save();
 
   return sendSuccess(
     res,
     "Attendance updated",
-    serializeRecord(existing.toObject() as never)
+    serializeRecord(existing.toObject() as never, activeIds)
   );
 });
 
@@ -712,7 +766,12 @@ export const unlockEmployeeAttendance = asyncHandler(async (req: Request, res: R
     after: { reason: payload.reason }
   });
 
-  return sendSuccess(res, "Attendance unlocked", serializeRecord(existing.toObject() as never));
+  const activeIds = await activeEmployeeIds(existing.schoolId, category);
+  return sendSuccess(
+    res,
+    "Attendance unlocked",
+    serializeRecord(existing.toObject() as never, activeIds)
+  );
 });
 
 export const deleteEmployeeAttendance = asyncHandler(async (req: Request, res: Response) => {
@@ -752,8 +811,12 @@ export const getEmployeeAttendanceDashboard = asyncHandler(
       isDeleted: false
     }).lean();
 
+    const activeIds = new Set(employees.map((e) => e._id));
     const summary = record
-      ? summarize(record.entries as Array<{ status: string }>)
+      ? summarize(
+          (record.entries as unknown as Array<{ teacherId?: unknown; staffId?: unknown; status: string }>)
+            .filter((e) => isActiveEntry(e, activeIds))
+        )
       : {
           total: employees.length,
           present: 0,
@@ -832,9 +895,11 @@ export const getEmployeeAttendanceRegister = asyncHandler(
     const q =
       typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
 
+    const activeIds = await activeEmployeeIds(schoolId, category);
     const rows = [];
     for (const rec of records) {
       for (const e of (rec.entries as unknown as Array<Record<string, unknown>>)) {
+        if (!isActiveEntry(e, activeIds)) continue;
         if (statusFilter && String(e.status) !== statusFilter) continue;
         if (deptFilter && !String(e.department || "").toLowerCase().includes(deptFilter)) {
           continue;
@@ -1116,7 +1181,7 @@ export const getEmployeeAttendancePeriodLog = asyncHandler(
         .select("dateBs status entries")
         .sort({ dateBs: 1 })
         .lean(),
-      Teacher.find({ schoolId })
+      Teacher.find({ schoolId, ...ACTIVE_TEACHER_FILTER })
         .populate("user", "fullName designation")
         .select("teacherCode user paymentType periodRateNpr basicSalaryNpr status")
         .sort({ teacherCode: 1 })
@@ -1448,7 +1513,7 @@ export const getEmployeeAttendancePeriodDay = asyncHandler(
       })
         .select("status entries")
         .lean(),
-      Teacher.find({ schoolId })
+      Teacher.find({ schoolId, ...ACTIVE_TEACHER_FILTER })
         .populate("user", "fullName designation")
         .select("teacherCode user paymentType periodRateNpr basicSalaryNpr")
         .sort({ teacherCode: 1 })

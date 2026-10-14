@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import type { Request, Response } from "express";
+import { Error as MongooseError } from "mongoose";
 import {
   accountantSchema,
   accountingExpenseSchema,
@@ -3271,6 +3272,42 @@ const clearSalarySheetApprovals = (row: InstanceType<typeof SalaryPayment>) => {
   row.rejectedBy = undefined;
 };
 
+/**
+ * Legacy payroll rows can hold malformed ObjectId values (e.g. "" in submittedBy).
+ * Mongoose records those as init cast errors and every later save() fails with
+ * "Cast to ObjectId failed" (surfaced as "Invalid identifier"). Clear optional
+ * refs and point a broken required ref (createdBy) at the current user.
+ */
+const repairInvalidSalaryRefs = (
+  row: InstanceType<typeof SalaryPayment>,
+  fallbackUserId: string
+) => {
+  type InternalState = { $__: { validationError?: { errors?: Record<string, unknown> } } };
+  const errors = (row as unknown as InternalState).$__.validationError?.errors;
+  for (const path of Object.keys(errors ?? {})) {
+    const type = row.schema.path(path) as { instance?: string; isRequired?: boolean } | undefined;
+    if (type?.instance !== "ObjectId") continue;
+    if (type.isRequired) {
+      row.set(path, fallbackUserId);
+    } else {
+      row.set(path, undefined);
+      row.markModified(path);
+    }
+  }
+};
+
+/** Name the employee + field when a payroll row still fails to save. */
+const salaryRowSaveError = (error: unknown, employeeName?: string): unknown => {
+  if (error instanceof MongooseError.ValidationError) {
+    const paths = Object.keys(error.errors).join(", ");
+    return new ApiError(
+      400,
+      `Could not save salary for ${employeeName || "employee"} (invalid: ${paths})`
+    );
+  }
+  return error;
+};
+
 export const getSalarySheet = asyncHandler(async (req: Request, res: Response) => {
   const monthBs = String(req.query.monthBs || "").trim();
   if (!/^\d{4}-\d{2}$/.test(monthBs)) {
@@ -3375,6 +3412,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       if (row.employeeType === "STAFF" && row.staffId) filter.staffId = row.staffId;
       existing = await SalaryPayment.findOne(filter);
     }
+    if (existing) repairInvalidSalaryRefs(existing, userId);
 
     let paymentType = normalizeTeacherPaymentType(row.paymentType);
     let monthlySalaryNpr = Number(row.monthlySalaryNpr) || 0;
@@ -3542,7 +3580,11 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         existing.submittedBy = userId as unknown as typeof existing.submittedBy;
       }
       Object.assign(existing, docFields);
-      await existing.save();
+      try {
+        await existing.save();
+      } catch (error) {
+        throw salaryRowSaveError(error, row.employeeName);
+      }
       savedIds.push(String(existing._id));
 
       if (!wasPaid && saveStatus === "PAID" && payload.paidDateBs) {
@@ -3575,6 +3617,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         ...(saveStatus === "PENDING_APPROVAL"
           ? { submittedAt: new Date(), submittedBy: userId }
           : {})
+      }).catch((error: unknown) => {
+        throw salaryRowSaveError(error, row.employeeName);
       });
       savedIds.push(String(created._id));
 
@@ -3645,6 +3689,7 @@ export const submitSalarySheet = asyncHandler(async (req: Request, res: Response
   }
 
   for (const row of rows) {
+    repairInvalidSalaryRefs(row, userId);
     clearSalarySheetApprovals(row);
     row.status = "PENDING_APPROVAL";
     row.submittedAt = new Date();
@@ -3693,6 +3738,7 @@ export const approveSalarySheet = asyncHandler(async (req: Request, res: Respons
 
   const now = new Date();
   for (const row of rows) {
+    repairInvalidSalaryRefs(row, userId);
     if (asCollege) {
       row.collegeAdminApprovedAt = now;
       row.collegeAdminApprovedBy = userId as unknown as typeof row.collegeAdminApprovedBy;
@@ -3740,6 +3786,7 @@ export const rejectSalarySheet = asyncHandler(async (req: Request, res: Response
   }
 
   for (const row of rows) {
+    repairInvalidSalaryRefs(row, userId);
     clearSalarySheetApprovals(row);
     row.status = "DRAFT";
     row.submittedAt = undefined;

@@ -211,7 +211,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     linkedStudents
   ] = await Promise.all([
     Student.countDocuments({ schoolId }),
-    Teacher.countDocuments({ schoolId }),
+    Teacher.countDocuments({ schoolId, status: { $ne: "INACTIVE" } }),
     college ? Batch.countDocuments({ schoolId }) : SchoolClass.countDocuments({ schoolId }),
     Notice.countDocuments(noticeFilter),
     includeAttendanceChart ? Attendance.find(attendanceFilter).sort({ dateBs: -1 }).limit(7) : Promise.resolve([]),

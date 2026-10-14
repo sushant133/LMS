@@ -848,7 +848,8 @@ export const listFinanceStaffAccess = asyncHandler(
 
     const filter: Record<string, unknown> = {
       schoolId,
-      isDeleted: false
+      isDeleted: false,
+      status: "ACTIVE"
     };
     if (search) {
       const term = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

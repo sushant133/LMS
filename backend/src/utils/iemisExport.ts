@@ -119,7 +119,7 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
 export async function generateTeacherMasterExport(req: Request): Promise<TeacherMasterRow[]> {
   const schoolId = tenantObjectId(req);
 
-  const teachers = await Teacher.find({ schoolId })
+  const teachers = await Teacher.find({ schoolId, status: { $ne: "INACTIVE" } })
     .populate("user", "fullName")
     .populate("subjects", "name")
     .lean();

@@ -470,13 +470,27 @@ export const SalaryPaymentRecordsPanel = ({
     void monthsQuery.refetch();
   };
 
-  const submitMutation = useMutation({
-    mutationFn: () => submitSalarySheetClient(monthBs),
+  /** Persist every row as shown (as Draft), then submit the month for approval. */
+  const saveAndSubmitMutation = useMutation({
+    mutationFn: async () => {
+      await saveSalarySheetClient({
+        monthBs,
+        status: "DRAFT",
+        paidDateBs: paidDateBs || undefined,
+        paymentMethod,
+        rows: sheetRowsPayload(),
+      });
+      await submitSalarySheetClient(monthBs);
+    },
     onSuccess: async () => {
-      toast.success("Submitted");
+      toast.success("Salary sheet saved and submitted for approval");
       await refreshSheet();
     },
-    onError: (e) => toast.error(parseErrorMessage(e)),
+    onError: async (e) => {
+      toast.error(parseErrorMessage(e));
+      // The save may have gone through even if submit failed — show what is stored.
+      await refreshSheet();
+    },
   });
 
   const approveMutation = useMutation({
@@ -1571,19 +1585,25 @@ export const SalaryPaymentRecordsPanel = ({
     toast.success("Excel salary sheet exported");
   };
 
+  /** Validation shared by Save and Save & Submit. Returns false (with a toast) when blocked. */
+  const sheetReadyToSave = (): boolean => {
+    if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) {
+      toast.error("Select payroll month (BS YYYY-MM)");
+      return false;
+    }
+    if (rows.length === 0) {
+      toast.error("No employees on the salary sheet");
+      return false;
+    }
+    return true;
+  };
+
   const saveSheet = () => {
     if (!canSaveSheet) {
       toast.error("Cannot save");
       return;
     }
-    if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) {
-      toast.error("Select payroll month (BS YYYY-MM)");
-      return;
-    }
-    if (rows.length === 0) {
-      toast.error("No employees on the salary sheet");
-      return;
-    }
+    if (!sheetReadyToSave()) return;
     if (status === "PAID" && !paidDateBs) {
       toast.error("Paid date (BS) is required when marking Paid");
       return;
@@ -1593,39 +1613,53 @@ export const SalaryPaymentRecordsPanel = ({
       status,
       paidDateBs: paidDateBs || undefined,
       paymentMethod,
-      rows: rows.map((r) => ({
-        employeeType: r.employeeType,
-        teacherId: r.teacherId,
-        staffId: r.staffId,
-        employeeName: r.employeeName,
-        monthlySalaryNpr: r.monthlySalaryNpr,
-        paymentType: r.paymentType,
-        periodRateNpr: r.periodRateNpr,
-        periodsAttended: r.periodsAttended,
-        tenderAmountNpr: r.tenderAmountNpr,
-        syllabusCompletedPercent: r.syllabusCompletedPercent,
-        syllabusAlreadyPaidPercent: r.syllabusAlreadyPaidPercent,
-        syllabusThisMonthPercent: r.syllabusThisMonthPercent,
-        syllabusRemainingPercent: r.syllabusRemainingPercent,
-        tenderAlreadyPaidNpr: r.tenderAlreadyPaidNpr,
-        tenderThisMonthNpr: r.tenderThisMonthNpr,
-        payBreakdown: r.payBreakdown,
-        presentDays: r.presentDays,
-        absentDays: r.absentDays,
-        leaveDays: r.leaveDays ?? 0,
-        extraDuty: r.extraDuty,
-        extraAmountNpr: r.extraAmountNpr,
-        absentDeductionNpr: r.absentDeductionNpr,
-        salaryAmountNpr: r.salaryAmountNpr,
-        tax1PercentNpr: r.tax1PercentNpr,
-        netSalaryNpr: r.netSalaryNpr,
-        remarks: r.remarks,
-        attendanceManualOverride: r.attendanceManualOverride,
-        valuesManualOverride: Boolean(r.valuesManualOverride),
-        salaryPaymentId: r.salaryPaymentId,
-      })),
+      rows: sheetRowsPayload(),
     });
   };
+
+  /** Save the prepared sheet exactly as shown, then submit it for approval in one step. */
+  const saveAndSubmitSheet = () => {
+    if (!canSubmitSheet) {
+      toast.error("Cannot submit");
+      return;
+    }
+    if (!sheetReadyToSave()) return;
+    saveAndSubmitMutation.mutate();
+  };
+
+  function sheetRowsPayload() {
+    return rows.map((r) => ({
+      employeeType: r.employeeType,
+      teacherId: r.teacherId,
+      staffId: r.staffId,
+      employeeName: r.employeeName,
+      monthlySalaryNpr: r.monthlySalaryNpr,
+      paymentType: r.paymentType,
+      periodRateNpr: r.periodRateNpr,
+      periodsAttended: r.periodsAttended,
+      tenderAmountNpr: r.tenderAmountNpr,
+      syllabusCompletedPercent: r.syllabusCompletedPercent,
+      syllabusAlreadyPaidPercent: r.syllabusAlreadyPaidPercent,
+      syllabusThisMonthPercent: r.syllabusThisMonthPercent,
+      syllabusRemainingPercent: r.syllabusRemainingPercent,
+      tenderAlreadyPaidNpr: r.tenderAlreadyPaidNpr,
+      tenderThisMonthNpr: r.tenderThisMonthNpr,
+      payBreakdown: r.payBreakdown,
+      presentDays: r.presentDays,
+      absentDays: r.absentDays,
+      leaveDays: r.leaveDays ?? 0,
+      extraDuty: r.extraDuty,
+      extraAmountNpr: r.extraAmountNpr,
+      absentDeductionNpr: r.absentDeductionNpr,
+      salaryAmountNpr: r.salaryAmountNpr,
+      tax1PercentNpr: r.tax1PercentNpr,
+      netSalaryNpr: r.netSalaryNpr,
+      remarks: r.remarks,
+      attendanceManualOverride: r.attendanceManualOverride,
+      valuesManualOverride: Boolean(r.valuesManualOverride),
+      salaryPaymentId: r.salaryPaymentId,
+    }));
+  }
 
   const viewModeToggle = (
     <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
@@ -1946,43 +1980,10 @@ export const SalaryPaymentRecordsPanel = ({
           type="button"
           size="sm"
           variant="secondary"
-          disabled={submitMutation.isPending || saveMutation.isPending}
-          onClick={() => {
-            const persistThenSubmit = async () => {
-              if (rows.some((r) => r.dirty || !r.salaryPaymentId)) {
-                await saveMutation.mutateAsync({
-                  monthBs,
-                  status: "DRAFT",
-                  paidDateBs: paidDateBs || undefined,
-                  paymentMethod,
-                  rows: rows.map((r) => ({
-                    employeeType: r.employeeType,
-                    teacherId: r.teacherId,
-                    staffId: r.staffId,
-                    employeeName: r.employeeName,
-                    monthlySalaryNpr: r.monthlySalaryNpr,
-                    presentDays: r.presentDays,
-                    absentDays: r.absentDays,
-                    leaveDays: r.leaveDays ?? 0,
-                    extraDuty: r.extraDuty,
-                    extraAmountNpr: r.extraAmountNpr,
-                    absentDeductionNpr: r.absentDeductionNpr,
-                    salaryAmountNpr: r.salaryAmountNpr,
-                    tax1PercentNpr: r.tax1PercentNpr,
-                    netSalaryNpr: r.netSalaryNpr,
-                    remarks: r.remarks,
-                    attendanceManualOverride: r.attendanceManualOverride,
-                    valuesManualOverride: Boolean(r.valuesManualOverride),
-                    salaryPaymentId: r.salaryPaymentId,
-                  })),
-                });
-              }
-              submitMutation.mutate();
-            };
-            void persistThenSubmit();
-          }}
+          disabled={saveAndSubmitMutation.isPending || saveMutation.isPending}
+          onClick={saveAndSubmitSheet}
         >
-          {submitMutation.isPending ? "Submitting…" : "Submit"}
+          {saveAndSubmitMutation.isPending ? "Saving & submitting…" : "Save & Submit"}
         </Button>
       ) : null}
       {canApproveSheet ? (
@@ -2237,7 +2238,7 @@ export const SalaryPaymentRecordsPanel = ({
           ) : (
             <p>
               Prepare the sheet (add employees and attendance), then{" "}
-              <strong>Submit</strong> for admin approval. Salary / net amounts
+              <strong>Save &amp; Submit</strong> — it saves the sheet and sends it for admin approval in one step. Salary / net amounts
               are fixed from employee records — only admin can change them or
               remove rows.
             </p>

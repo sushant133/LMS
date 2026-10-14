@@ -414,11 +414,22 @@ export const aggregateEmployeeAttendanceForMonth = async (
     // An empty day sheet is not attendance coverage — counting it would inflate
     // the expected-days baseline and hide genuinely missing employees.
     if ((sheet.entries?.length ?? 0) === 0) continue;
-    // A holiday is nobody's working day. Registers do get opened on Saturdays,
-    // sometimes marking people ABSENT or LEAVE — deducting pay for a public
-    // holiday. Skip those sheets entirely so they can neither deduct salary nor
-    // count towards attendance coverage.
-    if (holidayDates.has(sheet.dateBs)) continue;
+    // A holiday (Saturday / calendar holiday) is nobody's working day, so its
+    // sheet never counts towards coverage or present days. An explicit ABSENT
+    // marked by the admin on such a day (e.g. a Saturday event) is still a
+    // deliberate absence and deducts a day's salary.
+    if (holidayDates.has(sheet.dateBs)) {
+      for (const entry of sheet.entries ?? []) {
+        if (String(entry.status || "") !== "ABSENT") continue;
+        const target = entry.teacherId ? byTeacherId : entry.staffId ? byStaffId : null;
+        if (!target) continue;
+        const key = String(entry.teacherId ?? entry.staffId);
+        const bucket = target.get(key) ?? emptyBucket();
+        bucket.absentDays += 1;
+        target.set(key, bucket);
+      }
+      continue;
+    }
     dateSet.add(sheet.dateBs);
     if (sheet.category === "TEACHER") teacherDateSet.add(sheet.dateBs);
     if (sheet.category === "STAFF") staffDateSet.add(sheet.dateBs);
@@ -578,7 +589,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       | undefined
   ) => {
     const daysRecorded = att?.daysRecorded ?? 0;
-    const noAttendance = daysRecorded === 0;
+    // Holiday ABSENT marks add absent days without adding recorded working days.
+    const noAttendance = daysRecorded === 0 && !(att?.absentDays ?? 0);
     const manual = Boolean(saved?.attendanceManualOverride);
     const savedPresent = Number(saved?.presentDays ?? 0);
     const savedAbsent = Number(saved?.absentDays ?? 0);

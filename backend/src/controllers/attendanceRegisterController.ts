@@ -673,6 +673,7 @@ const loadEmployeeRegister = async (
   } else {
     const filter: Record<string, unknown> = {
       schoolId,
+      status: { $ne: "INACTIVE" },
       $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }]
     };
     const staff = await CollegeStaff.find(filter)

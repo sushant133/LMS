@@ -183,13 +183,16 @@ const resolvePerson = async (
 
   let teacher = await Teacher.findOne({
     schoolId,
+    status: { $ne: "INACTIVE" },
     teacherCode: { $in: variants }
   })
     .populate("user", "fullName designation")
     .lean();
 
   if (!teacher) {
-    const teachers = await Teacher.find({ schoolId }).populate("user", "fullName designation").lean();
+    const teachers = await Teacher.find({ schoolId, status: { $ne: "INACTIVE" } })
+      .populate("user", "fullName designation")
+      .lean();
     teacher =
       teachers.find((t) => normalizeBiometricCode(t.teacherCode) === normalized) ?? null;
   }
@@ -214,11 +217,16 @@ const resolvePerson = async (
   let staff = await CollegeStaff.findOne({
     schoolId,
     isDeleted: false,
+    status: { $ne: "INACTIVE" },
     staffId: { $in: variants }
   }).lean();
 
   if (!staff) {
-    const staffRows = await CollegeStaff.find({ schoolId, isDeleted: false }).lean();
+    const staffRows = await CollegeStaff.find({
+      schoolId,
+      isDeleted: false,
+      status: { $ne: "INACTIVE" }
+    }).lean();
     staff = staffRows.find((s) => normalizeBiometricCode(s.staffId) === normalized) ?? null;
   }
 
