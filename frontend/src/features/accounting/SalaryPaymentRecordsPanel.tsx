@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   SalaryPaymentStatus,
@@ -305,6 +305,11 @@ export const SalaryPaymentRecordsPanel = ({
   const [listType, setListType] = useState("");
   /** Employees already on this month's sheet (added one-by-one or previously saved) */
   const [rows, setRows] = useState<EditableRow[]>([]);
+  /**
+   * Sheet rows at the moment of a save. When the sheet reloads afterwards, any row the
+   * server did not store stays on the sheet (marked unsaved) instead of vanishing.
+   */
+  const rowsBeforeSaveRef = useRef<{ monthBs: string; rows: EditableRow[] } | null>(null);
   const [status, setStatus] = useState<SalaryPaymentStatus>("DRAFT");
   const [paidDateBs, setPaidDateBs] = useState("");
   const [paymentMethod, setPaymentMethod] =
@@ -393,7 +398,14 @@ export const SalaryPaymentRecordsPanel = ({
           (r as EditableRow).valuesManualOverride,
         ),
       }));
-    setRows(saved);
+    const pending =
+      rowsBeforeSaveRef.current?.monthBs === monthBs ? rowsBeforeSaveRef.current.rows : [];
+    rowsBeforeSaveRef.current = null;
+    const savedKeys = new Set(saved.map((r) => employeeKeyOf(r)));
+    const unsaved = pending
+      .filter((r) => !savedKeys.has(employeeKeyOf(r)))
+      .map((r) => ({ ...r, salaryPaymentId: undefined, dirty: true }));
+    setRows([...saved, ...unsaved].map((r, i) => ({ ...r, sn: i + 1 })));
     setEditingKey(null);
     setEntry(emptyEntryForm());
 
@@ -433,7 +445,10 @@ export const SalaryPaymentRecordsPanel = ({
         valuesManualOverride?: boolean;
         salaryPaymentId?: string;
       }>;
-    }) => saveSalarySheetClient(body),
+    }) => {
+      rowsBeforeSaveRef.current = { monthBs, rows };
+      return saveSalarySheetClient(body);
+    },
     onSuccess: async (saved) => {
       toast.success("Saved");
       if (saved.failedRows.length > 0) {
@@ -478,6 +493,7 @@ export const SalaryPaymentRecordsPanel = ({
   /** Persist every row as shown (as Draft), then submit the month for approval. */
   const saveAndSubmitMutation = useMutation({
     mutationFn: async () => {
+      rowsBeforeSaveRef.current = { monthBs, rows };
       const saved = await saveSalarySheetClient({
         monthBs,
         status: "DRAFT",

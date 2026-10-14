@@ -109,8 +109,28 @@ const salaryPaymentSchema = new Schema(
   { timestamps: true }
 );
 
-salaryPaymentSchema.index({ schoolId: 1, teacherId: 1, monthBs: 1 }, { unique: true, sparse: true });
-salaryPaymentSchema.index({ schoolId: 1, staffId: 1, monthBs: 1 }, { unique: true, sparse: true });
+/**
+ * One live payroll row per employee per month. Partial (not sparse): a sparse compound
+ * index still indexes every row because schoolId is always present, so all staff rows
+ * collided on "teacherId: null" (and teachers on "staffId: null") — only one teacher and
+ * one staff row could ever be saved per month. Soft-deleted rows do not hold the slot.
+ */
+salaryPaymentSchema.index(
+  { schoolId: 1, teacherId: 1, monthBs: 1 },
+  {
+    name: "uniq_teacher_month_live",
+    unique: true,
+    partialFilterExpression: { teacherId: { $type: "objectId" }, isDeleted: false }
+  }
+);
+salaryPaymentSchema.index(
+  { schoolId: 1, staffId: 1, monthBs: 1 },
+  {
+    name: "uniq_staff_month_live",
+    unique: true,
+    partialFilterExpression: { staffId: { $type: "objectId" }, isDeleted: false }
+  }
+);
 
 export type SalaryPaymentDocument = InferSchemaType<typeof salaryPaymentSchema>;
 export const SalaryPayment = mongoose.model("SalaryPayment", salaryPaymentSchema);

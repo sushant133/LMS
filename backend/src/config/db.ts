@@ -5,6 +5,7 @@ import { Subject } from "../models/Subject.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
 import { EmployeeAttendance } from "../models/EmployeeAttendance.js";
+import { SalaryPayment } from "../models/SalaryPayment.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -50,6 +51,9 @@ export const connectDatabase = async (): Promise<void> => {
   await syncIndexesWithRetry(FieldDutyAttendance, "FieldDutyAttendance");
   // Teacher / Staff attendance: unique per category+date
   await syncIndexesWithRetry(EmployeeAttendance, "EmployeeAttendance");
+  // Payroll: replace legacy sparse unique indexes that allowed only one teacher + one
+  // staff row per month with partial indexes (one live row per employee per month)
+  await syncIndexesWithRetry(SalaryPayment, "SalaryPayment");
   // Never log full connection string (may contain credentials)
   console.log(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
 };
