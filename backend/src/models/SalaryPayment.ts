@@ -100,6 +100,20 @@ const salaryPaymentSchema = new Schema(
       ],
       default: []
     },
+    /**
+     * Print / PDF / Excel signature blocks for the whole month (same on every row).
+     * Entered once by whoever prepares the sheet, so the admin need not retype them.
+     */
+    sheetSignatories: {
+      type: [
+        {
+          _id: false,
+          position: { type: String, trim: true, default: "" },
+          name: { type: String, trim: true, default: "" }
+        }
+      ],
+      default: undefined
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },

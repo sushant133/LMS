@@ -887,6 +887,8 @@ export const saveSalarySheetClient = async (payload: {
   status: "DRAFT" | "PROCESSED" | "PENDING_APPROVAL" | "APPROVED" | "PAID";
   paidDateBs?: string;
   paymentMethod: string;
+  /** Signature blocks for print / PDF / Excel, stored with the month. */
+  signatories?: Array<{ position: string; name: string }>;
   rows: SaveRow[];
 }): Promise<SalarySheetSaveResult> => {
   try {

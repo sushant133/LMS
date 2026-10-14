@@ -406,6 +406,17 @@ export const SalaryPaymentRecordsPanel = ({
       .filter((r) => !savedKeys.has(employeeKeyOf(r)))
       .map((r) => ({ ...r, salaryPaymentId: undefined, dirty: true }));
     setRows([...saved, ...unsaved].map((r, i) => ({ ...r, sn: i + 1 })));
+    // Signatures entered when the sheet was prepared — reuse them (no retyping on approval).
+    const savedSignatories = sheetQuery.data.signatories ?? [];
+    if (savedSignatories.length > 0) {
+      setSignatories(
+        savedSignatories.map((sig) => ({
+          id: newSignatoryId(),
+          position: sig.position,
+          name: sig.name,
+        })),
+      );
+    }
     setEditingKey(null);
     setEntry(emptyEntryForm());
 
@@ -425,6 +436,7 @@ export const SalaryPaymentRecordsPanel = ({
       status: SalaryPaymentStatus;
       paidDateBs?: string;
       paymentMethod: string;
+      signatories?: Array<{ position: string; name: string }>;
       rows: Array<{
         employeeType: "TEACHER" | "STAFF";
         teacherId?: string;
@@ -477,11 +489,8 @@ export const SalaryPaymentRecordsPanel = ({
     canPrepareSheet &&
     rows.length > 0 &&
     (status === "DRAFT" || status === "PROCESSED");
-  const canApproveSheet =
-    isAdmin &&
-    status === "PENDING_APPROVAL" &&
-    ((isCollegeAdmin && !approval?.collegeAdminApproved) ||
-      (isSuperAdmin && !approval?.superAdminApproved));
+  // Single-step approval by the Administrator — no separate Super Admin sign-off.
+  const canApproveSheet = isAdmin && status === "PENDING_APPROVAL";
   const canReturnForCorrection =
     isAdmin && (status === "PENDING_APPROVAL" || status === "APPROVED");
 
@@ -499,6 +508,7 @@ export const SalaryPaymentRecordsPanel = ({
         status: "DRAFT",
         paidDateBs: paidDateBs || undefined,
         paymentMethod,
+        signatories: signatoriesPayload(),
         rows: sheetRowsPayload(),
       });
       // Rows that could not be stored are reported, but never block submission.
@@ -810,7 +820,7 @@ export const SalaryPaymentRecordsPanel = ({
 
   const startEditRow = (row: EditableRow) => {
     if (!canManageRows) {
-      toast.error("Only Super Admin or College Admin can edit a salary sheet row");
+      toast.error("Only the Administrator can edit a salary sheet row");
       return;
     }
     const key = employeeKeyOf(row);
@@ -834,7 +844,7 @@ export const SalaryPaymentRecordsPanel = ({
 
   const removeRow = (row: EditableRow) => {
     if (!canManageRows) {
-      toast.error("Only Super Admin or College Admin can remove a salary sheet row");
+      toast.error("Only the Administrator can remove a salary sheet row");
       return;
     }
     const key = employeeKeyOf(row);
@@ -853,7 +863,7 @@ export const SalaryPaymentRecordsPanel = ({
   };
 
   /**
-   * Super Admin / College Admin: edit a cell on the generated sheet.
+   * Administrator: edit a cell on the generated sheet.
    * - Present / absent / leave → freeze attendance and re-calc money
    * - Monthly salary / extra duty → re-calc money without freezing attendance
    * - Money columns → mark valuesManualOverride (keep typed amounts)
@@ -1641,6 +1651,7 @@ export const SalaryPaymentRecordsPanel = ({
       status,
       paidDateBs: paidDateBs || undefined,
       paymentMethod,
+      signatories: signatoriesPayload(),
       rows: sheetRowsPayload(),
     });
   };
@@ -1654,6 +1665,11 @@ export const SalaryPaymentRecordsPanel = ({
     if (!sheetReadyToSave()) return;
     saveAndSubmitMutation.mutate();
   };
+
+  /** Signature slots as typed (blank ones kept so the layout survives a reload). */
+  function signatoriesPayload() {
+    return signatories.map((s) => ({ position: s.position.trim(), name: s.name.trim() }));
+  }
 
   function sheetRowsPayload() {
     return rows.map((r) => ({
@@ -1796,33 +1812,55 @@ export const SalaryPaymentRecordsPanel = ({
                       <Th className="text-right">Employees</Th>
                       <Th className="text-right">Total net</Th>
                       <Th>Status</Th>
-                      <Th>Paid date</Th>
+                      <Th>Dates (BS)</Th>
                       <Th className="text-right">Actions</Th>
                     </tr>
                   </TableHead>
                   <TableBody>
                     {filteredHistoryMonths.map((m) => {
                       const isCurrent = m.monthBs === monthBs;
+                      // Partly approved: one admin approved, the other still has to.
+                      // Admin approved under the old two-step rule — that is final now.
+                      const adminApproved =
+                        m.status === "APPROVED" ||
+                        (m.status === "PENDING_APPROVAL" && Boolean(m.collegeAdminApproved));
                       const statusLabel =
                         m.status === "MIXED"
-                          ? `Mixed (${m.paidCount} paid · ${m.processedCount} proc. · ${m.draftCount} draft)`
-                          : m.status === "PENDING_APPROVAL"
-                            ? "Pending"
-                            : m.status === "APPROVED"
+                          ? `Mixed (${m.paidCount} paid · ${m.approvedCount ?? 0} approved · ${m.pendingApprovalCount ?? 0} pending · ${m.draftCount} draft)`
+                          : m.status === "PAID"
+                            ? "Paid"
+                            : adminApproved
                               ? "Approved"
-                              : m.status;
+                              : m.status === "PENDING_APPROVAL"
+                                ? "Submitted · awaiting approval"
+                                : m.status === "PROCESSED"
+                                  ? "Processed"
+                                  : "Draft";
                       const statusClass =
                         m.status === "PAID"
                           ? "bg-emerald-100 text-emerald-800"
-                          : m.status === "APPROVED"
+                          : adminApproved
                             ? "bg-emerald-50 text-emerald-800"
                             : m.status === "PENDING_APPROVAL"
-                              ? "bg-amber-100 text-amber-900"
-                              : m.status === "PROCESSED"
-                            ? "bg-sky-100 text-sky-800"
-                            : m.status === "MIXED"
-                              ? "bg-amber-100 text-amber-900"
-                              : "bg-slate-100 text-slate-700";
+                                ? "bg-amber-100 text-amber-900"
+                                : m.status === "PROCESSED"
+                                  ? "bg-sky-100 text-sky-800"
+                                  : m.status === "MIXED"
+                                    ? "bg-amber-100 text-amber-900"
+                                    : "bg-slate-100 text-slate-700";
+                      /** Every dated step so far, newest last. */
+                      const dateLines = [
+                        m.submittedDateBs
+                          ? { label: "Submitted", date: m.submittedDateBs }
+                          : null,
+                        m.collegeAdminApprovedDateBs
+                          ? {
+                              label: `Approved${m.collegeAdminApprovedByName ? ` (${m.collegeAdminApprovedByName})` : ""}`,
+                              date: m.collegeAdminApprovedDateBs,
+                            }
+                          : null,
+                        m.paidDateBs ? { label: "Paid", date: m.paidDateBs } : null,
+                      ].filter(Boolean) as Array<{ label: string; date: string }>;
                       return (
                         <tr
                           key={m.monthBs}
@@ -1853,7 +1891,7 @@ export const SalaryPaymentRecordsPanel = ({
                           <Td>
                             <span
                               className={cn(
-                                "inline-flex max-w-[14rem] rounded-full px-2 py-0.5 text-[11px] font-medium",
+                                "inline-flex max-w-[16rem] rounded-full px-2 py-0.5 text-[11px] font-medium leading-snug",
                                 statusClass,
                               )}
                               title={statusLabel}
@@ -1862,7 +1900,22 @@ export const SalaryPaymentRecordsPanel = ({
                             </span>
                           </Td>
                           <Td className="text-sm text-slate-600">
-                            {m.paidDateBs || "—"}
+                            {dateLines.length ? (
+                              <div className="space-y-0.5">
+                                {dateLines.map((line) => (
+                                  <div key={line.label} className="whitespace-nowrap">
+                                    <span className="text-xs text-slate-500">
+                                      {line.label}:
+                                    </span>{" "}
+                                    <span className="font-medium tabular-nums text-slate-800">
+                                      {line.date}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              "—"
+                            )}
                           </Td>
                           <Td>
                             <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -2126,28 +2179,19 @@ export const SalaryPaymentRecordsPanel = ({
             </FormField>
             {status === "PENDING_APPROVAL" ||
             status === "APPROVED" ||
-            approval?.collegeAdminApproved ||
-            approval?.superAdminApproved ? (
+            approval?.collegeAdminApproved ? (
               <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-1">
                 <span
                   className={cn(
                     "rounded-full px-2 py-1 text-xs font-medium",
-                    approval?.collegeAdminApproved
+                    approval?.collegeAdminApproved || status === "APPROVED"
                       ? "bg-emerald-100 text-emerald-800"
                       : "bg-slate-100 text-slate-600",
                   )}
                 >
-                  Admin{approval?.collegeAdminApproved ? " ✓" : ""}
-                </span>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-1 text-xs font-medium",
-                    approval?.superAdminApproved
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-slate-100 text-slate-600",
-                  )}
-                >
-                  Super Admin{approval?.superAdminApproved ? " ✓" : ""}
+                  {approval?.collegeAdminApproved || status === "APPROVED"
+                    ? `Approved ✓${approval?.collegeAdminApprovedByName ? ` · ${approval.collegeAdminApprovedByName}` : ""}`
+                    : "Awaiting admin approval"}
                 </span>
               </div>
             ) : null}

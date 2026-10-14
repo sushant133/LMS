@@ -414,6 +414,8 @@ export interface SalarySheetResponse {
   attendanceCoverageDaysStaff?: number;
   attendanceIncomplete: boolean;
   attendanceWarning?: string;
+  /** Saved signature blocks for this month (print / PDF / Excel). */
+  signatories?: Array<{ position: string; name: string }>;
   /** e.g. "Bhadra 2083 (2083-05)" */
   attendanceMonthLabel?: string;
   /** Employees flagged incomplete, with the register dates to fix. */
@@ -444,6 +446,12 @@ export interface SalarySheetMonthSummary {
   /** Latest non-empty paid date among rows, if any */
   paidDateBs?: string;
   paymentMethod?: PaymentMethod;
+  /** BS dates (Nepal calendar day) of submit / each admin approval. */
+  submittedDateBs?: string;
+  collegeAdminApprovedDateBs?: string;
+  superAdminApprovedDateBs?: string;
+  collegeAdminApprovedByName?: string;
+  superAdminApprovedByName?: string;
   updatedAt?: string;
 }
 

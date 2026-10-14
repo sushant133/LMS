@@ -322,6 +322,16 @@ export const salarySheetSaveSchema = z.object({
   status: z.enum(["DRAFT", "PROCESSED", "PENDING_APPROVAL", "APPROVED", "PAID"]).default("DRAFT"),
   paidDateBs: bsDateSchema.optional().or(z.literal("")),
   paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
+  /** Signature blocks for print / PDF / Excel — stored with the month. */
+  signatories: z
+    .array(
+      z.object({
+        position: z.string().trim().max(80).default(""),
+        name: z.string().trim().max(120).default("")
+      })
+    )
+    .max(4)
+    .optional(),
   rows: z
     .array(
       z.object({

@@ -1434,6 +1434,11 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     attendanceCoverageDaysStaff: staffCoverageDays,
     attendanceIncomplete: anyIncomplete || coverageDays === 0,
     attendanceWarning,
+    signatories: (
+      existingSalaries.find(
+        (s) => Array.isArray(s.sheetSignatories) && s.sheetSignatories.length > 0
+      )?.sheetSignatories ?? []
+    ).map((sig) => ({ position: String(sig.position ?? ""), name: String(sig.name ?? "") })),
     attendanceMonthLabel: monthLabel,
     attendanceIncompleteEmployees,
     rows,
