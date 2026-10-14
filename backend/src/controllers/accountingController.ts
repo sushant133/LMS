@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import type { Request, Response } from "express";
-import { Error as MongooseError } from "mongoose";
+import { Error as MongooseError, Types } from "mongoose";
 import {
   accountantSchema,
   accountingExpenseSchema,
@@ -3296,16 +3296,114 @@ const repairInvalidSalaryRefs = (
   }
 };
 
-/** Name the employee + field when a payroll row still fails to save. */
-const salaryRowSaveError = (error: unknown, employeeName?: string): unknown => {
-  if (error instanceof MongooseError.ValidationError) {
-    const paths = Object.keys(error.errors).join(", ");
-    return new ApiError(
-      400,
-      `Could not save salary for ${employeeName || "employee"} (invalid: ${paths})`
-    );
+const SALARY_OBJECT_ID_PATHS = (() => {
+  const paths: string[] = [];
+  SalaryPayment.schema.eachPath((path, type) => {
+    if (path !== "_id" && (type as { instance?: string }).instance === "ObjectId") paths.push(path);
+  });
+  return paths;
+})();
+
+const toObjectIdOrNull = (value: unknown): Types.ObjectId | null => {
+  if (value instanceof Types.ObjectId) return value;
+  if (typeof value === "string" && /^[a-f\d]{24}$/i.test(value)) return new Types.ObjectId(value);
+  return null;
+};
+
+/** Malformed stored ids (cast / BSON failures) — the "Invalid identifier" family. */
+const isIdCastError = (error: unknown): boolean =>
+  error instanceof MongooseError.CastError ||
+  (error instanceof MongooseError.ValidationError &&
+    Object.values(error.errors).some((e) => e instanceof MongooseError.CastError)) ||
+  (error instanceof Error && (/ObjectId/i.test(error.message) || /BSON/i.test(error.name)));
+
+const isDuplicateKeyError = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && (error as { code?: number }).code === 11000;
+
+/**
+ * Save a payroll row even when the stored document carries malformed ids.
+ * Falls back to a direct collection update that writes the current values of the
+ * row, unsets broken optional refs and repoints a broken createdBy at the actor.
+ */
+const forceSaveSalaryRow = async (
+  row: InstanceType<typeof SalaryPayment>,
+  fallbackUserId: string
+): Promise<void> => {
+  repairInvalidSalaryRefs(row, fallbackUserId);
+  try {
+    await row.save();
+    return;
+  } catch (error) {
+    if (!isIdCastError(error)) throw error;
   }
-  return error;
+
+  const raw = ((await SalaryPayment.collection.findOne({ _id: row._id })) ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const plain = row.toObject({ depopulate: true }) as Record<string, unknown>;
+  const $set: Record<string, unknown> = {};
+  const $unset: Record<string, ""> = {};
+  for (const [key, value] of Object.entries(plain)) {
+    if (key === "_id" || key === "__v" || value === undefined) continue;
+    if (SALARY_OBJECT_ID_PATHS.includes(key)) {
+      const id = toObjectIdOrNull(value);
+      if (id) $set[key] = id;
+      else $unset[key] = "";
+    } else {
+      $set[key] = value;
+    }
+  }
+  for (const path of SALARY_OBJECT_ID_PATHS) {
+    const stored = raw[path];
+    if (stored != null && !toObjectIdOrNull(stored) && !(path in $set)) $unset[path] = "";
+  }
+  if (!$set.createdBy) {
+    const actor = toObjectIdOrNull(fallbackUserId);
+    if (actor) {
+      $set.createdBy = actor;
+      delete $unset.createdBy;
+    }
+  }
+  $set.updatedAt = new Date();
+  await SalaryPayment.collection.updateOne(
+    { _id: row._id },
+    Object.keys($unset).length ? { $set, $unset } : { $set }
+  );
+};
+
+/**
+ * Create a payroll row. A soft-deleted row for the same employee + month still
+ * holds the unique (school, employee, month) slot, so revive it instead of failing.
+ */
+const createSalaryRowSafely = async (
+  fields: Record<string, unknown>,
+  fallbackUserId: string
+): Promise<InstanceType<typeof SalaryPayment>> => {
+  try {
+    return await SalaryPayment.create(fields);
+  } catch (error) {
+    if (!isDuplicateKeyError(error) && !isIdCastError(error)) throw error;
+  }
+  const slot: Record<string, unknown> = { schoolId: fields.schoolId, monthBs: fields.monthBs };
+  if (fields.teacherId) slot.teacherId = fields.teacherId;
+  else if (fields.staffId) slot.staffId = fields.staffId;
+  else throw new ApiError(400, "Salary row has no employee");
+
+  const previous = await SalaryPayment.findOne(slot);
+  if (!previous) throw new ApiError(400, "Could not create salary row");
+  if (!previous.isDeleted && previous.status === "PAID") {
+    throw new ApiError(400, "Salary for this employee is already paid for this month");
+  }
+  previous.set({
+    ...fields,
+    isDeleted: false,
+    deletedAt: undefined,
+    deletedBy: undefined,
+    voidReason: undefined
+  });
+  await forceSaveSalaryRow(previous, fallbackUserId);
+  return previous;
 };
 
 export const getSalarySheet = asyncHandler(async (req: Request, res: Response) => {
@@ -3392,8 +3490,9 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   }
 
   const savedIds: string[] = [];
+  const failedRows: Array<{ employeeName: string; message: string }> = [];
 
-  for (const row of payload.rows) {
+  const saveRow = async (row: (typeof payload.rows)[number]) => {
     let existing = null as InstanceType<typeof SalaryPayment> | null;
     if (row.salaryPaymentId) {
       existing = await SalaryPayment.findOne({
@@ -3412,7 +3511,6 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       if (row.employeeType === "STAFF" && row.staffId) filter.staffId = row.staffId;
       existing = await SalaryPayment.findOne(filter);
     }
-    if (existing) repairInvalidSalaryRefs(existing, userId);
 
     let paymentType = normalizeTeacherPaymentType(row.paymentType);
     let monthlySalaryNpr = Number(row.monthlySalaryNpr) || 0;
@@ -3569,7 +3667,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
 
     if (existing) {
       if (existing.status === "PAID" && saveStatus !== "PAID") {
-        continue;
+        return;
       }
       const wasPaid = existing.status === "PAID";
       if (saveStatus === "DRAFT" || saveStatus === "PENDING_APPROVAL") {
@@ -3580,11 +3678,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         existing.submittedBy = userId as unknown as typeof existing.submittedBy;
       }
       Object.assign(existing, docFields);
-      try {
-        await existing.save();
-      } catch (error) {
-        throw salaryRowSaveError(error, row.employeeName);
-      }
+      await forceSaveSalaryRow(existing, userId);
       savedIds.push(String(existing._id));
 
       if (!wasPaid && saveStatus === "PAID" && payload.paidDateBs) {
@@ -3610,16 +3704,17 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         });
       }
     } else {
-      const created = await SalaryPayment.create({
-        ...docFields,
-        schoolId,
-        createdBy: userId,
-        ...(saveStatus === "PENDING_APPROVAL"
-          ? { submittedAt: new Date(), submittedBy: userId }
-          : {})
-      }).catch((error: unknown) => {
-        throw salaryRowSaveError(error, row.employeeName);
-      });
+      const created = await createSalaryRowSafely(
+        {
+          ...docFields,
+          schoolId,
+          createdBy: userId,
+          ...(saveStatus === "PENDING_APPROVAL"
+            ? { submittedAt: new Date(), submittedBy: userId }
+            : {})
+        },
+        userId
+      );
       savedIds.push(String(created._id));
 
       if (saveStatus === "PAID" && payload.paidDateBs) {
@@ -3645,6 +3740,26 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         });
       }
     }
+  };
+
+  // One broken employee row must not block the rest of the sheet.
+  for (const row of payload.rows) {
+    try {
+      await saveRow(row);
+    } catch (error) {
+      console.error("Salary row save failed:", row.employeeName, error);
+      if (payload.rows.length === 1) throw error;
+      failedRows.push({
+        employeeName: row.employeeName || "Employee",
+        message: error instanceof ApiError ? error.message : "Could not save this row"
+      });
+    }
+  }
+  if (savedIds.length === 0 && failedRows.length > 0) {
+    throw new ApiError(
+      400,
+      `Salary sheet could not be saved: ${failedRows.map((f) => f.employeeName).join(", ")}`
+    );
   }
 
   await recordAudit(req, {
@@ -3656,10 +3771,14 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
 
   const sheet = await buildSalarySheet({ schoolId, monthBs: payload.monthBs });
   const approval = await loadSalarySheetApproval(schoolId, payload.monthBs);
-  return sendSuccess(res, `Salary sheet saved (${savedIds.length} employee(s))`, {
+  const savedMessage = failedRows.length
+    ? `Salary sheet saved (${savedIds.length} employee(s); ${failedRows.length} could not be saved)`
+    : `Salary sheet saved (${savedIds.length} employee(s))`;
+  return sendSuccess(res, savedMessage, {
     ...sheet,
     approval,
     savedIds,
+    failedRows,
     totalNetInWords: formatNrsAmountInWords(sheet.totals.totalNetSalaryNpr)
   });
 });
@@ -3689,12 +3808,11 @@ export const submitSalarySheet = asyncHandler(async (req: Request, res: Response
   }
 
   for (const row of rows) {
-    repairInvalidSalaryRefs(row, userId);
     clearSalarySheetApprovals(row);
     row.status = "PENDING_APPROVAL";
     row.submittedAt = new Date();
     row.submittedBy = userId as unknown as typeof row.submittedBy;
-    await row.save();
+    await forceSaveSalaryRow(row, userId);
   }
 
   await recordAudit(req, {
@@ -3738,7 +3856,6 @@ export const approveSalarySheet = asyncHandler(async (req: Request, res: Respons
 
   const now = new Date();
   for (const row of rows) {
-    repairInvalidSalaryRefs(row, userId);
     if (asCollege) {
       row.collegeAdminApprovedAt = now;
       row.collegeAdminApprovedBy = userId as unknown as typeof row.collegeAdminApprovedBy;
@@ -3752,7 +3869,7 @@ export const approveSalarySheet = asyncHandler(async (req: Request, res: Respons
     } else {
       row.status = "PENDING_APPROVAL";
     }
-    await row.save();
+    await forceSaveSalaryRow(row, userId);
   }
 
   await recordAudit(req, {
@@ -3786,14 +3903,13 @@ export const rejectSalarySheet = asyncHandler(async (req: Request, res: Response
   }
 
   for (const row of rows) {
-    repairInvalidSalaryRefs(row, userId);
     clearSalarySheetApprovals(row);
     row.status = "DRAFT";
     row.submittedAt = undefined;
     row.submittedBy = undefined;
     row.rejectedAt = new Date();
     row.rejectedBy = userId as unknown as typeof row.rejectedBy;
-    await row.save();
+    await forceSaveSalaryRow(row, userId);
   }
 
   await recordAudit(req, {

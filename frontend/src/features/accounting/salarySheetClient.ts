@@ -874,6 +874,11 @@ type SaveRow = {
   salaryPaymentId?: string;
 };
 
+export type SalarySheetSaveResult = {
+  /** Rows the server could not store; the rest of the sheet was saved. */
+  failedRows: Array<{ employeeName: string; message: string }>;
+};
+
 /**
  * Save payroll rows: prefer bulk API, fall back to per-employee create/update.
  */
@@ -883,10 +888,12 @@ export const saveSalarySheetClient = async (payload: {
   paidDateBs?: string;
   paymentMethod: string;
   rows: SaveRow[];
-}): Promise<void> => {
+}): Promise<SalarySheetSaveResult> => {
   try {
-    await unwrap(api.post("/accounting/salary-sheet/save", payload));
-    return;
+    const data = await unwrap<{ failedRows?: SalarySheetSaveResult["failedRows"] }>(
+      api.post("/accounting/salary-sheet/save", payload),
+    );
+    return { failedRows: data?.failedRows ?? [] };
   } catch (error: unknown) {
     const status =
       error &&
@@ -1006,6 +1013,7 @@ export const saveSalarySheetClient = async (payload: {
       }
     }
   }
+  return { failedRows: [] };
 };
 
 export const submitSalarySheetClient = async (monthBs: string) =>

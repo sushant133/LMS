@@ -434,8 +434,13 @@ export const SalaryPaymentRecordsPanel = ({
         salaryPaymentId?: string;
       }>;
     }) => saveSalarySheetClient(body),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       toast.success("Saved");
+      if (saved.failedRows.length > 0) {
+        toast.warning(
+          `Not saved: ${saved.failedRows.map((f) => f.employeeName).join(", ")}`,
+        );
+      }
       await sheetQuery.refetch();
       void monthsQuery.refetch();
     },
@@ -473,17 +478,24 @@ export const SalaryPaymentRecordsPanel = ({
   /** Persist every row as shown (as Draft), then submit the month for approval. */
   const saveAndSubmitMutation = useMutation({
     mutationFn: async () => {
-      await saveSalarySheetClient({
+      const saved = await saveSalarySheetClient({
         monthBs,
         status: "DRAFT",
         paidDateBs: paidDateBs || undefined,
         paymentMethod,
         rows: sheetRowsPayload(),
       });
+      // Rows that could not be stored are reported, but never block submission.
       await submitSalarySheetClient(monthBs);
+      return saved;
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       toast.success("Salary sheet saved and submitted for approval");
+      if (saved.failedRows.length > 0) {
+        toast.warning(
+          `Not saved: ${saved.failedRows.map((f) => f.employeeName).join(", ")} — re-add them and submit again.`,
+        );
+      }
       await refreshSheet();
     },
     onError: async (e) => {
