@@ -105,7 +105,8 @@ import {
 import {
   buildSalarySheet,
   calculateSalarySheetLine,
-  calculateTenderProgress
+  calculateTenderProgress,
+  loadTenderAlreadyPaid
 } from "../utils/salarySheetService.js";
 import { needsApprovalForAmount } from "./accountingApprovalController.js";
 import { FinancialApproval } from "../models/FinancialApproval.js";
@@ -3489,6 +3490,17 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
     await assertFiscalPeriodOpen(schoolId, payload.paidDateBs);
   }
 
+  // Already-paid tender % always comes from earlier saved months on the server,
+  // never from the browser, so a stale page cannot pay the same syllabus % twice.
+  const tenderAlreadyPaid = await loadTenderAlreadyPaid(
+    schoolId,
+    payload.monthBs,
+    payload.rows
+      .filter((r) => r.employeeType === "TEACHER" && r.teacherId)
+      .map((r) => r.teacherId!),
+    schoolAcademicYearBs
+  );
+
   const savedIds: string[] = [];
   const failedRows: Array<{ employeeName: string; message: string }> = [];
 
@@ -3542,12 +3554,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         ? calculateTenderProgress({
             tenderAmountNpr: tenderContract,
             syllabusCompletedPercent: Number(row.syllabusCompletedPercent ?? 0),
-            syllabusAlreadyPaidPercent: Number(
-              row.syllabusAlreadyPaidPercent ??
-                (tenderContract > 0
-                  ? (Number(row.tenderAlreadyPaidNpr ?? 0) / tenderContract) * 100
-                  : 0)
-            )
+            syllabusAlreadyPaidPercent:
+              tenderAlreadyPaid.get(String(row.teacherId ?? ""))?.percent ?? 0
           })
         : null;
     const tenderThisMonthNpr =

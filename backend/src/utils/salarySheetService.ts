@@ -59,6 +59,97 @@ const monthInAcademicYear = (monthBs: string, academicYearBs: string): boolean =
   return y === endY;
 };
 
+/** "2083-5" / "2083-05" → "2083-05" so months compare correctly as strings. */
+const normalizeMonthBs = (value: string): string => {
+  const match = /^(\d{4})-(\d{1,2})/.exec(String(value || "").trim());
+  return match ? `${match[1]}-${match[2]!.padStart(2, "0")}` : "";
+};
+
+export type TenderAlreadyPaid = {
+  /** Sum of syllabus % already paid (or committed) in earlier months of the academic year. */
+  percent: number;
+  /** Sum of tender NPR already paid (or committed) in earlier months. */
+  npr: number;
+};
+
+/**
+ * What each tender teacher has already been given for this academic year, so this
+ * month pays only the newly completed syllabus %.
+ *
+ * - Only months BEFORE monthBs count (reopening an earlier month never subtracts
+ *   later months).
+ * - Every saved, non-deleted month counts — Draft, Submitted, Approved or Paid — so a
+ *   sheet that is made but not yet marked Paid cannot be paid a second time.
+ * - The amount actually given is used: an admin-adjusted (manual) salary counts as
+ *   its adjusted money, so any unpaid balance carries forward to the next month.
+ */
+export const loadTenderAlreadyPaid = async (
+  schoolId: Types.ObjectId,
+  monthBs: string,
+  teacherIds: Array<Types.ObjectId | string>,
+  academicYearBs: string
+): Promise<Map<string, TenderAlreadyPaid>> => {
+  const result = new Map<string, TenderAlreadyPaid>();
+  const current = normalizeMonthBs(monthBs);
+  if (teacherIds.length === 0 || !current) return result;
+
+  const rows = await SalaryPayment.find({
+    schoolId,
+    isDeleted: false,
+    teacherId: { $in: teacherIds }
+  })
+    .select(
+      "teacherId monthBs paymentType tenderThisMonthNpr tenderAmountNpr basicSalaryNpr syllabusCompletedPercent syllabusAlreadyPaidPercent syllabusThisMonthPercent academicYearBs valuesManualOverride salaryAmountNpr extraAmountNpr"
+    )
+    .lean();
+
+  for (const row of rows) {
+    const rowMonth = normalizeMonthBs(String(row.monthBs || ""));
+    if (!rowMonth || rowMonth >= current) continue;
+    const isTender =
+      normalizeTeacherPaymentType(row.paymentType) === "TENDER" ||
+      Number(row.tenderThisMonthNpr) > 0;
+    if (!isTender) continue;
+    const ay = String(row.academicYearBs || "").trim();
+    if (academicYearBs) {
+      if (ay) {
+        if (ay !== academicYearBs) continue;
+      } else if (!monthInAcademicYear(rowMonth, academicYearBs)) {
+        continue;
+      }
+    }
+
+    const contract = Math.max(0, Number(row.tenderAmountNpr || row.basicSalaryNpr) || 0);
+    const manual = Boolean(row.valuesManualOverride);
+    const thisThen = Math.max(0, Number(row.syllabusThisMonthPercent) || 0);
+    let paidNpr = manual
+      ? Math.max(0, (Number(row.salaryAmountNpr) || 0) - (Number(row.extraAmountNpr) || 0))
+      : Math.max(0, Number(row.tenderThisMonthNpr) || 0);
+    let paidPercent =
+      !manual && thisThen > 0
+        ? thisThen
+        : contract > 0
+          ? (paidNpr / contract) * 100
+          : thisThen;
+    // Legacy rows saved before the breakdown existed: completed − already paid then.
+    if (paidNpr === 0 && paidPercent === 0 && !manual) {
+      paidPercent = Math.max(
+        0,
+        (Number(row.syllabusCompletedPercent) || 0) - (Number(row.syllabusAlreadyPaidPercent) || 0)
+      );
+      paidNpr = contract > 0 ? (paidPercent / 100) * contract : 0;
+    }
+
+    const key = idKey(row.teacherId);
+    const prev = result.get(key) ?? { percent: 0, npr: 0 };
+    result.set(key, {
+      percent: round2(Math.min(100, prev.percent + paidPercent)),
+      npr: round2(prev.npr + paidNpr)
+    });
+  }
+  return result;
+};
+
 type TeacherPayFacts = {
   periodsByTeacher: Map<string, number>;
   /** Where each teacher's period count came from — the register beats the log book. */
@@ -106,7 +197,7 @@ const loadTeacherPayFacts = async (
   const school = await School.findById(schoolId).select("academicYearBs").lean();
   const academicYearBs = String(school?.academicYearBs || "").trim();
 
-  const [logCounts, progressRows, paidRows, subjects, syllabusProgress] = await Promise.all([
+  const [logCounts, progressRows, alreadyPaid, subjects, syllabusProgress] = await Promise.all([
     AcademicLogBookEntry.aggregate<{ _id: Types.ObjectId; periods: number }>([
       {
         $match: {
@@ -124,17 +215,7 @@ const loadTeacherPayFacts = async (
     AcademicProgress.find({ schoolId, teacherId: { $in: teacherIds } })
       .select("teacherId subjectId completedPercent academicYearBs")
       .lean(),
-    SalaryPayment.find({
-      schoolId,
-      isDeleted: false,
-      status: "PAID",
-      teacherId: { $in: teacherIds },
-      monthBs: { $ne: monthBs }
-    })
-      .select(
-        "teacherId monthBs paymentType tenderThisMonthNpr tenderAmountNpr basicSalaryNpr syllabusCompletedPercent syllabusAlreadyPaidPercent syllabusThisMonthPercent academicYearBs"
-      )
-      .lean(),
+    loadTenderAlreadyPaid(schoolId, monthBs, teacherIds, academicYearBs),
     Subject.find({ schoolId }).select("name code masterSubjectId").lean(),
     loadTenderSyllabusProgress({
       schoolId,
@@ -239,60 +320,9 @@ const loadTeacherPayFacts = async (
 
   const tenderPaidByTeacher = new Map<string, number>();
   const tenderPaidPercentByTeacher = new Map<string, number>();
-  const paidPercentSumByTeacher = new Map<string, number>();
-  const paidContractByTeacher = new Map<string, number>();
-  for (const row of paidRows) {
-    const isTender =
-      normalizeTeacherPaymentType(row.paymentType) === "TENDER" ||
-      Number(row.tenderThisMonthNpr) > 0;
-    if (!isTender) continue;
-    const ay = String(row.academicYearBs || "").trim();
-    if (academicYearBs) {
-      if (ay) {
-        if (ay !== academicYearBs) continue;
-      } else if (!monthInAcademicYear(String(row.monthBs || ""), academicYearBs)) {
-        continue;
-      }
-    }
-    const key = String(row.teacherId);
-    const paidNpr = Number(row.tenderThisMonthNpr) || 0;
-    tenderPaidByTeacher.set(key, round2((tenderPaidByTeacher.get(key) ?? 0) + paidNpr));
-    const contract = Math.max(
-      0,
-      Number(row.tenderAmountNpr ?? row.basicSalaryNpr) || 0
-    );
-    if (contract > 0) paidContractByTeacher.set(key, contract);
-
-    const completedAtPay = Number(row.syllabusCompletedPercent) || 0;
-    const alreadyThen = Number(row.syllabusAlreadyPaidPercent) || 0;
-    const thisThen = Number(row.syllabusThisMonthPercent) || 0;
-    const milestone = Math.max(completedAtPay, alreadyThen + thisThen);
-    tenderPaidPercentByTeacher.set(
-      key,
-      round2(Math.max(tenderPaidPercentByTeacher.get(key) ?? 0, milestone))
-    );
-    if (thisThen > 0) {
-      paidPercentSumByTeacher.set(
-        key,
-        round2((paidPercentSumByTeacher.get(key) ?? 0) + thisThen)
-      );
-    }
-  }
-  for (const [key, sumPct] of paidPercentSumByTeacher) {
-    tenderPaidPercentByTeacher.set(
-      key,
-      round2(Math.max(tenderPaidPercentByTeacher.get(key) ?? 0, sumPct))
-    );
-  }
-  for (const [key, paidNpr] of tenderPaidByTeacher) {
-    if ((tenderPaidPercentByTeacher.get(key) ?? 0) > 0) continue;
-    const contract = paidContractByTeacher.get(key) ?? 0;
-    if (contract > 0 && paidNpr > 0) {
-      tenderPaidPercentByTeacher.set(
-        key,
-        round2(Math.min(100, (paidNpr / contract) * 100))
-      );
-    }
+  for (const [key, paid] of alreadyPaid) {
+    tenderPaidByTeacher.set(key, paid.npr);
+    tenderPaidPercentByTeacher.set(key, paid.percent);
   }
 
   const subjectNameById = new Map<string, string>();
