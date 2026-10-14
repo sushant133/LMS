@@ -354,6 +354,8 @@ export interface SalarySheetRow {
    * Paid as present so Present + Absent + Leave = working days.
    */
   unrecordedDays?: number;
+  /** Register dates (BS, YYYY-MM-DD) this employee is missing from — set when incomplete. */
+  attendanceMissingDates?: string[];
   workingDaysInMonth: number;
   /** Calendar days in the BS month — the monthly per-day salary divisor. */
   calendarDaysInMonth?: number;
@@ -380,6 +382,18 @@ export interface SalarySheetApproval {
   fullyApproved: boolean;
 }
 
+export interface SalarySheetIncompleteEmployee {
+  employeeName: string;
+  employeeType: "TEACHER" | "STAFF";
+  department?: string;
+  designation?: string;
+  daysRecorded: number;
+  expectedDays: number;
+  /** BS dates (YYYY-MM-DD) with a register but no mark for this employee. */
+  missingDates: string[];
+  reason: string;
+}
+
 export interface SalarySheetResponse {
   monthBs: string;
   /** Working days = calendar days - Saturdays - other holidays. */
@@ -400,6 +414,10 @@ export interface SalarySheetResponse {
   attendanceCoverageDaysStaff?: number;
   attendanceIncomplete: boolean;
   attendanceWarning?: string;
+  /** e.g. "Bhadra 2083 (2083-05)" */
+  attendanceMonthLabel?: string;
+  /** Employees flagged incomplete, with the register dates to fix. */
+  attendanceIncompleteEmployees?: SalarySheetIncompleteEmployee[];
   rows: SalarySheetRow[];
   totals: SalarySheetTotals;
   approval?: SalarySheetApproval;

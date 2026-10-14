@@ -1,5 +1,6 @@
 import type { Types } from "mongoose";
 import {
+  BS_MONTH_NAMES,
   calculateSalarySheetLine,
   calculateTenderProgress,
   formatNrsAmountInWords,
@@ -325,6 +326,8 @@ type AttendanceBucket = {
   periodsTaught: number;
   /** Days a period count was actually entered — 0 means periods were never recorded. */
   periodDaysRecorded: number;
+  /** BS dates (working days) this employee has a register mark on. */
+  recordedDates: string[];
 };
 
 const emptyBucket = (): AttendanceBucket => ({
@@ -333,7 +336,8 @@ const emptyBucket = (): AttendanceBucket => ({
   leaveDays: 0,
   daysRecorded: 0,
   periodsTaught: 0,
-  periodDaysRecorded: 0
+  periodDaysRecorded: 0,
+  recordedDates: []
 });
 
 /**
@@ -383,6 +387,9 @@ export const aggregateEmployeeAttendanceForMonth = async (
   teacherCoverageDays: number;
   /** Distinct STAFF sheet dates that actually carry entries. */
   staffCoverageDays: number;
+  /** Sorted TEACHER / STAFF register dates — used to list each employee's missing days. */
+  teacherCoverageDates: string[];
+  staffCoverageDates: string[];
   /** Every day of the BS month, holidays included. */
   calendarDaysInMonth: number;
   saturdayDaysInMonth: number;
@@ -440,12 +447,14 @@ export const aggregateEmployeeAttendanceForMonth = async (
         const bucket = byTeacherId.get(key) ?? emptyBucket();
         applyStatus(bucket, status);
         applyPeriods(bucket, entry.periodsTaught);
+        bucket.recordedDates.push(sheet.dateBs);
         byTeacherId.set(key, bucket);
       }
       if (entry.staffId) {
         const key = String(entry.staffId);
         const bucket = byStaffId.get(key) ?? emptyBucket();
         applyStatus(bucket, status);
+        bucket.recordedDates.push(sheet.dateBs);
         byStaffId.set(key, bucket);
       }
     }
@@ -457,6 +466,8 @@ export const aggregateEmployeeAttendanceForMonth = async (
     coverageDays: dateSet.size,
     teacherCoverageDays: teacherDateSet.size,
     staffCoverageDays: staffDateSet.size,
+    teacherCoverageDates: [...teacherDateSet].sort(),
+    staffCoverageDates: [...staffDateSet].sort(),
     calendarDaysInMonth: calendarDays,
     saturdayDaysInMonth: saturdayDates.size,
     otherHolidayDaysInMonth: otherHolidayDates.size,
@@ -563,6 +574,10 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     unrecordedDays: number;
     /** Day sheets that exist this month for this employee's category. */
     attendanceExpectedDays: number;
+    /** Register dates (BS) this employee is missing from. */
+    attendanceMissingDates?: string[];
+    /** Why the row is flagged incomplete (shown in the sheet warning). */
+    attendanceIncompleteReason?: string;
     salaryPaymentId?: string;
     status?: string;
     extraAmountOverrideNpr?: number;
@@ -905,6 +920,11 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     payBreakdown: ""
   });
 
+  const missingDatesFor = (att: AttendanceBucket | undefined, coverage: string[]) => {
+    const recorded = new Set(att?.recordedDates ?? []);
+    return coverage.filter((d) => !recorded.has(d));
+  };
+
   const drafts: DraftRow[] = [];
 
   if (!employeeType || employeeType === "TEACHER") {
@@ -989,6 +1009,13 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         attendanceDaysRecorded: settled.daysRecorded,
         unrecordedDays: settled.unrecordedDays,
         attendanceExpectedDays: expectedDays,
+        attendanceMissingDates: missingDatesFor(att, attendance.teacherCoverageDates),
+        attendanceIncompleteReason:
+          pay.paymentType === "PERIOD"
+            ? "no periods recorded this month"
+            : pay.paymentType === "TENDER"
+              ? "no tender amount set"
+              : undefined,
         salaryPaymentId: saved ? String(saved._id) : undefined,
         status: saved?.status,
         extraAmountOverrideNpr:
@@ -1072,6 +1099,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         attendanceDaysRecorded: settled.daysRecorded,
         unrecordedDays: settled.unrecordedDays,
         attendanceExpectedDays: expectedDays,
+        attendanceMissingDates: missingDatesFor(att, attendance.staffCoverageDates),
         salaryPaymentId: saved ? String(saved._id) : undefined,
         status: saved?.status,
         extraAmountOverrideNpr:
@@ -1289,6 +1317,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       attendanceDaysRecorded: d.attendanceDaysRecorded,
       attendanceExpectedDays: d.attendanceExpectedDays,
       unrecordedDays: d.unrecordedDays,
+      attendanceMissingDates: d.attendanceIncomplete ? (d.attendanceMissingDates ?? []) : [],
       workingDaysInMonth,
       calendarDaysInMonth: monthCalendarDays,
       salaryPaymentId: d.salaryPaymentId,
@@ -1323,12 +1352,40 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   const otherHolidayDaysInMonth = attendance.otherHolidayDaysInMonth;
   const holidayDaysInMonth = attendance.holidayDaysInMonth;
   const incompleteCount = rows.filter((r) => r.attendanceIncomplete).length;
+  const monthMatch = /^(\d{4})-(\d{2})$/.exec(monthBs);
+  const monthName = monthMatch ? BS_MONTH_NAMES[Number(monthMatch[2]) - 1] : undefined;
+  const monthLabel = monthName ? `${monthName} ${monthMatch![1]} (${monthBs})` : monthBs;
+
+  /** Who is incomplete and on which register dates — so it can be found and fixed. */
+  const attendanceIncompleteEmployees = drafts
+    .filter((d) => d.attendanceIncomplete)
+    .map((d) => {
+      const missingDates = d.attendanceMissingDates ?? [];
+      const reason =
+        d.attendanceIncompleteReason ??
+        (d.attendanceDaysRecorded === 0
+          ? "no attendance marked this month"
+          : `missing on ${missingDates.length} register day(s)`);
+      return {
+        employeeName: d.employeeName,
+        employeeType: d.employeeType,
+        department: d.department,
+        designation: d.designation,
+        daysRecorded: d.attendanceDaysRecorded,
+        expectedDays: d.attendanceExpectedDays,
+        missingDates: d.attendanceIncompleteReason ? [] : missingDates,
+        reason
+      };
+    })
+    .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 
   const attendanceWarning =
     coverageDays === 0
       ? `No staff/teacher attendance records found for ${monthBs}. Every working day is paid as present — authorized users may enter absences and leaves manually.`
       : anyIncomplete
-        ? `Attendance is incomplete for ${incompleteCount} of ${rows.length} employee(s) in ${monthBs}. ` +
+        ? `Attendance is incomplete for ${incompleteCount} of ${rows.length} employee(s) in ${monthLabel}: ` +
+          attendanceIncompleteEmployees.map((e) => e.employeeName).join(", ") +
+          ". " +
           `${monthBs} has ${calendarDaysInMonth} calendar days − ${saturdayDaysInMonth} Saturday(s) − ${otherHolidayDaysInMonth} other holiday(s) = ${workingDaysInMonth} working days; ` +
           `registers were taken on ${teacherCoverageDays} teacher day(s) and ${staffCoverageDays} staff day(s). ` +
           `Per-day salary = monthly ÷ month days; leave and absence on working days deduct at that rate. Saturdays and calendar holidays are never deducted. ` +
@@ -1347,6 +1404,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     attendanceCoverageDaysStaff: staffCoverageDays,
     attendanceIncomplete: anyIncomplete || coverageDays === 0,
     attendanceWarning,
+    attendanceMonthLabel: monthLabel,
+    attendanceIncompleteEmployees,
     rows,
     totals
   };

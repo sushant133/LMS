@@ -2261,8 +2261,58 @@ export const SalaryPaymentRecordsPanel = ({
       {sheetQuery.data?.attendanceWarning ? (
         <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-amber-900/90">{sheetQuery.data.attendanceWarning}</p>
+            {sheetQuery.data.attendanceIncompleteEmployees?.length ? (
+              <div className="mt-3">
+                <p className="font-semibold text-amber-950">
+                  Fix attendance for{" "}
+                  {sheetQuery.data.attendanceMonthLabel ??
+                    formatPayrollMonthLabel(monthBs)}
+                  :
+                </p>
+                <ul className="mt-1.5 space-y-1.5">
+                  {sheetQuery.data.attendanceIncompleteEmployees.map((emp) => (
+                    <li
+                      key={`${emp.employeeType}-${emp.employeeName}`}
+                      className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="font-medium text-amber-950">
+                          {emp.employeeName}
+                        </span>
+                        <span className="text-xs text-amber-800">
+                          {emp.employeeType === "TEACHER" ? "Teacher" : "Staff"}
+                          {emp.designation ? ` · ${emp.designation}` : ""}
+                          {emp.department && emp.department !== "Teaching"
+                            ? ` · ${emp.department}`
+                            : ""}
+                        </span>
+                        <span className="text-xs text-amber-800">
+                          — {emp.reason}
+                          {emp.expectedDays
+                            ? ` (marked ${emp.daysRecorded} of ${emp.expectedDays} register days)`
+                            : ""}
+                        </span>
+                      </div>
+                      {emp.missingDates.length ? (
+                        <p className="mt-1 text-xs text-amber-900">
+                          Missing dates (BS):{" "}
+                          <span className="font-mono">
+                            {emp.missingDates.join(", ")}
+                          </span>
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-amber-800">
+                  Open{" "}
+                  <strong>Attendance Management → Teacher / Staff attendance</strong>,
+                  pick each date above and mark the employee, then reload this sheet.
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
