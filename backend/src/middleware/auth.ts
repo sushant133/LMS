@@ -17,6 +17,7 @@ import { ApiError } from "../utils/apiError.js";
 import {
   getUserModuleAccessMap,
   getUserSecondaryRoles,
+  primePermissionCache,
   resolveModuleForRequest
 } from "../utils/moduleAccessService.js";
 
@@ -39,12 +40,19 @@ const loadUserFromCookie = async (req: Request): Promise<boolean> => {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
 
     const dbUser = await User.findById(decoded.userId)
-      .select("isActive role email schoolId departmentAccount")
+      .select("isActive role email schoolId departmentAccount moduleAccess moduleActions secondaryRoles")
       .lean();
 
     if (!dbUser || !dbUser.isActive) {
       return false;
     }
+
+    primePermissionCache(decoded.userId, {
+      role: dbUser.role as string,
+      moduleAccess: dbUser.moduleAccess,
+      moduleActions: dbUser.moduleActions,
+      secondaryRoles: dbUser.secondaryRoles as UserRole[] | undefined
+    });
 
     // Prefer live DB role/school over JWT claims so admin changes apply immediately
     req.user = {

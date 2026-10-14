@@ -63,6 +63,13 @@ type TeacherPayFacts = {
   /** Where each teacher's period count came from — the register beats the log book. */
   periodSourceByTeacher: Map<string, "ATTENDANCE" | "LOGBOOK" | "NONE">;
   progressByTeacherSubject: Map<string, number>;
+  /**
+   * teacherId:subjectId keys whose % comes from the official syllabus, counting only
+   * leaves credited to that teacher. Their value is final — even 0 after
+   * administration extra lectures — and must never fall back to a sibling subject or
+   * session-plan progress (both count administration completions).
+   */
+  officialProgressKeys: Set<string>;
   progressDetailByTeacherSubject: Map<string, string>;
   assignedSubjectsByTeacher: Map<string, string[]>;
   tenderPaidByTeacher: Map<string, number>;
@@ -84,6 +91,7 @@ const loadTeacherPayFacts = async (
     periodsByTeacher: new Map(),
     periodSourceByTeacher: new Map(),
     progressByTeacherSubject: new Map(),
+    officialProgressKeys: new Set(),
     progressDetailByTeacherSubject: new Map(),
     assignedSubjectsByTeacher: new Map(),
     tenderPaidByTeacher: new Map(),
@@ -193,8 +201,14 @@ const loadTeacherPayFacts = async (
     progressByTeacherSubject.set(key, round2(Math.max(percent, existing)));
   }
 
+  const officialProgressKeys = new Set<string>();
+  for (const [key, hasLeaves] of syllabusProgress.hasAllottedLeavesByTeacherSubject) {
+    if (hasLeaves) officialProgressKeys.add(key);
+  }
+
   const inheritFamilyProgress = (teacherId: string, subjectId: string) => {
     const key = `${teacherId}:${subjectId}`;
+    if (officialProgressKeys.has(key)) return;
     if ((progressByTeacherSubject.get(key) ?? 0) > 0) return;
     const inherited = lookupFamilyValue(
       progressByTeacherSubject,
@@ -290,6 +304,7 @@ const loadTeacherPayFacts = async (
   return {
     periodsByTeacher,
     progressByTeacherSubject,
+    officialProgressKeys,
     progressDetailByTeacherSubject: syllabusProgress.detailByTeacherSubject,
     assignedSubjectsByTeacher: syllabusProgress.assignedSubjectsByTeacher,
     tenderPaidByTeacher,
@@ -708,16 +723,20 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       let weighted = 0;
       let weight = 0;
       for (const row of subjectRows) {
-        const percent =
-          lookupFamilyValue(
-            payFacts.progressByTeacherSubject,
-            teacherId,
-            row.subjectId,
-            payFacts.subjectFamilyById,
-            (n) => n > 0
-          ) ??
-          payFacts.progressByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ??
-          0;
+        const exactKey = `${teacherId}:${row.subjectId}`;
+        // Official syllabus % (this teacher's own leaves only) is final, even when 0
+        // because administration taught the units — never borrow a sibling's value.
+        const percent = payFacts.officialProgressKeys.has(exactKey)
+          ? (payFacts.progressByTeacherSubject.get(exactKey) ?? 0)
+          : (lookupFamilyValue(
+              payFacts.progressByTeacherSubject,
+              teacherId,
+              row.subjectId,
+              payFacts.subjectFamilyById,
+              (n) => n > 0
+            ) ??
+            payFacts.progressByTeacherSubject.get(exactKey) ??
+            0);
         const detail =
           lookupFamilyValue(
             payFacts.progressDetailByTeacherSubject,

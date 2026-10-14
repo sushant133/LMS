@@ -52,6 +52,7 @@ import {
 import { compareBsDates, getTodayBs } from "../utils/nepaliDate.js";
 import { sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
+import { runThrottled } from "../utils/throttledJob.js";
 import { withTenantScope } from "../utils/tenant.js";
 
 const LAB_TYPE_LABELS: Record<string, string> = {
@@ -81,7 +82,11 @@ const emptyToUndef = (value?: string | null) => {
   return trimmed ? trimmed : undefined;
 };
 
-const syncEquipmentOverdueStatuses = async (schoolId: string): Promise<void> => {
+/** Called from lab list/dashboard reads, so throttled per college. */
+const syncEquipmentOverdueStatuses = (schoolId: string): Promise<void> =>
+  runThrottled(`lab-overdue:${schoolId}`, 10 * 60 * 1000, () => sweepEquipmentOverdueStatuses(schoolId));
+
+const sweepEquipmentOverdueStatuses = async (schoolId: string): Promise<void> => {
   const todayBs = getTodayBs();
   const activeIssues = await LaboratoryIssue.find({
     schoolId,

@@ -40,12 +40,23 @@ const LATIN_FONT = (): string | null =>
  * (network blocks/timeouts used to force the PDFKit fallback, which then crashed
  * on Devanagari layout for words like अक्षरेपी).
  */
+/** Base64 of each font file, read once — they were re-read synchronously on every PDF. */
+const fontBase64Cache = new Map<string, string>();
+const fontBase64 = (fontPath: string): string => {
+  let b64 = fontBase64Cache.get(fontPath);
+  if (b64 === undefined) {
+    b64 = fs.readFileSync(fontPath).toString("base64");
+    fontBase64Cache.set(fontPath, b64);
+  }
+  return b64;
+};
+
 const injectLocalFonts = (html: string, keepDocumentFonts = false): string => {
   const faces: string[] = [];
 
   const devPath = DEVANAGARI_FONT();
   if (devPath) {
-    const b64 = fs.readFileSync(devPath).toString("base64");
+    const b64 = fontBase64(devPath);
     faces.push(`
       @font-face {
         font-family: 'Noto Sans Devanagari';
@@ -59,7 +70,7 @@ const injectLocalFonts = (html: string, keepDocumentFonts = false): string => {
 
   const latinPath = LATIN_FONT();
   if (latinPath) {
-    const b64 = fs.readFileSync(latinPath).toString("base64");
+    const b64 = fontBase64(latinPath);
     faces.push(`
       @font-face {
         font-family: 'Noto Sans';
@@ -172,6 +183,65 @@ const chromeExecutablePath = (): string | undefined => {
   return undefined;
 };
 
+type PuppeteerBrowser = Awaited<ReturnType<(typeof import("puppeteer"))["default"]["launch"]>>;
+
+/**
+ * One shared Chromium for the whole process. Launching a fresh browser per PDF
+ * cost 1–3 s and ~150 MB each, and a class worth of marksheet downloads started
+ * dozens at once — the VPS ran out of memory and every API request slowed down.
+ */
+let sharedBrowser: Promise<PuppeteerBrowser> | null = null;
+
+const getSharedBrowser = (): Promise<PuppeteerBrowser> => {
+  if (!sharedBrowser) {
+    const launching = (async () => {
+      const puppeteer = await import("puppeteer");
+      const executablePath = chromeExecutablePath();
+      const browser = await puppeteer.default.launch({
+        headless: true,
+        ...(executablePath ? { executablePath } : {}),
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--font-render-hinting=none",
+          "--disable-gpu"
+        ]
+      });
+      browser.on("disconnected", () => {
+        if (sharedBrowser === launching) sharedBrowser = null;
+      });
+      return browser;
+    })();
+    sharedBrowser = launching;
+    // A failed launch must not be cached — the next PDF retries.
+    launching.catch(() => {
+      if (sharedBrowser === launching) sharedBrowser = null;
+    });
+  }
+  return sharedBrowser;
+};
+
+/** At most this many pages render at once; the rest queue instead of piling on RAM. */
+const MAX_CONCURRENT_PDF_PAGES = 2;
+let activePdfPages = 0;
+const pdfPageQueue: Array<() => void> = [];
+
+const acquirePdfSlot = async (): Promise<void> => {
+  if (activePdfPages < MAX_CONCURRENT_PDF_PAGES) {
+    activePdfPages += 1;
+    return;
+  }
+  // The releasing caller hands its slot straight to us, so the count stays put.
+  await new Promise<void>((resolve) => pdfPageQueue.push(resolve));
+};
+
+const releasePdfSlot = (): void => {
+  const next = pdfPageQueue.shift();
+  if (next) next();
+  else activePdfPages -= 1;
+};
+
 async function convertWithPuppeteer(
   html: string,
   pdfOptions?: Partial<PDFOptions> & {
@@ -179,26 +249,15 @@ async function convertWithPuppeteer(
     requireBrowser?: boolean;
   }
 ): Promise<Buffer> {
-  // Dynamic import so the app still boots if puppeteer is not installed.
-  const puppeteer = await import("puppeteer");
   const { keepDocumentFonts, requireBrowser: _requireBrowser, ...pageOptions } = pdfOptions ?? {};
   const preparedHtml = injectLocalFonts(html, keepDocumentFonts);
-  const executablePath = chromeExecutablePath();
 
-  const browser = await puppeteer.default.launch({
-    headless: true,
-    ...(executablePath ? { executablePath } : {}),
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--font-render-hinting=none",
-      "--disable-gpu"
-    ]
-  });
-
+  await acquirePdfSlot();
+  let page: Awaited<ReturnType<PuppeteerBrowser["newPage"]>> | null = null;
   try {
-    const page = await browser.newPage();
+    // Dynamic import inside getSharedBrowser so the app still boots without puppeteer.
+    const browser = await getSharedBrowser();
+    page = await browser.newPage();
     // domcontentloaded: no wait on external network (fonts are embedded)
     await page.setContent(preparedHtml, {
       waitUntil: "domcontentloaded",
@@ -224,7 +283,8 @@ async function convertWithPuppeteer(
 
     return Buffer.from(pdf);
   } finally {
-    await browser.close();
+    if (page) await page.close().catch(() => undefined);
+    releasePdfSlot();
   }
 }
 

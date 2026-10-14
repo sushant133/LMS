@@ -13,6 +13,15 @@
 root /var/www/LMS/frontend/dist;
 index index.html;
 
+# Compress JS/CSS/JSON. Stock nginx gzips only text/html, so the ~600 KB main
+# bundle and every lazy page chunk otherwise go over the wire uncompressed.
+gzip on;
+gzip_comp_level 5;
+gzip_min_length 1024;
+gzip_proxied any;
+gzip_vary on;
+gzip_types text/plain text/css application/javascript text/javascript application/json application/manifest+json image/svg+xml;
+
 # Hashed build output: immutable, and a miss must be a real 404 (never the app shell)
 location /assets/ {
     try_files $uri =404;

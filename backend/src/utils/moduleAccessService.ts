@@ -106,6 +106,14 @@ export const invalidatePermissionCache = (userId?: string | null): void => {
   permissionCache.delete(String(userId));
 };
 
+/**
+ * Seed the cache from a User read that already selected the permission fields
+ * (auth does this), so `enforceModuleAccess` needs no second findById.
+ */
+export const primePermissionCache = (userId: string, value: PermissionUserFields): void => {
+  permissionCache.set(String(userId), { expiresAt: Date.now() + PERMISSION_CACHE_TTL_MS, value });
+};
+
 const loadPermissionUser = async (userId: string): Promise<PermissionUserFields | null> => {
   const key = String(userId);
   const now = Date.now();

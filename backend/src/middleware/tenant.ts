@@ -1,17 +1,16 @@
 import type { NextFunction, Request, Response } from "express";
 import { normalizeUserRole } from "@phit-erp/shared";
 import { env } from "../config/env.js";
-import { School } from "../models/School.js";
 import { ApiError } from "../utils/apiError.js";
 import { resolveInstitutionSchoolId } from "../utils/institutionSchool.js";
-import { isValidObjectIdString, pickNonEmptySchoolId } from "../utils/tenant.js";
+import { getCachedSchool } from "../utils/schoolCache.js";
+import { pickNonEmptySchoolId } from "../utils/tenant.js";
 
 /**
  * Load an active school by id. Returns null for invalid ids (no CastError).
  */
 const findActiveSchoolById = async (schoolId: string | undefined) => {
-  if (!schoolId || !isValidObjectIdString(schoolId)) return null;
-  const school = await School.findById(schoolId).select("_id isActive").lean();
+  const school = await getCachedSchool(schoolId);
   if (!school || !school.isActive) return null;
   return school;
 };

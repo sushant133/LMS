@@ -1,6 +1,6 @@
 import type { InstitutionType } from "@phit-erp/shared";
 import type { Request } from "express";
-import { School } from "../models/School.js";
+import { getCachedSchool } from "./schoolCache.js";
 import { ApiError } from "./apiError.js";
 import { tenantObjectId } from "./tenant.js";
 
@@ -8,13 +8,13 @@ export const isCollege = (institutionType?: InstitutionType | null): boolean => 
 
 export const getInstitutionType = async (req: Request): Promise<InstitutionType> => {
   const schoolId = tenantObjectId(req);
-  const school = await School.findById(schoolId).select("institutionType").lean();
+  const school = await getCachedSchool(schoolId.toString());
 
   if (!school) {
     throw new ApiError(404, "College not found");
   }
 
-  return (school.institutionType as InstitutionType) ?? "SCHOOL";
+  return school.institutionType;
 };
 
 export const requireSchoolInstitution = async (req: Request): Promise<void> => {

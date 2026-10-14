@@ -54,24 +54,43 @@ const buildFeeDueStudents = async (req: Request, schoolId: ReturnType<typeof ten
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
 
-  const [students, primaryGroups, secondaryGroups, collections, settings] = await Promise.all([
+  const [students, primaryGroups, secondaryGroups, settings] = await Promise.all([
     Student.find({ schoolId, feesDueNpr: { $gt: 0 } })
-      .populate("user", "-password")
+      .populate("user", "fullName email")
       .sort({ feesDueNpr: -1 })
       .lean(),
-    college ? Batch.find({ schoolId }).lean() : SchoolClass.find({ schoolId }).lean(),
-    college ? Year.find({ schoolId }).lean() : Section.find({ schoolId }).lean(),
-    FeeCollection.find({ schoolId, isDeleted: false }).lean(),
+    college
+      ? Batch.find({ schoolId }).select("_id name").lean()
+      : SchoolClass.find({ schoolId }).select("_id name").lean(),
+    college
+      ? Year.find({ schoolId }).select("_id name").lean()
+      : Section.find({ schoolId }).select("_id name").lean(),
     AccountingSettings.findOne({ schoolId }).lean()
   ]);
+
+  // Only the collections of students who still owe fees, grouped once — the old
+  // code loaded every collection in the college and re-scanned it per student.
+  const collections = await FeeCollection.find({
+    schoolId,
+    isDeleted: false,
+    studentId: { $in: students.map((student) => student._id) }
+  })
+    .select("studentId paidDateBs amountPaidNpr discountNpr scholarshipNpr isInstallment totalInstallments installmentNumber")
+    .lean();
+  const collectionsByStudent = new Map<string, typeof collections>();
+  for (const item of collections) {
+    const key = item.studentId.toString();
+    const list = collectionsByStudent.get(key);
+    if (list) list.push(item);
+    else collectionsByStudent.set(key, [item]);
+  }
 
   const primaryMap = new Map(primaryGroups.map((item) => [item._id.toString(), item.name]));
   const secondaryMap = new Map(secondaryGroups.map((item) => [item._id.toString(), item.name]));
   const graceDays = settings?.lateFineGraceDays ?? 0;
 
   return students.map((student) => {
-    const studentCollections = collections
-      .filter((item) => item.studentId.toString() === student._id.toString())
+    const studentCollections = (collectionsByStudent.get(student._id.toString()) ?? [])
       .sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs));
     const totalPaid = studentCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
     const totalDiscount = studentCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);

@@ -378,25 +378,33 @@ export const deleteBatch = asyncHandler(async (req: Request, res: Response) => {
 
 /** Ensure every batch has the full COLLEGE_YEAR_NAMES set (e.g. new "Ended" option). */
 const ensureCollegeYearsForSchool = async (schoolId: unknown) => {
-  const batches = await Batch.find({ schoolId }).select("_id").lean();
+  // Runs on every GET /years, so read all years in one query instead of one
+  // sequential query per batch.
+  const [batches, years] = await Promise.all([
+    Batch.find({ schoolId }).select("_id").lean(),
+    Year.find({ schoolId }).select("batchId name").lean()
+  ]);
   if (!batches.length) return;
 
-  for (const batch of batches) {
-    const existing = await Year.find({ schoolId, batchId: batch._id }).lean();
-    const byName = new Set(existing.map((y) => y.name));
-    const missing = COLLEGE_YEAR_NAMES.filter((name) => !byName.has(name));
-    if (!missing.length) continue;
-
-    await Year.insertMany(
-      missing.map((name) => ({
-        schoolId,
-        batchId: batch._id,
-        name,
-        level: COLLEGE_YEAR_NAMES.indexOf(name) + 1,
-        isActive: true
-      }))
-    );
+  const namesByBatch = new Map<string, Set<string>>();
+  for (const year of years) {
+    const key = String(year.batchId);
+    const names = namesByBatch.get(key) ?? new Set<string>();
+    names.add(year.name);
+    namesByBatch.set(key, names);
   }
+
+  const toInsert = batches.flatMap((batch) => {
+    const byName = namesByBatch.get(String(batch._id)) ?? new Set<string>();
+    return COLLEGE_YEAR_NAMES.filter((name) => !byName.has(name)).map((name) => ({
+      schoolId,
+      batchId: batch._id,
+      name,
+      level: COLLEGE_YEAR_NAMES.indexOf(name) + 1,
+      isActive: true
+    }));
+  });
+  if (toInsert.length) await Year.insertMany(toInsert);
 };
 
 export const listYears = asyncHandler(async (req: Request, res: Response) => {

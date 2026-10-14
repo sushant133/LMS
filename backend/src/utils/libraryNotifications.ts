@@ -7,6 +7,7 @@ import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { compareBsDates, getOffsetBsDate, getTodayBs } from "./nepaliDate.js";
+import { runThrottled } from "./throttledJob.js";
 import { notifyParentsOfStudent, sendNotification } from "./notificationService.js";
 
 type ReminderType = "BEFORE_DUE" | "DUE_TODAY" | "OVERDUE";
@@ -161,7 +162,11 @@ export const processLibraryIssueReminders = async (
   return status;
 };
 
-export const syncSchoolLibraryOverdueStatuses = async (schoolId: string): Promise<void> => {
+/** Overdue status + reminder sweep. Called from every library page load, so throttled per college. */
+export const syncSchoolLibraryOverdueStatuses = (schoolId: string): Promise<void> =>
+  runThrottled(`library-overdue:${schoolId}`, 10 * 60 * 1000, () => sweepSchoolLibraryIssues(schoolId));
+
+const sweepSchoolLibraryIssues = async (schoolId: string): Promise<void> => {
   const todayBs = getTodayBs();
   const activeIssues = await LibraryIssue.find({
     schoolId,

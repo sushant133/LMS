@@ -65,12 +65,26 @@ export default defineConfig(({ mode }) => {
           // /api/exams/results/:examId/:studentId/marksheet/pdf and the tab renders the
           // SPA "Page not found" screen instead of the file.
           navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/android-app-version\.json/],
-          globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+          // Precache only the app shell (entry JS/CSS + icons). Precaching every
+          // chunk made each visitor download ~5.5 MB (html2pdf, xlsx, jspdf, charts…)
+          // in the background on first visit and again after every deploy, competing
+          // with the page they were actually loading.
+          globPatterns: ["index.html", "assets/index-*.{js,css}", "*.{ico,png,svg}"],
           globIgnores: ["**/android-app-version.json"],
           runtimeCaching: [
             {
               urlPattern: /\/android-app-version\.json/i,
               handler: "NetworkOnly",
+            },
+            {
+              // Lazy page chunks: content-hashed, so cache on first use forever.
+              urlPattern: ({ url }) =>
+                url.origin === self.location.origin && url.pathname.startsWith("/assets/"),
+              handler: "CacheFirst",
+              options: {
+                cacheName: "app-chunks",
+                expiration: { maxEntries: 250, maxAgeSeconds: 60 * 60 * 24 * 60 },
+              },
             },
             {
               urlPattern: /^https?:\/\/.*\.(?:png|jpg|jpeg|svg|gif|ico)$/i,

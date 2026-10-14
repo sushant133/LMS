@@ -1,3 +1,4 @@
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
@@ -31,6 +32,10 @@ if (env.TRUST_PROXY > 0) {
 app.disable("x-powered-by");
 
 app.use(securityHeaders);
+
+// Gzip JSON responses — list endpoints (students, attendance, ledgers) shrink ~5-10x,
+// which matters far more than server time on slow mobile connections.
+app.use(compression({ threshold: 1024 }));
 
 app.use(
   cors({

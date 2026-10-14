@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { invalidateSchoolCache } from "../utils/schoolCacheStore.js";
 
 const addressSchema = new Schema(
   {
@@ -25,6 +26,14 @@ const schoolSchema = new Schema(
     isActive: { type: Boolean, default: true }
   },
   { timestamps: true }
+);
+
+// Any write may change isActive / institutionType — drop the per-request lookup cache.
+schoolSchema.post(
+  ["save", "updateOne", "updateMany", "findOneAndUpdate", "findOneAndDelete", "deleteOne", "deleteMany", "replaceOne"],
+  () => {
+    invalidateSchoolCache();
+  }
 );
 
 export type SchoolDocument = InferSchemaType<typeof schoolSchema>;

@@ -6,6 +6,8 @@ coverage
 .env.local
 *.tsbuildinfo
 vite.config.d.ts
+# Stale tsc output shadows vite.config.ts (Vite loads .js first) — never commit it
+vite.config.js
 
 # Capacitor / Android local build outputs (keep android/ project if you commit it)
 android/.gradle
