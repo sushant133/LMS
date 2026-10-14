@@ -17,6 +17,7 @@ import {
   type AcademicNotifyKind
 } from "./academicManagementService.js";
 import { notifyDayAheadDigest } from "./academicCalendarNotifications.js";
+import { resolveCalendarHolidayForDate } from "./academicCalendarService.js";
 import { notifyAdminDailyDigest } from "./adminDailyDigest.js";
 import { getDayOfWeekFromBs, getTodayBs } from "./nepaliDate.js";
 import { sendNotification } from "./notificationService.js";
@@ -382,7 +383,9 @@ export const runAcademicManagementNotifications = async (): Promise<void> => {
       }
     }
 
-    // Missing daily log book — only teachers with timetable periods today
+    // Missing daily log book — only teachers with timetable periods today, and
+    // never on an academic-calendar holiday (no classes run, so nothing is due).
+    if (await resolveCalendarHolidayForDate(schoolId, todayBs)) continue;
     const teachersWithSlots = await TimetableSlot.distinct("teacherId", {
       schoolId,
       dayOfWeek,

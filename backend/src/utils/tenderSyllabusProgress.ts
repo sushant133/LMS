@@ -6,6 +6,7 @@ import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { Subject } from "../models/Subject.js";
 import { SubjectAssignment } from "../models/SubjectAssignment.js";
 import { leafCountsTowardTeacherSalary } from "./syllabusCompletionAttribution.js";
+import { unitWeightedFraction } from "./syllabusPercent.js";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -145,6 +146,8 @@ type Leaf = {
   classId: string;
   batchId: string;
   unitNo: number;
+  /** Unit the leaf belongs to — each unit weighs the same (syllabusPercent.ts). */
+  unitKey: string;
   leafId: string;
   completed: boolean;
   practicalRequired?: boolean;
@@ -222,8 +225,7 @@ export const filterLeavesForSubjectKind = (
 
 export const percentFromLeaves = (leaves: Leaf[]): number | null => {
   if (leaves.length === 0) return null;
-  const done = leaves.filter((leaf) => leaf.completed).length;
-  return round2((done / leaves.length) * 100);
+  return round2(unitWeightedFraction(leaves, (leaf) => leaf.completed) * 100);
 };
 
 const groupMatchScore = (syl: SyllabusLean, asg: AssignmentLean): number => {
@@ -418,6 +420,7 @@ export const loadTenderSyllabusProgress = async (opts: {
         classId: meta.classId,
         batchId: meta.batchId,
         unitNo,
+        unitKey: `${sid}:${String(sub.unitId)}`,
         leafId: id,
         completed: subUnitDone(String(sub.status || "")),
         practicalRequired:
@@ -457,6 +460,7 @@ export const loadTenderSyllabusProgress = async (opts: {
         classId: meta.classId,
         batchId: meta.batchId,
         unitNo,
+        unitKey: `${sid}:${tid}`,
         leafId: `topic:${tid}`,
         completed: legacy.status === "COMPLETED",
         practicalRequired: Boolean(topic.practicalRequired) || legacy.practical
@@ -478,6 +482,7 @@ export const loadTenderSyllabusProgress = async (opts: {
         classId: meta.classId,
         batchId: meta.batchId,
         unitNo: Number(unit.unitNo) || 0,
+        unitKey: `${sid}:legacy:${String(unit._id)}`,
         leafId: `legacy:${String(unit._id)}`,
         completed: String(unit.status || "") === "COMPLETED",
         practicalRequired: Boolean(unit.practicalRequired)
@@ -486,7 +491,10 @@ export const loadTenderSyllabusProgress = async (opts: {
     }
   }
 
-  const buckets = new Map<string, { leafIds: Set<string>; completed: number; details: Set<string> }>();
+  const buckets = new Map<
+    string,
+    { leaves: Map<string, { unitKey: string; counts: boolean }>; details: Set<string> }
+  >();
   const baselineByKey = new Map<string, number>();
   const assignedPctByKey = new Map<string, number | "mixed">();
 
@@ -497,15 +505,16 @@ export const loadTenderSyllabusProgress = async (opts: {
     const key = `${teacherId}:${subjectId}`;
     hasAllottedLeavesByTeacherSubject.set(key, true);
     const bucket = buckets.get(key) ?? {
-      leafIds: new Set<string>(),
-      completed: 0,
+      leaves: new Map<string, { unitKey: string; counts: boolean }>(),
       details: new Set<string>()
     };
     for (const leaf of leaves) {
       const lid = `${leaf.syllabusId}:${leaf.leafId}`;
-      if (bucket.leafIds.has(lid)) continue;
-      bucket.leafIds.add(lid);
-      if (leafCountsTowardTeacherSalary(leaf, teacherId)) bucket.completed += 1;
+      if (bucket.leaves.has(lid)) continue;
+      bucket.leaves.set(lid, {
+        unitKey: leaf.unitKey,
+        counts: leafCountsTowardTeacherSalary(leaf, teacherId)
+      });
     }
     if (detail) bucket.details.add(detail);
     buckets.set(key, bucket);
@@ -586,9 +595,8 @@ export const loadTenderSyllabusProgress = async (opts: {
   const percentByTeacherSubject = new Map<string, number>();
   const detailByTeacherSubject = new Map<string, string>();
   for (const [key, bucket] of buckets) {
-    const total = bucket.leafIds.size;
-    if (total === 0) continue;
-    let pct = round2((bucket.completed / total) * 100);
+    if (bucket.leaves.size === 0) continue;
+    let pct = round2(unitWeightedFraction([...bucket.leaves.values()], (leaf) => leaf.counts) * 100);
     const allotted = assignedPctByKey.get(key);
     if (typeof allotted === "number" && allotted > 0 && allotted < 100) {
       pct = round2(Math.min(100, (pct / allotted) * 100));

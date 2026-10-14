@@ -14,6 +14,7 @@ import { securityHeaders } from "./middleware/securityHeaders.js";
 import routes from "./routes/index.js";
 import { ensureDemoData } from "./seed/index.js";
 import { migrateLegacyDemoDisplayNames } from "./utils/migrateLegacyDemoDisplayNames.js";
+import { ensureUnitStandInSubUnits } from "./utils/ensureUnitStandInSubUnits.js";
 import { repairLaboratoryIndexes } from "./utils/repairLaboratoryIndexes.js";
 import { startAcademicManagementNotificationScheduler } from "./utils/academicManagementNotifications.js";
 import { startNoticeNotificationScheduler } from "./utils/noticeNotifications.js";
@@ -193,6 +194,17 @@ const startServer = async (): Promise<void> => {
   } catch (error) {
     logger.warn(
       `migrateLegacyDemoDisplayNames failed (non-fatal): ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  // Units without sub-units get one stand-in sub-unit so they count in syllabus %.
+  try {
+    await ensureUnitStandInSubUnits();
+  } catch (error) {
+    logger.warn(
+      `ensureUnitStandInSubUnits failed (non-fatal): ${
         error instanceof Error ? error.message : String(error)
       }`
     );

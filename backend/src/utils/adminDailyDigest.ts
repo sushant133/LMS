@@ -4,6 +4,7 @@ import { DailyAttendance } from "../models/DailyAttendance.js";
 import { LeaveRequest } from "../models/LeaveRequest.js";
 import { LibraryIssue } from "../models/LibraryBook.js";
 import { TimetableSlot } from "../models/TimetableSlot.js";
+import { resolveCalendarHolidayForDate } from "./academicCalendarService.js";
 import { getDayOfWeekFromBs, getNepalHour } from "./nepaliDate.js";
 import { notifySchoolAdmins } from "./notificationService.js";
 
@@ -35,6 +36,8 @@ export const buildAdminDailyDigest = async (
   todayBs: string
 ): Promise<{ title: string; message: string; sections: number } | null> => {
   const dayOfWeek = getDayOfWeekFromBs(todayBs);
+  // No classes on an academic-calendar holiday, so no log book is expected.
+  const isHoliday = Boolean(await resolveCalendarHolidayForDate(schoolId, todayBs));
 
   const [sheets, pendingLeave, overdueBooks, overduePlans, teachersWithSlots, teachersWithLog] =
     await Promise.all([
@@ -42,7 +45,9 @@ export const buildAdminDailyDigest = async (
       LeaveRequest.countDocuments({ schoolId, status: "PENDING" }),
       LibraryIssue.countDocuments({ schoolId, status: "OVERDUE" }),
       AcademicLessonPlanItem.countDocuments({ schoolId, completionStatus: "DELAYED" }),
-      TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek, teacherId: { $ne: null } }),
+      isHoliday
+        ? Promise.resolve([])
+        : TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek, teacherId: { $ne: null } }),
       AcademicLogBookEntry.distinct("teacherId", { schoolId, dateBs: todayBs, isDeleted: false })
     ]);
 

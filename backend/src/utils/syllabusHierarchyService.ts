@@ -20,6 +20,7 @@ import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { Teacher } from "../models/Teacher.js";
+import { unitWeightedFractionFromCounts } from "./syllabusPercent.js";
 
 /**
  * Preserve existing Mongo ids from form clientKey when re-saving hierarchy.
@@ -413,6 +414,18 @@ export const deleteSyllabusHierarchy = async (
 
 type SubUnitInput = AcademicSyllabusSubUnitInputShape;
 
+/** The single sub-unit that represents a unit which has no sub-units of its own. */
+const standInSubUnitFor = (unit: {
+  title?: string;
+  teachingHours?: number;
+  practicalRequired?: boolean;
+}): SubUnitInput =>
+  ({
+    heading: (unit.title || "").trim(),
+    teachingHours: unit.teachingHours ?? 0,
+    practicalRequired: Boolean(unit.practicalRequired)
+  }) as SubUnitInput;
+
 const safeHours = (value: unknown): number => {
   if (value === "" || value === null || value === undefined) return 0;
   const n = typeof value === "number" ? value : Number(value);
@@ -726,8 +739,12 @@ export const saveSyllabusHierarchy = async (
           );
         }
 
-        const subUnits = unit.subUnits ?? [];
-        if (subUnits.length === 0) continue;
+        // A unit with no sub-units is taught as one piece: give it a single sub-unit
+        // standing for the whole unit, so it can be marked complete (log book /
+        // oversight, teacher vs administration) and counts in every syllabus %.
+        const subUnits: SubUnitInput[] = unit.subUnits?.length
+          ? unit.subUnits
+          : [standInSubUnitFor(unit)];
 
         await insertSubUnitTree(
           {
@@ -1105,8 +1122,12 @@ export const loadSyllabusHierarchy = async (
 
     const totalSubUnits = units.reduce((sum, u) => sum + u.totalSubUnits, 0);
     const completedSubUnits = units.reduce((sum, u) => sum + u.completedSubUnits, 0);
-    const completedPercent =
-      totalSubUnits > 0 ? Math.round((completedSubUnits / totalSubUnits) * 100) : 0;
+    // Each unit weighs the same (see syllabusPercent.ts)
+    const completedPercent = Math.round(
+      unitWeightedFractionFromCounts(
+        units.map((u) => ({ total: u.totalSubUnits, done: u.completedSubUnits }))
+      ) * 100
+    );
 
     const rawKind = (chapter as { sectionKind?: string }).sectionKind;
     const sectionKind =
@@ -1144,8 +1165,14 @@ export const computeHierarchyStats = (chapters: AcademicSyllabusChapterRecord[])
   const totalSubUnits = chapters.reduce((sum, c) => sum + c.totalSubUnits, 0);
   const completedSubUnits = chapters.reduce((sum, c) => sum + c.completedSubUnits, 0);
   const remainingSubUnits = totalSubUnits - completedSubUnits;
-  const completedPercent =
-    totalSubUnits > 0 ? Math.round((completedSubUnits / totalSubUnits) * 100) : 0;
+  // Each unit weighs the same across the whole syllabus (see syllabusPercent.ts)
+  const completedPercent = Math.round(
+    unitWeightedFractionFromCounts(
+      chapters.flatMap((c) =>
+        c.units.map((u) => ({ total: u.totalSubUnits, done: u.completedSubUnits }))
+      )
+    ) * 100
+  );
 
   let teachingHoursTotal = 0;
   let teachingHoursCovered = 0;

@@ -53,6 +53,7 @@ import {
   serializeSessionPlan,
   serializeSyllabus
 } from "./academicManagementService.js";
+import { unitWeightedFraction } from "./syllabusPercent.js";
 
 const roundPct = (n: number): number => Math.round(Math.min(100, Math.max(0, n)));
 
@@ -163,7 +164,14 @@ const summarizeLeaves = (leaves: FlatLeaf[]) => {
     if (admin) administration += 1;
     else teacher += 1;
   }
-  const completedPercent = total > 0 ? roundPct((completed / total) * 100) : 0;
+  // Each unit weighs the same (see syllabusPercent.ts); leaf counts stay for display.
+  const keyed = leaves.map((leaf) => ({ ...leaf, unitKey: leaf.unitId }));
+  const isAdmin = (leaf: FlatLeaf) =>
+    leaf.attribution?.source === "ADMINISTRATION" ||
+    leaf.attribution?.countsTowardSalary === false;
+  const pct = (counts: (leaf: FlatLeaf) => boolean) =>
+    roundPct(unitWeightedFraction(keyed, counts) * 100);
+  const completedPercent = pct((leaf) => leafDone(leaf.status));
   return {
     totalLeaves: total,
     completedLeaves: completed,
@@ -171,8 +179,8 @@ const summarizeLeaves = (leaves: FlatLeaf[]) => {
     administrationLeaves: administration,
     remainingLeaves: Math.max(0, total - completed),
     completedPercent,
-    teacherPercent: total > 0 ? roundPct((teacher / total) * 100) : 0,
-    administrationPercent: total > 0 ? roundPct((administration / total) * 100) : 0,
+    teacherPercent: pct((leaf) => leafDone(leaf.status) && !isAdmin(leaf)),
+    administrationPercent: pct((leaf) => leafDone(leaf.status) && isAdmin(leaf)),
     remainingPercent: Math.max(0, 100 - completedPercent)
   };
 };
@@ -233,6 +241,7 @@ const salaryStatsForTeacher = (
   const allotted = leavesForAssignment(leaves, asg);
   let completed = 0;
   let administration = 0;
+  const countedForTeacher = new Set<FlatLeaf>();
   for (const leaf of allotted) {
     const done = leafDone(leaf.status);
     if (
@@ -254,13 +263,20 @@ const salaryStatsForTeacher = (
       )
     ) {
       completed += 1;
+      countedForTeacher.add(leaf);
     }
   }
   return {
     allottedLeaves: allotted.length,
     completedLeaves: completed,
     administrationLeaves: administration,
-    salaryPercent: allotted.length > 0 ? roundPct((completed / allotted.length) * 100) : 0
+    // Each allotted unit weighs the same (see syllabusPercent.ts)
+    salaryPercent: roundPct(
+      unitWeightedFraction(
+        allotted.map((leaf) => ({ leaf, unitKey: leaf.unitId })),
+        (row) => countedForTeacher.has(row.leaf)
+      ) * 100
+    )
   };
 };
 

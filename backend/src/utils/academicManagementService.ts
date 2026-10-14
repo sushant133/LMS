@@ -50,6 +50,8 @@ import {
 } from "./syllabusCompletionAttribution.js";
 import { recordAudit } from "./audit.js";
 import { getInstitutionType, isCollege } from "./institution.js";
+import { resolveCalendarHolidayForDate } from "./academicCalendarService.js";
+import { unitWeightedFraction, unitWeightedFractionFromCounts } from "./syllabusPercent.js";
 import { compareBsDates, getDayOfWeekFromBs, getOffsetFromBsDate, getTodayBs } from "./nepaliDate.js";
 import { sendNotification, getSchoolIdFromRequest } from "./notificationService.js";
 import { getTeacherScope, requireTeacherScope } from "./teacherScope.js";
@@ -2446,9 +2448,11 @@ const computeSessionPlanProgressStats = async (sessionPlanId: string) => {
     .filter((id): id is string => Boolean(id));
   let totalLeaves = 0;
   let doneLeaves = 0;
+  /** Unit-weighted % (syllabusPercent.ts) once leaves are known; null = none found. */
+  let leafPercent: number | null = null;
   if (syllabusUnitIds.length > 0) {
     const subs = await AcademicSyllabusSubUnit.find({ unitId: { $in: syllabusUnitIds } })
-      .select("_id parentSubUnitId status")
+      .select("_id unitId parentSubUnitId status")
       .lean();
     const parentIds = new Set(
       subs
@@ -2458,6 +2462,14 @@ const computeSessionPlanProgressStats = async (sessionPlanId: string) => {
     const leaves = subs.filter((row) => !parentIds.has(String(row._id)));
     totalLeaves = leaves.length;
     doneLeaves = leaves.filter((row) => syllabusLeafDone(String(row.status || ""))).length;
+    if (totalLeaves > 0) {
+      leafPercent = Math.round(
+        unitWeightedFraction(
+          leaves.map((row) => ({ ...row, unitKey: String(row.unitId) })),
+          (row) => syllabusLeafDone(String(row.status || ""))
+        ) * 100
+      );
+    }
   }
 
   // Same subject syllabus (covers units not yet linked by syllabusUnitId).
@@ -2499,14 +2511,15 @@ const computeSessionPlanProgressStats = async (sessionPlanId: string) => {
         if (stats.totalSubUnits > 0) {
           totalLeaves = stats.totalSubUnits;
           doneLeaves = stats.completedSubUnits;
+          leafPercent = stats.completedPercent;
         }
       }
     }
   }
 
   const completedPercent =
-    totalLeaves > 0
-      ? Math.round((doneLeaves / totalLeaves) * 100)
+    leafPercent !== null
+      ? leafPercent
       : total > 0
         ? Math.round((completedUnits / total) * 100)
         : 0;
@@ -3372,7 +3385,7 @@ const loadSyllabusCompletionRows = async (
   const syllabusIds = syllabi.map((row) => row._id);
   const [subUnits, legacyUnits, subjectDocs] = await Promise.all([
     AcademicSyllabusSubUnit.find({ syllabusId: { $in: syllabusIds } })
-      .select("syllabusId parentSubUnitId status")
+      .select("syllabusId unitId parentSubUnitId status")
       .lean(),
     AcademicSyllabusUnit.find({ syllabusId: { $in: syllabusIds } })
       .select("syllabusId status")
@@ -3387,14 +3400,25 @@ const loadSyllabusCompletionRows = async (
       .map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : ""))
       .filter(Boolean)
   );
-  const leavesBySyllabus = new Map<string, { total: number; done: number }>();
+  // Per syllabus → per unit tallies, so each unit weighs the same (syllabusPercent.ts)
+  const unitTalliesBySyllabus = new Map<string, Map<string, { total: number; done: number }>>();
   for (const sub of subUnits) {
     if (parentIds.has(String(sub._id))) continue;
     const sid = String(sub.syllabusId);
-    const bucket = leavesBySyllabus.get(sid) ?? { total: 0, done: 0 };
-    bucket.total += 1;
-    if (sub.status === "COMPLETED" || sub.status === "SKIPPED") bucket.done += 1;
-    leavesBySyllabus.set(sid, bucket);
+    const units = unitTalliesBySyllabus.get(sid) ?? new Map<string, { total: number; done: number }>();
+    const unit = units.get(String(sub.unitId)) ?? { total: 0, done: 0 };
+    unit.total += 1;
+    if (sub.status === "COMPLETED" || sub.status === "SKIPPED") unit.done += 1;
+    units.set(String(sub.unitId), unit);
+    unitTalliesBySyllabus.set(sid, units);
+  }
+  const leavesBySyllabus = new Map<string, { total: number; done: number }>();
+  for (const [sid, units] of unitTalliesBySyllabus) {
+    // Express the unit-weighted fraction as done/total so callers keep one shape.
+    leavesBySyllabus.set(sid, {
+      total: 1,
+      done: unitWeightedFractionFromCounts([...units.values()])
+    });
   }
   const hasHierarchy = new Set(leavesBySyllabus.keys());
   const legacyBySyllabus = new Map<string, { total: number; done: number }>();
@@ -3574,8 +3598,12 @@ const buildDashboardInner = async (
     dateBs: logDateBs,
     isDeleted: false
   });
+  // Academic-calendar holidays (and automatic Saturdays) have no classes, so no
+  // teacher is "scheduled" and no log book is due.
+  const logDateIsHoliday =
+    logDayOfWeek >= 0 && Boolean(await resolveCalendarHolidayForDate(schoolId, logDateBs));
   const scheduledTeacherIds: Array<mongoose.Types.ObjectId | string> =
-    logDayOfWeek >= 0
+    logDayOfWeek >= 0 && !logDateIsHoliday
       ? await TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek: logDayOfWeek })
       : [];
   const scheduledTeacherCount = scheduledTeacherIds.length;
