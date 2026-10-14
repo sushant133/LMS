@@ -1071,7 +1071,7 @@ export const SalaryPaymentRecordsPanel = ({
           r.employeeType === "TEACHER"
             ? `<div class="pay-meta">${escapeHtml(
                 TEACHER_PAYMENT_TYPE_LABELS[payTypeOf(r)],
-              )}${r.payBreakdown ? ` · ${escapeHtml(r.payBreakdown)}` : ""}</div>`
+              )}</div>`
             : ""
         }</td>
         <td class="n">${formatCurrencyNpr(r.monthlySalaryNpr)}</td>
@@ -2754,11 +2754,6 @@ export const SalaryPaymentRecordsPanel = ({
                           <Badge className="mt-1 bg-slate-100 text-slate-800">
                             {TEACHER_PAYMENT_TYPE_LABELS[payTypeOf(row)]}
                           </Badge>
-                        ) : null}
-                        {row.payBreakdown ? (
-                          <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-600">
-                            {row.payBreakdown}
-                          </div>
                         ) : null}
                         {row.attendanceIncomplete ? (
                           <Badge
