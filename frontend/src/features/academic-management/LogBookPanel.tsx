@@ -57,6 +57,8 @@ import {
   AcademicSubjectMasterDetail,
   isPhoneViewport,
 } from "./AcademicSubjectMasterDetail";
+import { SubjectApproveAllButton } from "./SubjectApproveAllButton";
+import { ReviewUndoActions } from "./ReviewUndoActions";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
@@ -1309,6 +1311,14 @@ export const LogBookPanel = ({
             Needs improvement
           </Button>
           ) : null}
+          <ReviewUndoActions
+            resource="log-book-entries"
+            id={entry._id}
+            status={entry.reviewStatus}
+            label="log book entry"
+            canVerify={isAdmin}
+            canApprove={canPerformApprove}
+          />
         </>
       ) : null}
       {canEditDelete &&
@@ -1889,6 +1899,14 @@ export const LogBookPanel = ({
                       Log book starts from the beginning for this FULL assignment.
                     </p>
                   )}
+                  <SubjectApproveAllButton
+                    type="LOG_BOOK"
+                    subjectIds={selectedSubjectMeta.subject.subjectIds}
+                    subjectName={selectedSubjectMeta.subject.subjectName}
+                    filters={filters}
+                    isCollege={isCollege}
+                    isAdminView={isAdmin}
+                  />
                 </CardContent>
               </Card>
 

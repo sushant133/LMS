@@ -36,6 +36,9 @@ export interface AttendanceRegisterDayMeta {
   /** JS getDay(): 0=Sun … 6=Sat */
   dayOfWeek: number;
   isSaturday: boolean;
+  /** Holiday on the Academic Calendar (Saturdays, calendar holidays, settings holidays). */
+  isHoliday?: boolean;
+  holidayTitle?: string;
 }
 
 export interface AttendanceRegisterCell {

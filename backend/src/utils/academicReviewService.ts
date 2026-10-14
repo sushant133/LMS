@@ -18,6 +18,7 @@ import {
   actorIsAcademicAdmin,
   actorIsInstitutionApprover,
   buildAcademicFilter,
+  expandCurriculumSubjectIds,
   notifyAdminsOfPendingAcademic,
   notifyTeacherOfAcademicDecision,
   recordApproval,
@@ -357,6 +358,177 @@ export const approveLogBookById = async (req: Request, id: string, remarks?: str
   return serializeLogBookEntry(existing._id.toString());
 };
 
+export type AcademicUndoKind = "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK";
+export type AcademicUndoAction = "UNAPPROVE" | "UNVERIFY" | "RETURN";
+
+const UNDO_DONE: Record<AcademicUndoAction, "UNAPPROVED" | "UNVERIFIED" | "RETURNED"> = {
+  UNAPPROVE: "UNAPPROVED",
+  UNVERIFY: "UNVERIFIED",
+  RETURN: "RETURNED"
+};
+
+/** Re-run every progress sync that log approval drives (both directions). */
+const resyncAfterLogReviewChange = async (
+  req: Request,
+  entry: InstanceType<typeof AcademicLogBookEntry>
+) => {
+  if (entry.lessonPlanItemId) {
+    await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
+  }
+  await syncSyllabusCompletionForLogEntry(tenantObjectId(req), entry);
+  await resyncSessionPlansTouchedByLog({
+    schoolId: tenantObjectId(req).toString(),
+    teacherId: entry.teacherId.toString(),
+    subjectId: entry.subjectId.toString(),
+    sessionPlanUnitId: entry.sessionPlanUnitId?.toString(),
+    syllabusUnitId: entry.syllabusUnitId?.toString()
+  });
+};
+
+/**
+ * Undo a review decision made by mistake:
+ * - UNAPPROVE: Approved → Verified (Administrator / Super Admin).
+ * - UNVERIFY:  Verified → Submitted / Pending (unapprove first if it is approved).
+ * - RETURN:    any submitted / verified / approved record → back to the teacher for
+ *              correction (plans: Rejected, log book: Needs improvement). Remarks required.
+ */
+export const undoAcademicReview = async (
+  req: Request,
+  kind: AcademicUndoKind,
+  id: string,
+  action: AcademicUndoAction,
+  remarks?: string
+) => {
+  const schoolId = tenantObjectId(req);
+  const note = remarks?.trim() || undefined;
+  if (action === "RETURN" && !note) {
+    throw new ApiError(400, "Write a reason so the teacher knows what to correct");
+  }
+
+  if (kind === "LOG_BOOK") {
+    const entry = await AcademicLogBookEntry.findOne({ _id: id, schoolId, isDeleted: false });
+    if (!entry) throw new ApiError(404, "Log book entry not found");
+    const status = String(entry.reviewStatus || "PENDING");
+    const wasApproved = status === "APPROVED";
+
+    if (action === "UNAPPROVE") {
+      await assertCanApproveAcademic(req);
+      if (!wasApproved) throw new ApiError(400, "Only approved log book entries can be unapproved");
+      entry.reviewStatus = "VERIFIED";
+      entry.adminSignature = "";
+      entry.audit = { ...entry.audit, approvedBy: undefined, approvedAt: undefined, updatedBy: actorObjectId(req) };
+    } else if (action === "UNVERIFY") {
+      await assertCanVerifyAcademic(req);
+      if (wasApproved) throw new ApiError(400, "Unapprove this log book entry first, then unverify it");
+      if (status !== "VERIFIED" && status !== "REVIEWED") {
+        throw new ApiError(400, "Only verified log book entries can be unverified");
+      }
+      entry.reviewStatus = "PENDING";
+      entry.verifiedByName = "";
+      entry.audit = { ...entry.audit, verifiedBy: undefined, verifiedAt: undefined, updatedBy: actorObjectId(req) };
+    } else {
+      if (wasApproved) await assertCanApproveAcademic(req);
+      else await assertCanVerifyAcademic(req);
+      if (status === "NEEDS_IMPROVEMENT") throw new ApiError(400, "This entry is already with the teacher");
+      entry.reviewStatus = "NEEDS_IMPROVEMENT";
+      entry.adminRemarks = note;
+      entry.adminSignature = "";
+      entry.verifiedByName = "";
+      entry.audit = {
+        ...entry.audit,
+        approvedBy: undefined,
+        approvedAt: undefined,
+        verifiedBy: undefined,
+        verifiedAt: undefined,
+        updatedBy: actorObjectId(req)
+      };
+    }
+    await entry.save();
+    // Approval drives syllabus / session / lesson progress — roll it back when undone.
+    if (wasApproved) await resyncAfterLogReviewChange(req, entry);
+    await recordApproval(req, "LOG_BOOK_ENTRY", entry._id.toString(), UNDO_DONE[action], note);
+    await notifyTeacherOfAcademicDecision(req, {
+      kind: "LOG_BOOK",
+      teacherId: entry.teacherId.toString(),
+      subjectId: entry.subjectId.toString(),
+      extra: entry.dateBs,
+      action: action === "RETURN" ? "REJECTED" : "UNLOCKED",
+      remarks: action === "RETURN" ? `Returned for correction: ${note}` : note,
+      entityId: entry._id.toString()
+    });
+    return serializeLogBookEntry(entry._id.toString());
+  }
+
+  const Model = kind === "SESSION_PLAN" ? AcademicSessionPlan : AcademicLessonPlan;
+  const plan = (await (Model as typeof AcademicSessionPlan).findOne({
+    _id: id,
+    schoolId,
+    isDeleted: false
+  })) as InstanceType<typeof AcademicSessionPlan> | InstanceType<typeof AcademicLessonPlan> | null;
+  if (!plan) throw new ApiError(404, kind === "SESSION_PLAN" ? "Session plan not found" : "Lesson plan not found");
+  const status = String(plan.status);
+  const wasApproved = status === "APPROVED";
+  const clearApproval = () => {
+    if (kind === "LESSON_PLAN") {
+      plan.set("approvedByName", "");
+      plan.set("approvalDate", "");
+    }
+    plan.audit = { ...plan.audit, approvedBy: undefined, approvedAt: undefined, updatedBy: actorObjectId(req) };
+  };
+  const clearVerification = () => {
+    plan.set("verifiedByName", "");
+    if (kind === "LESSON_PLAN") plan.set("checkedBy", "");
+    plan.audit = { ...plan.audit, verifiedBy: undefined, verifiedAt: undefined, updatedBy: actorObjectId(req) };
+  };
+
+  if (action === "UNAPPROVE") {
+    await assertCanApproveAcademic(req);
+    if (!wasApproved) throw new ApiError(400, "Only approved plans can be unapproved");
+    plan.status = "VERIFIED";
+    clearApproval();
+  } else if (action === "UNVERIFY") {
+    await assertCanVerifyAcademic(req);
+    if (wasApproved) throw new ApiError(400, "Unapprove this plan first, then unverify it");
+    if (status !== "VERIFIED") throw new ApiError(400, "Only verified plans can be unverified");
+    plan.status = "SUBMITTED";
+    clearVerification();
+  } else {
+    if (wasApproved) await assertCanApproveAcademic(req);
+    else await assertCanVerifyAcademic(req);
+    if (!["SUBMITTED", "PENDING_APPROVAL", "VERIFIED", "APPROVED"].includes(status)) {
+      throw new ApiError(400, "Only submitted, verified or approved plans can be returned to the teacher");
+    }
+    plan.status = "REJECTED";
+    plan.adminRemarks = note;
+    clearApproval();
+    clearVerification();
+    plan.audit = {
+      ...plan.audit,
+      rejectedBy: actorObjectId(req),
+      rejectedAt: new Date(),
+      rejectionReason: note,
+      updatedBy: actorObjectId(req)
+    };
+  }
+  await plan.save();
+  await recordApproval(req, kind, plan._id.toString(), UNDO_DONE[action], note);
+  await notifyTeacherOfAcademicDecision(req, {
+    kind,
+    teacherId: plan.teacherId.toString(),
+    subjectId: plan.subjectId.toString(),
+    extra:
+      kind === "SESSION_PLAN"
+        ? plan.academicYearBs
+        : String(plan.get("teachingDateBs") || plan.get("month") || ""),
+    action: action === "RETURN" ? "REJECTED" : "UNLOCKED",
+    remarks: action === "RETURN" ? `Returned for correction: ${note}` : note,
+    entityId: plan._id.toString()
+  });
+  return kind === "SESSION_PLAN"
+    ? serializeSessionPlan(plan._id.toString())
+    : serializeLessonPlan(plan._id.toString());
+};
+
 export const bulkVerifyAcademic = async (
   req: Request,
   filters: AcademicManagementFilters
@@ -402,10 +574,28 @@ export const bulkVerifyAcademic = async (
 export const bulkApproveAcademic = async (
   req: Request,
   filters: AcademicManagementFilters,
-  remarks?: string
+  remarks: string | undefined,
+  scope: {
+    /** The opened subject's ids — approval never spans other subjects. */
+    subjectIds: string[];
+    /** Only these record kinds (the open panel); all three when omitted. */
+    types?: Array<"SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK">;
+  }
 ): Promise<AcademicBulkReviewResult> => {
   await assertCanApproveAcademic(req);
+  if (!scope.subjectIds.length) {
+    throw new ApiError(400, "Open a subject first — approve all works for one subject at a time");
+  }
   const planFilter = buildAcademicFilter(req, filters);
+  // Restrict to the opened subject (plus its curriculum siblings in other sections/years).
+  const schoolId = tenantObjectId(req);
+  const expanded = new Set<string>();
+  for (const id of scope.subjectIds) {
+    for (const sibling of await expandCurriculumSubjectIds(schoolId, id)) expanded.add(String(sibling));
+  }
+  planFilter.subjectId = {
+    $in: [...expanded].map((id) => new mongoose.Types.ObjectId(id))
+  };
   await applyOfficialPlanScopeToFilter(req, planFilter, filters.teacherId);
   const logFilter = { ...planFilter };
   delete logFilter.status;
@@ -413,13 +603,21 @@ export const bulkApproveAcademic = async (
   delete logFilter.month;
   delete logFilter.status;
 
+  const wants = (type: "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK") =>
+    !scope.types || scope.types.includes(type);
   const [sessionPlans, lessonPlans, logBooks] = await Promise.all([
-    AcademicSessionPlan.find({ ...planFilter, status: "VERIFIED" }),
-    AcademicLessonPlan.find({ ...planFilter, status: "VERIFIED" }),
-    AcademicLogBookEntry.find({
-      ...logFilter,
-      reviewStatus: { $in: ["VERIFIED", "REVIEWED"] }
-    })
+    wants("SESSION_PLAN")
+      ? AcademicSessionPlan.find({ ...planFilter, status: "VERIFIED" })
+      : Promise.resolve([]),
+    wants("LESSON_PLAN")
+      ? AcademicLessonPlan.find({ ...planFilter, status: "VERIFIED" })
+      : Promise.resolve([]),
+    wants("LOG_BOOK")
+      ? AcademicLogBookEntry.find({
+          ...logFilter,
+          reviewStatus: { $in: ["VERIFIED", "REVIEWED"] }
+        })
+      : Promise.resolve([])
   ]);
 
   for (const plan of sessionPlans) {

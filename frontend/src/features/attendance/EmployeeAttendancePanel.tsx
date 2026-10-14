@@ -191,8 +191,9 @@ export const EmployeeAttendancePanel = ({
           designation: emp.designation,
           userId: emp.userId,
           // Blank until someone marks it — an untouched row must not read as
-          // "Present" and get submitted by accident.
-          status: prev?.status ?? "",
+          // "Present" and get submitted by accident. On an Academic Calendar
+          // holiday it defaults to Holiday (H) instead.
+          status: prev?.status ?? (ctx.isHoliday ? "HOLIDAY" : ""),
           checkInTime: prev?.checkInTime ?? "",
           checkOutTime: prev?.checkOutTime ?? "",
           periodsTaught:
@@ -775,6 +776,14 @@ export const EmployeeAttendancePanel = ({
                 ) : null}
               </span>
             </div>
+
+            {contextQuery.data?.isHoliday ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                <strong>Holiday — {contextQuery.data.holidayTitle ?? "Academic Calendar"}.</strong>{" "}
+                Everyone is set to Holiday (H) for this date. Change a row only if that
+                person actually worked.
+              </div>
+            ) : null}
 
             {isLocked ? (
               <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">

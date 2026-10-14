@@ -56,6 +56,8 @@ import {
   AcademicSubjectMasterDetail,
   isPhoneViewport,
 } from "./AcademicSubjectMasterDetail";
+import { SubjectApproveAllButton } from "./SubjectApproveAllButton";
+import { ReviewUndoActions } from "./ReviewUndoActions";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
@@ -1040,6 +1042,14 @@ export const SessionPlanPanel = ({
                 Unlock
               </Button>
             ) : null}
+            <ReviewUndoActions
+              resource="session-plans"
+              id={plan._id}
+              status={plan.status}
+              label="session plan"
+              canVerify={isAdmin}
+              canApprove={isAdmin && canPerformApprove}
+            />
             {canEditDelete &&
             (plan.status === "DRAFT" ||
               plan.status === "REJECTED" ||
@@ -1963,6 +1973,14 @@ export const SessionPlanPanel = ({
                     {selectedPlans.length === 1 ? "" : "s"} · Official plan for
                     this subject and academic year
                   </p>
+                  <SubjectApproveAllButton
+                    type="SESSION_PLAN"
+                    subjectIds={selectedSubjectMeta.subject.subjectIds}
+                    subjectName={selectedSubjectMeta.subject.subjectName}
+                    filters={filters}
+                    isCollege={isCollege}
+                    isAdminView={isAdmin}
+                  />
                 </CardContent>
               </Card>
 

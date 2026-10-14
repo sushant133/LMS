@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   type AcademicLessonPlanRecord,
   type AcademicLogBookEntryRecord,
@@ -39,7 +39,7 @@ import {
   printElementById,
   type PageFormat,
 } from "lib/printUtils";
-import { cn, parseErrorMessage } from "lib/utils";
+import { cn } from "lib/utils";
 import { toast } from "sonner";
 import { AcademicManagementDashboardPanel } from "./AcademicManagementDashboard";
 import { AcademicManagementFilterBar } from "./AcademicManagementFilterBar";
@@ -100,7 +100,6 @@ const pageFormatForTab = (tab: Tab): PageFormat =>
 
 export const AcademicManagementHub = () => {
   const { user, availableSchools } = useAuth();
-  const queryClient = useQueryClient();
   const isCollege = useIsCollege();
   const workspace = useWorkspaceMode();
   /** Administration hub: all teachers' plans / approvals. My Work: own subjects only. */
@@ -220,31 +219,6 @@ export const AcademicManagementHub = () => {
       }),
     [appliedFilters, isCollege, isAdminWorkspace],
   );
-
-  const approveAllMutation = useMutation({
-    mutationFn: () =>
-      unwrap<{
-        sessionPlans: number;
-        lessonPlans: number;
-        logBooks: number;
-      }>(
-        api.post(
-          "/academic-management/approvals/approve-all",
-          { academicYearBs: appliedFilters.academicYearBs },
-          { params: academicListParams },
-        ),
-      ),
-    onSuccess: (result) => {
-      const total = result.sessionPlans + result.lessonPlans + result.logBooks;
-      toast.success(
-        total > 0
-          ? `${total} verified academic record${total === 1 ? "" : "s"} approved`
-          : "No verified academic records match the current filters",
-      );
-      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
-    },
-    onError: (error) => toast.error(parseErrorMessage(error)),
-  });
 
   useEffect(() => {
     if (!isAdminWorkspace) return;
@@ -609,26 +583,6 @@ export const AcademicManagementHub = () => {
         academicYearBs={institutionAcademicYearBs}
         showTeacherFilter={isAdmin}
       />
-
-      {isAdminWorkspace && canPerformApprove ? (
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            disabled={approveAllMutation.isPending}
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Approve every verified session plan, lesson plan, and log book entry matching the current filters?",
-                )
-              ) {
-                approveAllMutation.mutate();
-              }
-            }}
-          >
-            {approveAllMutation.isPending ? "Approving verified records…" : "Approve all verified"}
-          </Button>
-        </div>
-      ) : null}
 
       <div className={cn(activeTab === "dashboard" ? "block" : "hidden")}>
         <AcademicManagementDashboardPanel

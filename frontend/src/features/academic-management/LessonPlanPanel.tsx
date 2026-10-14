@@ -64,6 +64,8 @@ import {
   AcademicSubjectMasterDetail,
   isPhoneViewport,
 } from "./AcademicSubjectMasterDetail";
+import { SubjectApproveAllButton } from "./SubjectApproveAllButton";
+import { ReviewUndoActions } from "./ReviewUndoActions";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
@@ -2489,6 +2491,14 @@ export const LessonPlanPanel = ({
                   <p className="text-xs text-slate-500">
                     Official lesson plan for this subject and academic year
                   </p>
+                  <SubjectApproveAllButton
+                    type="LESSON_PLAN"
+                    subjectIds={selectedSubjectMeta.subject.subjectIds}
+                    subjectName={selectedSubjectMeta.subject.subjectName}
+                    filters={filters}
+                    isCollege={isCollege}
+                    isAdminView={isAdmin}
+                  />
                 </CardContent>
               </Card>
 
@@ -2960,6 +2970,14 @@ export const LessonPlanPanel = ({
                                               Unlock
                                             </Button>
                                           ) : null}
+                                          <ReviewUndoActions
+                                            resource="lesson-plans"
+                                            id={plan._id}
+                                            status={plan.status}
+                                            label="lesson plan"
+                                            canVerify={isAdmin}
+                                            canApprove={isAdmin && canPerformApprove}
+                                          />
                                         </div>
                                       ) : null}
                                     </Td>

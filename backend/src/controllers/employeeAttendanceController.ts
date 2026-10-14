@@ -26,6 +26,7 @@ import {
   getUserModuleActionsMap
 } from "../utils/moduleAccessService.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import { resolveMonthHolidayDates } from "../utils/academicCalendarService.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
@@ -341,6 +342,12 @@ export const getEmployeeAttendanceMarkContext = asyncHandler(
       canEdit = true;
     }
 
+    const { holidayDates, holidayTitles } = await resolveMonthHolidayDates(
+      schoolId,
+      dateBs.slice(0, 7)
+    );
+    const isHoliday = holidayDates.has(dateBs);
+
     const status = existing?.status ? String(existing.status) : "";
     /** Only final lock blocks marking (CHECK_IN / CHECK_OUT phases stay editable). */
     const locked = status === "LOCKED" || status === "SUBMITTED";
@@ -354,6 +361,8 @@ export const getEmployeeAttendanceMarkContext = asyncHandler(
         : null,
       canMark: canMark && !locked,
       canEdit: canEdit && Boolean(existing && !locked),
+      isHoliday,
+      holidayTitle: isHoliday ? (holidayTitles.get(dateBs) ?? "Holiday") : undefined,
       message: locked
         ? "Attendance is locked for this date. Unlock or request admin approval to edit."
         : undefined

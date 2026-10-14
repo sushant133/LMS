@@ -734,6 +734,41 @@ const sameOrUnsetScope = (filter: Record<string, unknown>): void => {
   }
 };
 
+/**
+ * One official syllabus per subject + academic year + year level / class, whatever its
+ * status. A second one is refused until the existing syllabus is deleted.
+ */
+export const assertNoDuplicateSyllabus = async (
+  req: Request,
+  payload: {
+    subjectId: string;
+    academicYearBs: string;
+    yearId?: string;
+    classId?: string;
+  },
+  excludeId?: string
+): Promise<void> => {
+  const schoolId = tenantObjectId(req);
+  const subjectIds = await expandCurriculumSubjectIds(schoolId, payload.subjectId);
+  const filter: Record<string, unknown> = {
+    schoolId,
+    academicYearBs: payload.academicYearBs,
+    subjectId: subjectIds.length === 1 ? subjectIds[0] : { $in: subjectIds },
+    isDeleted: false
+  };
+  if (payload.yearId) filter.yearId = payload.yearId;
+  if (payload.classId) filter.classId = payload.classId;
+  if (excludeId) filter._id = { $ne: excludeId };
+  sameOrUnsetScope(filter);
+  const existing = await AcademicSyllabus.findOne(filter).select("_id status").lean();
+  if (existing) {
+    throw new ApiError(
+      409,
+      `A syllabus already exists for this subject and academic year (status: ${String(existing.status || "DRAFT").replace(/_/g, " ").toLowerCase()}). Open it to edit, or delete it before creating a new one.`
+    );
+  }
+};
+
 export const assertNoDuplicateOfficialSessionPlan = async (
   req: Request,
   payload: {
@@ -764,7 +799,7 @@ export const assertNoDuplicateOfficialSessionPlan = async (
   if (existing) {
     throw new ApiError(
       400,
-      "A session plan already exists for this subject and academic year. It stays the same when the assigned teacher changes — open the existing plan instead of creating another."
+      "A session plan already exists for this subject and academic year. Open it to edit, or delete it before creating a new one."
     );
   }
 };
@@ -888,7 +923,15 @@ export const recordApproval = async (
   req: Request,
   entityType: "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY",
   entityId: string,
-  action: "SUBMITTED" | "VERIFIED" | "APPROVED" | "REJECTED" | "UNLOCKED",
+  action:
+    | "SUBMITTED"
+    | "VERIFIED"
+    | "APPROVED"
+    | "REJECTED"
+    | "UNLOCKED"
+    | "UNAPPROVED"
+    | "UNVERIFIED"
+    | "RETURNED",
   remarks?: string
 ): Promise<void> => {
   if (!req.user) return;

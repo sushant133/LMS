@@ -609,9 +609,19 @@ export const academicVerifyActionSchema = z.object({
   remarks: z.string().optional()
 });
 
+export const academicBulkRecordTypeSchema = z.enum(["SESSION_PLAN", "LESSON_PLAN", "LOG_BOOK"]);
+
+/**
+ * Approve all verified records of ONE subject (the subject opened in the panel).
+ * subjectIds = that subject's ids across years/sections; types = which panel's records.
+ */
 export const academicBulkReviewSchema = z.object({
   academicYearBs: z.string().optional().default(""),
-  remarks: z.string().optional().default("")
+  remarks: z.string().optional().default(""),
+  subjectIds: z
+    .array(z.string().trim().regex(/^[a-f\d]{24}$/i, "Invalid identifier"))
+    .min(1, "Open a subject first — approve all works for one subject at a time"),
+  types: z.array(academicBulkRecordTypeSchema).min(1).optional()
 });
 
 export const syllabusCompletionSourceSchema = z.enum(["TEACHER", "ADMINISTRATION"]);

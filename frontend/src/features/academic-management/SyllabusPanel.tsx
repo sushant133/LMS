@@ -578,39 +578,8 @@ export const SyllabusPanel = ({
     onError: (error) => {
       const message = parseErrorMessage(error);
       toast.error(message);
-      // Unique constraint: resume existing DRAFT by PUTting local form (do not wipe unsaved work).
-      // Server resume path + hierarchy guards ensure we never clear another subject.
-      if (
-        (/already exists/i.test(message) || /duplicate/i.test(message)) &&
-        formRef.current.subjectId
-      ) {
-        const subjectId = formRef.current.subjectId;
-        const yearId = formRef.current.yearId;
-        const classId = formRef.current.classId;
-        const existing = (plansQuery.data ?? []).find((plan) => {
-          if (plan.subjectId !== subjectId) return false;
-          if (yearId && plan.yearId && plan.yearId !== yearId) return false;
-          if (classId && plan.classId && plan.classId !== classId) return false;
-          return plan.status === "DRAFT" || plan.status === "REJECTED";
-        });
-        if (existing) {
-          const payload = buildSavePayload();
-          if (payload && (payload.chapters?.length ?? 0) > 0) {
-            toast.message("Updating the existing draft with your current units…");
-            setEditingId(existing._id);
-            // Baseline unknown until server responds; update path has server-side wipe guards
-            loadedBaselineRef.current = {
-              id: existing._id,
-              units: 0,
-              subs: 0,
-            };
-            updateMutation.mutate({ id: existing._id, payload });
-          } else {
-            toast.message("Opening the existing draft so you can continue editing");
-            void openEditForm(existing, { silent: true });
-          }
-        }
-      }
+      // A syllabus already exists for this subject: never write this form over it.
+      // The user opens the existing one to edit, or deletes it first.
     },
   });
 

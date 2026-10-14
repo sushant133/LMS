@@ -3665,7 +3665,14 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       notes: row.remarks ?? "",
       status: saveStatus,
       paidDateBs: payload.paidDateBs || undefined,
-      paymentMethod: payload.paymentMethod
+      paymentMethod: payload.paymentMethod,
+      // Admin adding an employee to an approved sheet: the row is approved by that admin.
+      ...(saveStatus === "APPROVED"
+        ? {
+            collegeAdminApprovedBy: existing?.collegeAdminApprovedBy ?? userId,
+            collegeAdminApprovedAt: existing?.collegeAdminApprovedAt ?? new Date()
+          }
+        : {})
     };
 
     if (existing) {

@@ -483,6 +483,15 @@ export const SalaryPaymentRecordsPanel = ({
   const canEditAmounts = isAdmin && canEditSheet;
   /** Row Edit / Remove: admin only. Accountant prepares by adding, then submits. */
   const canManageRows = isAdmin && canEditSheet;
+  /**
+   * Administrator only: add employees who were missed to an already-approved sheet.
+   * Existing approved rows stay locked; new rows are saved as Approved.
+   */
+  const canAddToApprovedSheet = isAdmin && status === "APPROVED";
+  /** The Add-employee panel (prepare mode, or admin adding to an approved sheet). */
+  const canUseAddPanel = canWritePayroll || canAddToApprovedSheet;
+  const canEditEntryAmounts = canEditAmounts || canAddToApprovedSheet;
+  const canEntryAttendance = canManualAttendance || canAddToApprovedSheet;
   const canSaveSheet =
     canEditSheet || (isAdmin && (status === "APPROVED" || status === "PAID"));
   const canSubmitSheet =
@@ -711,12 +720,20 @@ export const SalaryPaymentRecordsPanel = ({
     list.map((r, i) => ({ ...r, sn: i + 1 }));
 
   const addOrUpdateEntry = () => {
-    if (!canWritePayroll) {
+    if (!canUseAddPanel) {
       toast.error("Cannot edit");
       return;
     }
     if (!entry.employeeKey) {
       toast.error("Select an employee");
+      return;
+    }
+    if (
+      canAddToApprovedSheet &&
+      !canWritePayroll &&
+      rows.some((r) => employeeKeyOf(r) === entry.employeeKey && r.salaryPaymentId)
+    ) {
+      toast.error("This employee is already on the approved sheet");
       return;
     }
     const src =
@@ -726,7 +743,7 @@ export const SalaryPaymentRecordsPanel = ({
       toast.error("Employee not found");
       return;
     }
-    const monthly = canEditAmounts
+    const monthly = canEditEntryAmounts
       ? Number(entry.monthlySalaryNpr) || 0
       : Number(src.monthlySalaryNpr) || 0;
     const payType = payTypeOf(src);
@@ -777,7 +794,7 @@ export const SalaryPaymentRecordsPanel = ({
       absentDays,
       leaveDays,
       extraDuty,
-      ...(src.valuesManualOverride && !canEditAmounts
+      ...(src.valuesManualOverride && !canEditEntryAmounts
         ? {
             absentDeductionNpr: src.absentDeductionNpr,
             extraAmountNpr: src.extraAmountNpr,
@@ -812,7 +829,9 @@ export const SalaryPaymentRecordsPanel = ({
     toast.success(
       editingKey
         ? `${src.employeeName} updated on salary sheet`
-        : `${src.employeeName} added to salary sheet`,
+        : canAddToApprovedSheet && !canWritePayroll
+          ? `${src.employeeName} added — click Save to store it on the approved sheet`
+          : `${src.employeeName} added to salary sheet`,
     );
     setEditingKey(null);
     setEntry(emptyEntryForm());
@@ -1652,7 +1671,10 @@ export const SalaryPaymentRecordsPanel = ({
       paidDateBs: paidDateBs || undefined,
       paymentMethod,
       signatories: signatoriesPayload(),
-      rows: sheetRowsPayload(),
+      rows:
+        status === "APPROVED"
+          ? sheetRowsPayload().filter((_, i) => rows[i]!.dirty || !rows[i]!.salaryPaymentId)
+          : sheetRowsPayload(),
     });
   };
 
@@ -2378,7 +2400,7 @@ export const SalaryPaymentRecordsPanel = ({
       ) : null}
 
       {/* ─── 2. Add employee (accountant prepares; admin may also edit amounts) ─── */}
-      {canWritePayroll ? (
+      {canUseAddPanel ? (
       <Card className="overflow-hidden border-slate-200 shadow-sm">
         <button
           type="button"
@@ -2395,7 +2417,9 @@ export const SalaryPaymentRecordsPanel = ({
               <p className="text-sm font-semibold text-slate-900">
                 {editingKey
                   ? "Edit employee on sheet"
-                  : "Add employee (one by one)"}
+                  : canAddToApprovedSheet && !canWritePayroll
+                    ? "Add employee to approved sheet (Administrator)"
+                    : "Add employee (one by one)"}
               </p>
             </div>
             {editingKey ? (
@@ -2466,9 +2490,9 @@ export const SalaryPaymentRecordsPanel = ({
               <NumberInput
                 min={0}
                 value={entry.monthlySalaryNpr}
-                disabled={!canEditAmounts}
+                disabled={!canEditEntryAmounts}
                 title={
-                  canEditAmounts
+                  canEditEntryAmounts
                     ? undefined
                     : "Salary / tender / period rate is set by admin and cannot be changed here"
                 }
@@ -2476,7 +2500,7 @@ export const SalaryPaymentRecordsPanel = ({
                   setEntry((f) => ({ ...f, monthlySalaryNpr: e.target.value }))
                 }
               />
-              {!canEditAmounts ? (
+              {!canEditEntryAmounts ? (
                 <p className="text-[11px] leading-snug text-slate-500">
                   Amount is fixed from the employee record (admin). Accountant
                   prepares the sheet, then submits for approval.
@@ -2528,7 +2552,7 @@ export const SalaryPaymentRecordsPanel = ({
                 min={0}
                 step={0.5}
                 value={entry.presentDays}
-                disabled={!canManualAttendance && !entry.attendanceManualOverride}
+                disabled={!canEntryAttendance && !entry.attendanceManualOverride}
                 onChange={(e) =>
                   setEntry((f) => ({
                     ...f,
@@ -2543,7 +2567,7 @@ export const SalaryPaymentRecordsPanel = ({
                 min={0}
                 step={0.5}
                 value={entry.absentDays}
-                disabled={!canManualAttendance && !entry.attendanceManualOverride}
+                disabled={!canEntryAttendance && !entry.attendanceManualOverride}
                 onChange={(e) =>
                   setEntry((f) => ({
                     ...f,
@@ -2558,7 +2582,7 @@ export const SalaryPaymentRecordsPanel = ({
                 min={0}
                 step={0.5}
                 value={entry.leaveDays}
-                disabled={!canManualAttendance && !entry.attendanceManualOverride}
+                disabled={!canEntryAttendance && !entry.attendanceManualOverride}
                 onChange={(e) =>
                   setEntry((f) => ({
                     ...f,
@@ -2672,7 +2696,7 @@ export const SalaryPaymentRecordsPanel = ({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                {canWritePayroll ? "3 · Salary sheet" : "2 · Salary sheet"}
+                {canUseAddPanel ? "3 · Salary sheet" : "2 · Salary sheet"}
               </p>
               <CardTitle className="mt-0.5 flex items-center gap-2 text-base">
                 <Wallet className="h-4 w-4 text-brand-600" />

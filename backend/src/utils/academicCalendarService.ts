@@ -687,6 +687,8 @@ export const resolveMonthHolidayDates = async (
   otherHolidayDates: Set<string>;
   /** Working days = calendarDays - holidayDates.size (never below 1). */
   workingDays: number;
+  /** Display name per holiday date (event name, settings title, or "Saturday"). */
+  holidayTitles: Map<string, string>;
 }> => {
   const { Types: MongooseTypes } = await import("mongoose");
   const oid =
@@ -725,6 +727,7 @@ export const resolveMonthHolidayDates = async (
 
   const workingDayOverrides = new Set<string>();
   const eventHolidays = new Set<string>();
+  const titleByDate = new Map<string, string>();
 
   for (const event of events) {
     const { startDateBs, endDateBs } = normalizeEventDates(event);
@@ -736,7 +739,10 @@ export const resolveMonthHolidayDates = async (
     for (const dateBs of expandBsDateRange(startDateBs, endDateBs)) {
       if (!dateBs.startsWith(monthBs)) continue;
       if (isOverride) workingDayOverrides.add(dateBs);
-      else eventHolidays.add(dateBs);
+      else {
+        eventHolidays.add(dateBs);
+        if (event.name && !titleByDate.has(dateBs)) titleByDate.set(dateBs, event.name);
+      }
     }
   }
 
@@ -745,10 +751,17 @@ export const resolveMonthHolidayDates = async (
       .map((item) => String(item.dateBs || ""))
       .filter((dateBs) => dateBs.startsWith(monthBs))
   );
+  for (const item of settings?.holidays ?? []) {
+    const dateBs = String(item.dateBs || "");
+    if (dateBs.startsWith(monthBs) && item.title && !titleByDate.has(dateBs)) {
+      titleByDate.set(dateBs, String(item.title));
+    }
+  }
 
   const saturdayDates = new Set<string>();
   const otherHolidayDates = new Set<string>();
   const holidayDates = new Set<string>();
+  const holidayTitles = new Map<string, string>();
   for (const dateBs of allDates) {
     // An explicit WORKING_DAY override beats every holiday source.
     if (workingDayOverrides.has(dateBs)) continue;
@@ -758,9 +771,11 @@ export const resolveMonthHolidayDates = async (
     if (isSaturday) {
       saturdayDates.add(dateBs);
       holidayDates.add(dateBs);
+      holidayTitles.set(dateBs, titleByDate.get(dateBs) ?? "Saturday");
     } else if (isOtherHoliday) {
       otherHolidayDates.add(dateBs);
       holidayDates.add(dateBs);
+      holidayTitles.set(dateBs, titleByDate.get(dateBs) ?? "Holiday");
     }
   }
 
@@ -769,6 +784,7 @@ export const resolveMonthHolidayDates = async (
     holidayDates,
     saturdayDates,
     otherHolidayDates,
-    workingDays: Math.max(1, calendarDays - holidayDates.size)
+    workingDays: Math.max(1, calendarDays - holidayDates.size),
+    holidayTitles
   };
 };

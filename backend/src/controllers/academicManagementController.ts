@@ -43,9 +43,12 @@ import {
   approveSessionPlanById,
   assertCanVerifyAcademic,
   bulkApproveAcademic,
+  undoAcademicReview,
   verifyLessonPlanById,
   verifyLogBookById,
-  verifySessionPlanById
+  verifySessionPlanById,
+  type AcademicUndoAction,
+  type AcademicUndoKind
 } from "../utils/academicReviewService.js";
 import { AcademicComment } from "../models/AcademicComment.js";
 import {
@@ -77,6 +80,7 @@ import {
   assertNoDuplicateLogBookForItemDate,
   assertNoDuplicateOfficialSessionPlan,
   assertNoDuplicateOfficialLessonPlan,
+  assertNoDuplicateSyllabus,
   nextLogBookPeriodNumber,
   nextContinuedLogBookSerial,
   resolveLogBookLessonPlanLink,
@@ -1047,91 +1051,15 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
   const classId = payload.classId?.trim() || undefined;
   const sectionId = payload.sectionId?.trim() || undefined;
 
-  /**
-   * Resume flow: one syllabus per subject+year (or class). If a DRAFT/REJECTED
-   * already exists, update its hierarchy instead of failing with duplicate key.
-   * Also match curriculum sibling subject ids (batch-year subject instances).
-   */
-  const schoolOid = tenantObjectId(req);
-  const subjectIds = await expandCurriculumSubjectIds(schoolOid, payload.subjectId);
-  const existingDraftFilter: Record<string, unknown> = {
-    schoolId: schoolOid,
-    subjectId: { $in: subjectIds },
+  // One syllabus per subject + academic year + scope. Creating "another" used to
+  // silently overwrite the existing draft (or add a duplicate when no year/class was
+  // set); now it is refused until the existing syllabus is deleted.
+  await assertNoDuplicateSyllabus(req, {
+    subjectId: payload.subjectId,
     academicYearBs: payload.academicYearBs,
-    isDeleted: false,
-    status: { $in: ["DRAFT", "REJECTED"] }
-  };
-  if (yearId) existingDraftFilter.yearId = yearId;
-  if (classId) existingDraftFilter.classId = classId;
-
-  const existingDraft = await AcademicSyllabus.findOne(existingDraftFilter).sort({
-    updatedAt: -1
+    yearId,
+    classId
   });
-  if (existingDraft) {
-    await assertSyllabusAccess(req, {
-      teacherId: existingDraft.teacherId?.toString(),
-      subjectId: existingDraft.subjectId.toString()
-    });
-
-    const draftId = existingDraft._id.toString();
-    // Never resume-write an empty shell over an existing draft hierarchy.
-    // Multi-unit partial drafts (even "Unit N" titles) still rewrite so units grow.
-    const incomingEmptyShell = isEmptyHierarchyShell(chapters);
-    const [draftTopicCount, draftChapterCount, draftSubCount] = await Promise.all([
-      AcademicSyllabusTopic.countDocuments({ syllabusId: existingDraft._id }),
-      AcademicSyllabusChapter.countDocuments({ syllabusId: existingDraft._id }),
-      AcademicSyllabusSubUnit.countDocuments({ syllabusId: existingDraft._id })
-    ]);
-    const draftHasHierarchy =
-      draftTopicCount > 0 || draftChapterCount > 0 || draftSubCount > 0;
-    const shouldRewriteHierarchy = !draftHasHierarchy || !incomingEmptyShell;
-
-    await withTransaction(async (session) => {
-      const sessionOpt = getSessionOption(session);
-      existingDraft.session = payload.session || existingDraft.session;
-      existingDraft.faculty = payload.faculty ?? existingDraft.faculty;
-      existingDraft.semesterBs = payload.semesterBs ?? existingDraft.semesterBs;
-      existingDraft.subjectCode = payload.subjectCode ?? existingDraft.subjectCode;
-      existingDraft.totalTheoryHours =
-        payload.totalTheoryHours ?? existingDraft.totalTheoryHours;
-      existingDraft.totalPracticalHours =
-        payload.totalPracticalHours ?? existingDraft.totalPracticalHours;
-      existingDraft.creditHours = payload.creditHours ?? existingDraft.creditHours;
-      existingDraft.remarks = payload.remarks ?? existingDraft.remarks;
-      existingDraft.attachmentUrl =
-        payload.attachmentUrl ?? existingDraft.attachmentUrl;
-      existingDraft.teacherId = undefined;
-      if (shouldRewriteHierarchy) {
-        existingDraft.hierarchyMigratedAt = new Date();
-      }
-      existingDraft.audit = {
-        ...existingDraft.audit,
-        updatedBy: actorObjectId(req)
-      };
-      await existingDraft.save(sessionOpt);
-
-      if (shouldRewriteHierarchy) {
-        await saveSyllabusHierarchy(
-          {
-            schoolId: tenantObjectId(req).toString(),
-            syllabusId: draftId,
-            chapters
-          },
-          session ?? undefined
-        );
-      }
-
-      await recordAudit(req, {
-        action: "academic.syllabus.resumeDraft",
-        entity: "SYLLABUS",
-        entityId: draftId,
-        after: existingDraft
-      });
-    });
-
-    const serialized = await serializeSyllabus(draftId);
-    return sendSuccess(res, "Draft syllabus updated", serialized);
-  }
 
   let result: string;
   try {
@@ -2686,6 +2614,10 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (safePayload.teacherSignature !== undefined) {
     existing.teacherSignature = String(safePayload.teacherSignature ?? "");
   }
+  // Teacher corrected an entry that was returned — it goes back for verification.
+  if (existing.reviewStatus === "NEEDS_IMPROVEMENT" && !(await actorIsAcademicAdmin(req))) {
+    existing.reviewStatus = "PENDING";
+  }
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
 
@@ -2823,6 +2755,33 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
   return sendSuccess(res, "Log book entry reviewed", serialized);
 });
 
+const UNDO_KINDS: Record<string, AcademicUndoKind> = {
+  "session-plans": "SESSION_PLAN",
+  "lesson-plans": "LESSON_PLAN",
+  "log-book-entries": "LOG_BOOK"
+};
+const UNDO_ACTIONS: Record<string, AcademicUndoAction> = {
+  unapprove: "UNAPPROVE",
+  unverify: "UNVERIFY",
+  return: "RETURN"
+};
+const UNDO_MESSAGES: Record<AcademicUndoAction, string> = {
+  UNAPPROVE: "Approval undone — back to Verified",
+  UNVERIFY: "Verification undone — back to Submitted",
+  RETURN: "Returned to the teacher for correction"
+};
+
+/** POST /:kind/:id/unapprove | unverify | return — undo a review decision. */
+export const undoAcademicReviewAction = (resource: string, verb: string) =>
+  asyncHandler(async (req: Request, res: Response) => {
+    const kind = UNDO_KINDS[resource]!;
+    const action = UNDO_ACTIONS[verb]!;
+    const body = (req.body ?? {}) as { remarks?: unknown };
+    const remarks = typeof body.remarks === "string" ? body.remarks.slice(0, 1000) : undefined;
+    const serialized = await undoAcademicReview(req, kind, routeParamId(req.params.id), action, remarks);
+    return sendSuccess(res, UNDO_MESSAGES[action], serialized);
+  });
+
 export const verifySessionPlan = asyncHandler(async (req: Request, res: Response) => {
   academicVerifyActionSchema.parse(req.body ?? {});
   const serialized = await verifySessionPlanById(req, routeParamId(req.params.id));
@@ -2851,8 +2810,13 @@ export const approveAllVerifiedAcademic = asyncHandler(async (req: Request, res:
   const payload = academicBulkReviewSchema.parse(req.body ?? {});
   const filters = parseFilters(req);
   if (payload.academicYearBs) filters.academicYearBs = payload.academicYearBs;
-  const result = await bulkApproveAcademic(req, filters, payload.remarks || undefined);
-  return sendSuccess(res, "All verified academic records approved", result);
+  // Never approve across subjects — the subject comes from the opened panel.
+  delete filters.subjectId;
+  const result = await bulkApproveAcademic(req, filters, payload.remarks || undefined, {
+    subjectIds: payload.subjectIds,
+    types: payload.types
+  });
+  return sendSuccess(res, "Verified records for the subject approved", result);
 });
 
 export const listSessionPlanUnits = asyncHandler(async (req: Request, res: Response) => {

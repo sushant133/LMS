@@ -42,6 +42,7 @@ import {
   unlockLessonPlan,
   unlockSessionPlan,
   unlockSyllabus,
+  undoAcademicReviewAction,
   updateLessonPlan,
   updateLogBookEntry,
   updateSessionPlan,
@@ -149,6 +150,18 @@ router.post("/log-book-entries/:id/review", authorize("SUPER_ADMIN", "COLLEGE_AD
 router.post("/log-book-entries/:id/verify", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), verifyLogBookEntry);
 router.post("/log-book-entries/:id/approve", authorizeInstitutionAdmin, approveLogBookEntry);
 router.post("/approvals/approve-all", authorizeInstitutionAdmin, approveAllVerifiedAcademic);
+// Undo a review decision made by mistake (role rules enforced in the service:
+// unapprove = Administrator; unverify / return = verifiers, Administrator when approved).
+for (const resource of ["session-plans", "lesson-plans", "log-book-entries"]) {
+  router.post(`/${resource}/:id/unapprove`, authorizeInstitutionAdmin, undoAcademicReviewAction(resource, "unapprove"));
+  for (const verb of ["unverify", "return"]) {
+    router.post(
+      `/${resource}/:id/${verb}`,
+      authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"),
+      undoAcademicReviewAction(resource, verb)
+    );
+  }
+}
 
 router.get("/timetable/today", authorize("TEACHER"), getTodayTimetableSlots);
 router.get("/attendance/summary", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"), getSessionAttendance);

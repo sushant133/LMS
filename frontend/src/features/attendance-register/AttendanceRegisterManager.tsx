@@ -66,6 +66,10 @@ type Meta = {
   monthNames: string[];
 };
 
+/** Academic Calendar holiday (server flag); older responses fall back to Saturday. */
+const isHolidayDay = (d: { isHoliday?: boolean; isSaturday: boolean }): boolean =>
+  d.isHoliday ?? d.isSaturday;
+
 const tabToPath = (tab: AttendanceRegisterTab): string => {
   if (tab === "TEACHER") return "/attendance-register/teachers";
   if (tab === "STAFF") return "/attendance-register/staff";
@@ -710,9 +714,9 @@ export const AttendanceRegisterManager = ({
                           key={d.dateBs}
                           className={cn(
                             "min-w-[2rem] border border-slate-200 px-1 py-1",
-                            d.isSaturday && "bg-slate-200",
+                            isHolidayDay(d) && "bg-rose-100 text-rose-900",
                           )}
-                          title={`${d.weekday} ${d.dateBs}`}
+                          title={`${d.weekday} ${d.dateBs}${isHolidayDay(d) ? ` · Holiday: ${d.holidayTitle ?? "Saturday"}` : ""}`}
                         >
                           <div className="font-bold">{d.dayOfMonth}</div>
                           <div className="text-[9px] font-medium text-slate-500">
@@ -765,7 +769,7 @@ export const AttendanceRegisterManager = ({
                               key={d.dateBs}
                               className={cn(
                                 "border border-slate-200 px-0.5 py-0.5 text-center",
-                                d.isSaturday && "bg-slate-100",
+                                isHolidayDay(d) && "bg-rose-50",
                               )}
                             >
                               {clickable ? (
@@ -776,7 +780,7 @@ export const AttendanceRegisterManager = ({
                                     code
                                       ? cellClass(cell)
                                       : "text-slate-300 hover:bg-slate-100",
-                                    d.isSaturday && code === "H" && "opacity-80",
+                                    isHolidayDay(d) && code === "H" && "opacity-80",
                                   )}
                                   onClick={() =>
                                     void openCell(row.personId, d.dateBs)
@@ -784,19 +788,20 @@ export const AttendanceRegisterManager = ({
                                   title={
                                     canEditRegister
                                       ? `${d.dateBs} · click to edit`
-                                      : `${d.dateBs} · ${cell?.status ?? ""}`
+                                      : `${d.dateBs} · ${cell?.status ?? ""}${isHolidayDay(d) ? ` · ${d.holidayTitle ?? "Holiday"}` : ""}`
                                   }
                                 >
-                                  {d.isSaturday && !code ? "H" : code || "·"}
+                                  {isHolidayDay(d) && !code ? "H" : code || "·"}
                                 </button>
                               ) : (
                                 <span
                                   className={cn(
                                     "text-slate-300",
-                                    d.isSaturday && "font-medium text-slate-400",
+                                    isHolidayDay(d) && "font-medium text-rose-400",
                                   )}
+                                  title={isHolidayDay(d) ? d.holidayTitle ?? "Holiday" : undefined}
                                 >
-                                  {d.isSaturday ? "H" : "·"}
+                                  {isHolidayDay(d) ? "H" : "·"}
                                 </span>
                               )}
                             </td>

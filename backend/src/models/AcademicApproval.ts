@@ -10,7 +10,16 @@ const approvalSchema = new Schema(
       index: true
     },
     entityId: { type: Schema.Types.ObjectId, required: true, index: true },
-    action: { type: String, enum: ["SUBMITTED", "VERIFIED", "APPROVED", "REJECTED", "UNLOCKED"], required: true },
+    action: { type: String, enum: [
+        "SUBMITTED",
+        "VERIFIED",
+        "APPROVED",
+        "REJECTED",
+        "UNLOCKED",
+        "UNAPPROVED",
+        "UNVERIFIED",
+        "RETURNED"
+      ], required: true },
     actorUserId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     actorRole: { type: String, required: true },
     remarks: { type: String }

@@ -40,6 +40,7 @@ import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { syncDailyAttendanceToSubject } from "../utils/dailyAttendanceUtils.js";
+import { resolveMonthHolidayDates } from "../utils/academicCalendarService.js";
 import {
   ensureValidBsDate,
   getDayOfWeekFromBs,
@@ -166,6 +167,32 @@ const buildDays = (year: number, month: number): AttendanceRegisterDayMeta[] => 
   }
   return days;
 };
+
+/** Flag Academic Calendar holidays on the month's days (Saturdays, events, settings). */
+const applyCalendarHolidays = async (
+  schoolId: ReturnType<typeof tenantObjectId>,
+  monthBs: string,
+  days: AttendanceRegisterDayMeta[]
+): Promise<void> => {
+  const { holidayDates, holidayTitles } = await resolveMonthHolidayDates(schoolId, monthBs);
+  for (const day of days) {
+    if (!holidayDates.has(day.dateBs)) continue;
+    day.isHoliday = true;
+    day.holidayTitle = holidayTitles.get(day.dateBs) ?? "Holiday";
+  }
+};
+
+/** Unmarked cell — shows H on calendar holidays, blank otherwise. A real mark always wins. */
+const emptyCell = (day: AttendanceRegisterDayMeta): AttendanceRegisterCell =>
+  day.isHoliday
+    ? {
+        dateBs: day.dateBs,
+        status: "HOLIDAY",
+        code: toAttendanceRegisterCode("HOLIDAY"),
+        remarks: day.holidayTitle,
+        source: "ACADEMIC_CALENDAR"
+      }
+    : { dateBs: day.dateBs, status: null, code: null };
 
 const monthLabel = (year: number, month: number): string =>
   `${BS_MONTH_NAMES[month - 1] ?? `Month ${month}`} ${year}`;
@@ -321,6 +348,7 @@ export const getStudentAttendanceRegister = asyncHandler(
     const schoolId = tenantObjectId(req);
     const { monthBs, year, month } = parseMonthBs(req.query.monthBs);
     const days = buildDays(year, month);
+    await applyCalendarHolidays(schoolId, monthBs, days);
     const todayBs = getTodayBs();
     const institutionType = await getInstitutionType(req);
     const college = isCollege(institutionType);
@@ -535,11 +563,7 @@ export const getStudentAttendanceRegister = asyncHandler(
       const dayMap = byPerson.get(id) ?? new Map();
       const cells: Record<string, AttendanceRegisterCell> = {};
       for (const day of days) {
-        cells[day.dateBs] = dayMap.get(day.dateBs) ?? {
-          dateBs: day.dateBs,
-          status: null,
-          code: null
-        };
+        cells[day.dateBs] = dayMap.get(day.dateBs) ?? emptyCell(day);
       }
       return {
         personId: id,
@@ -627,6 +651,7 @@ const loadEmployeeRegister = async (
   const schoolId = tenantObjectId(req);
   const { monthBs, year, month } = parseMonthBs(req.query.monthBs);
   const days = buildDays(year, month);
+  await applyCalendarHolidays(schoolId, monthBs, days);
   const todayBs = getTodayBs();
   const department = q(req, "department");
   const designation = q(req, "designation");
@@ -755,11 +780,7 @@ const loadEmployeeRegister = async (
     const dayMap = byPerson.get(person.id) ?? new Map();
     const cells: Record<string, AttendanceRegisterCell> = {};
     for (const day of days) {
-      cells[day.dateBs] = dayMap.get(day.dateBs) ?? {
-        dateBs: day.dateBs,
-        status: null,
-        code: null
-      };
+      cells[day.dateBs] = dayMap.get(day.dateBs) ?? emptyCell(day);
     }
     return {
       personId: person.id,

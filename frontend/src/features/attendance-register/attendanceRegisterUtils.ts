@@ -200,7 +200,7 @@ export const buildAttendanceRegisterPrintHtml = (
 
   const dayHeaders = data.days
     .map((d) => {
-      const sat = d.isSaturday ? ' class="sat"' : "";
+      const sat = (d.isHoliday ?? d.isSaturday) ? ' class="sat"' : "";
       return `<th${sat}>${d.dayOfMonth}<br/><span class="wd">${escapeHtml(d.weekdayShort || "")}</span></th>`;
     })
     .join("");
@@ -210,9 +210,9 @@ export const buildAttendanceRegisterPrintHtml = (
       const dayCells = data.days
         .map((d) => {
           const code =
-            row.cells[d.dateBs]?.code ?? (d.isSaturday ? "H" : "");
-          const bg = code ? printCodeBg(code) : d.isSaturday ? "#e2e8f0" : "#fff";
-          const sat = d.isSaturday ? " sat" : "";
+            row.cells[d.dateBs]?.code ?? ((d.isHoliday ?? d.isSaturday) ? "H" : "");
+          const bg = code ? printCodeBg(code) : (d.isHoliday ?? d.isSaturday) ? "#e2e8f0" : "#fff";
+          const sat = (d.isHoliday ?? d.isSaturday) ? " sat" : "";
           return `<td class="day${sat}" style="background:${bg}">${escapeHtml(code || "")}</td>`;
         })
         .join("");

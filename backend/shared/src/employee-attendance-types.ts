@@ -146,6 +146,9 @@ export interface EmployeeAttendanceMarkContext {
   canMark: boolean;
   canEdit: boolean;
   message?: string;
+  /** dateBs is a holiday on the Academic Calendar — unmarked rows default to HOLIDAY. */
+  isHoliday?: boolean;
+  holidayTitle?: string;
 }
 
 export interface EmployeeAttendanceSelfSummary {
