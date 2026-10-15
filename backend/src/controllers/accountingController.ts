@@ -3200,14 +3200,24 @@ const resolvePayrollAmounts = (payload: {
   };
 };
 
+/** Sheet number from a query/body value (1 when absent). */
+const sheetNoOf = (value: unknown): number => Math.max(1, Math.floor(Number(value) || 1));
+
+/** Mongo filter for one sheet — legacy rows without sheetNo belong to sheet 1. */
+const sheetScope = (sheetNo: number) => ({
+  sheetNo: sheetNo === 1 ? { $in: [1, null] } : sheetNo
+});
+
 const loadSalarySheetApproval = async (
   schoolId: ReturnType<typeof tenantObjectId>,
-  monthBs: string
+  monthBs: string,
+  sheetNo = 1
 ) => {
   const rows = await SalaryPayment.find({
     schoolId,
     monthBs,
-    isDeleted: false
+    isDeleted: false,
+    ...sheetScope(sheetNo)
   })
     .select(
       "status submittedAt collegeAdminApprovedBy superAdminApprovedBy collegeAdminApprovedAt superAdminApprovedAt"
@@ -3408,9 +3418,11 @@ export const getSalarySheet = asyncHandler(async (req: Request, res: Response) =
     throw new ApiError(400, "monthBs is required (YYYY-MM BS)");
   }
   const schoolId = tenantObjectId(req);
+  const sheetNo = sheetNoOf(req.query.sheetNo);
   const sheet = await buildSalarySheet({
     schoolId,
     monthBs,
+    sheetNo,
     department: typeof req.query.department === "string" ? req.query.department : "",
     employeeType:
       req.query.employeeType === "TEACHER" || req.query.employeeType === "STAFF"
@@ -3419,21 +3431,25 @@ export const getSalarySheet = asyncHandler(async (req: Request, res: Response) =
     employeeId: typeof req.query.employeeId === "string" ? req.query.employeeId : "",
     search: typeof req.query.q === "string" ? req.query.q : ""
   });
-  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  const approval = await loadSalarySheetApproval(schoolId, monthBs, sheetNo);
   return sendSuccess(res, "Salary sheet generated", { ...sheet, approval });
 });
 
 export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) => {
   const payload = salarySheetSaveSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
+  const sheetNo = sheetNoOf(payload.sheetNo);
+  const sheetLabel = payload.sheetLabel;
   const userId = req.user!.userId;
   const roles = await actorAccountingRoles(req);
   const admin = isSalarySheetAdmin(roles);
 
+  // Lock / paid checks are per sheet — Sheet 2 can be prepared while Sheet 1 is approved.
   const existingMonth = await SalaryPayment.find({
     schoolId,
     monthBs: payload.monthBs,
-    isDeleted: false
+    isDeleted: false,
+    ...sheetScope(sheetNo)
   })
     .select("status submittedAt collegeAdminApprovedBy superAdminApprovedBy")
     .lean();
@@ -3453,7 +3469,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   }
 
   if (payload.status === "PAID") {
-    const approval = await loadSalarySheetApproval(schoolId, payload.monthBs);
+    const approval = await loadSalarySheetApproval(schoolId, payload.monthBs, sheetNo);
     const hasRows = existingMonth.length > 0 || payload.rows.length > 0;
     if (hasRows && !approval.fullyApproved && existingMonth.some((r) => r.status !== "PAID")) {
       throw new ApiError(400, "Salary sheet must be approved before it can be marked paid");
@@ -3517,6 +3533,13 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       if (row.employeeType === "TEACHER" && row.teacherId) filter.teacherId = row.teacherId;
       if (row.employeeType === "STAFF" && row.staffId) filter.staffId = row.staffId;
       existing = await SalaryPayment.findOne(filter);
+    }
+    // One employee, one sheet per month: never pull a row over from another sheet.
+    if (existing && sheetNoOf(existing.sheetNo) !== sheetNo) {
+      throw new ApiError(
+        409,
+        `${row.employeeName || "This employee"} is already on Sheet ${sheetNoOf(existing.sheetNo)} of this month`
+      );
     }
 
     let paymentType = normalizeTeacherPaymentType(row.paymentType);
@@ -3616,6 +3639,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
         };
 
     const docFields = {
+      sheetNo,
+      ...(sheetLabel !== undefined ? { sheetLabel } : {}),
       employeeType: row.employeeType,
       teacherId: row.employeeType === "TEACHER" ? row.teacherId : undefined,
       staffId: row.employeeType === "STAFF" ? row.staffId : undefined,
@@ -3776,8 +3801,16 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   // reopening the sheet) sees exactly what the accountant entered.
   if (payload.signatories !== undefined) {
     await SalaryPayment.updateMany(
-      { schoolId, monthBs: payload.monthBs, isDeleted: false },
+      { schoolId, monthBs: payload.monthBs, isDeleted: false, ...sheetScope(sheetNo) },
       { $set: { sheetSignatories: payload.signatories } }
+    );
+  }
+
+  // The sheet name applies to every row on the sheet.
+  if (sheetLabel !== undefined) {
+    await SalaryPayment.updateMany(
+      { schoolId, monthBs: payload.monthBs, isDeleted: false, ...sheetScope(sheetNo) },
+      { $set: { sheetLabel } }
     );
   }
 
@@ -3788,8 +3821,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
     after: { monthBs: payload.monthBs, count: savedIds.length, status: saveStatus }
   });
 
-  const sheet = await buildSalarySheet({ schoolId, monthBs: payload.monthBs });
-  const approval = await loadSalarySheetApproval(schoolId, payload.monthBs);
+  const sheet = await buildSalarySheet({ schoolId, monthBs: payload.monthBs, sheetNo });
+  const approval = await loadSalarySheetApproval(schoolId, payload.monthBs, sheetNo);
   const savedMessage = failedRows.length
     ? `Salary sheet saved (${savedIds.length} employee(s); ${failedRows.length} could not be saved)`
     : `Salary sheet saved (${savedIds.length} employee(s))`;
@@ -3812,12 +3845,14 @@ const monthBsParam = (value: string): string => {
 
 export const submitSalarySheet = asyncHandler(async (req: Request, res: Response) => {
   const monthBs = monthBsParam(String(req.params.monthBs || ""));
+  const sheetNo = sheetNoOf(req.query.sheetNo);
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId;
   const rows = await SalaryPayment.find({
     schoolId,
     monthBs,
-    isDeleted: false
+    isDeleted: false,
+    ...sheetScope(sheetNo)
   });
   if (!rows.length) {
     throw new ApiError(400, "Save the salary sheet first");
@@ -3841,14 +3876,15 @@ export const submitSalarySheet = asyncHandler(async (req: Request, res: Response
     after: { monthBs, count: rows.length }
   });
 
-  const sheet = await buildSalarySheet({ schoolId, monthBs });
-  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  const sheet = await buildSalarySheet({ schoolId, monthBs, sheetNo });
+  const approval = await loadSalarySheetApproval(schoolId, monthBs, sheetNo);
   return sendSuccess(res, "Salary sheet submitted", { ...sheet, approval });
 });
 
 export const approveSalarySheet = asyncHandler(async (req: Request, res: Response) => {
   await assertCanEditOrDeleteFeePayment(req);
   const monthBs = monthBsParam(String(req.params.monthBs || ""));
+  const sheetNo = sheetNoOf(req.query.sheetNo);
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId;
   const roles = await actorAccountingRoles(req);
@@ -3860,7 +3896,8 @@ export const approveSalarySheet = asyncHandler(async (req: Request, res: Respons
   const rows = await SalaryPayment.find({
     schoolId,
     monthBs,
-    isDeleted: false
+    isDeleted: false,
+    ...sheetScope(sheetNo)
   });
   if (!rows.length) {
     throw new ApiError(404, "Salary sheet not found");
@@ -3887,21 +3924,23 @@ export const approveSalarySheet = asyncHandler(async (req: Request, res: Respons
     after: { monthBs }
   });
 
-  const sheet = await buildSalarySheet({ schoolId, monthBs });
-  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  const sheet = await buildSalarySheet({ schoolId, monthBs, sheetNo });
+  const approval = await loadSalarySheetApproval(schoolId, monthBs, sheetNo);
   return sendSuccess(res, "Salary sheet approved", { ...sheet, approval });
 });
 
 export const rejectSalarySheet = asyncHandler(async (req: Request, res: Response) => {
   await assertCanEditOrDeleteFeePayment(req);
   const monthBs = monthBsParam(String(req.params.monthBs || ""));
+  const sheetNo = sheetNoOf(req.query.sheetNo);
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId;
 
   const rows = await SalaryPayment.find({
     schoolId,
     monthBs,
-    isDeleted: false
+    isDeleted: false,
+    ...sheetScope(sheetNo)
   });
   if (!rows.length) {
     throw new ApiError(404, "Salary sheet not found");
@@ -3927,8 +3966,8 @@ export const rejectSalarySheet = asyncHandler(async (req: Request, res: Response
     after: { monthBs }
   });
 
-  const sheet = await buildSalarySheet({ schoolId, monthBs });
-  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  const sheet = await buildSalarySheet({ schoolId, monthBs, sheetNo });
+  const approval = await loadSalarySheetApproval(schoolId, monthBs, sheetNo);
   return sendSuccess(res, "Salary sheet returned for correction", { ...sheet, approval });
 });
 
@@ -4189,7 +4228,9 @@ export const listSalarySheetMonths = asyncHandler(
   async (req: Request, res: Response) => {
     const schoolId = tenantObjectId(req);
     const grouped = await SalaryPayment.aggregate<{
-      _id: string;
+      _id: { monthBs: string; sheetNo: number };
+      sheetLabel: string | null;
+      employeeTypes: string[];
       employeeCount: number;
       totalNetSalaryNpr: number;
       totalSalaryAmountNpr: number;
@@ -4218,7 +4259,10 @@ export const listSalarySheetMonths = asyncHandler(
       },
       {
         $group: {
-          _id: "$monthBs",
+          // One line per sheet of each month (legacy rows → sheet 1)
+          _id: { monthBs: "$monthBs", sheetNo: { $ifNull: ["$sheetNo", 1] } },
+          sheetLabel: { $max: "$sheetLabel" },
+          employeeTypes: { $addToSet: "$employeeType" },
           employeeCount: { $sum: 1 },
           totalNetSalaryNpr: { $sum: { $ifNull: ["$netSalaryNpr", 0] } },
           totalSalaryAmountNpr: {
@@ -4255,7 +4299,7 @@ export const listSalarySheetMonths = asyncHandler(
           superAdminApprovedBy: { $max: "$superAdminApprovedBy" }
         }
       },
-      { $sort: { _id: -1 } }
+      { $sort: { "_id.monthBs": -1, "_id.sheetNo": 1 } }
     ]);
 
     // Approver names for the "Approved by …" label
@@ -4275,7 +4319,7 @@ export const listSalarySheetMonths = asyncHandler(
     );
 
     const months = grouped.map((g) => {
-      const monthBs = String(g._id || "").trim();
+      const monthBs = String(g._id?.monthBs || "").trim();
       const draftCount = Number(g.draftCount || 0);
       const processedCount = Number(g.processedCount || 0);
       const pendingApprovalCount = Number(g.pendingApprovalCount || 0);
@@ -4311,6 +4355,9 @@ export const listSalarySheetMonths = asyncHandler(
 
       return {
         monthBs,
+        sheetNo: Math.max(1, Number(g._id?.sheetNo) || 1),
+        sheetLabel: String(g.sheetLabel || ""),
+        employeeTypes: (g.employeeTypes || []).filter(Boolean) as Array<"TEACHER" | "STAFF">,
         employeeCount: Number(g.employeeCount || 0),
         totalNetSalaryNpr: Math.round(Number(g.totalNetSalaryNpr || 0) * 100) / 100,
         totalSalaryAmountNpr:
@@ -4365,8 +4412,14 @@ export const deleteSalarySheetMonth = asyncHandler(
     const schoolId = tenantObjectId(req);
     const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
 
+    // ?sheetNo=N deletes one sheet of the month; without it the whole month goes.
+    const onlySheet = req.query.sheetNo !== undefined ? sheetNoOf(req.query.sheetNo) : undefined;
     const salaries = await SalaryPayment.find(
-      withTenantScope(req, { monthBs, isDeleted: false })
+      withTenantScope(req, {
+        monthBs,
+        isDeleted: false,
+        ...(onlySheet !== undefined ? sheetScope(onlySheet) : {})
+      })
     );
     if (salaries.length === 0) {
       throw new ApiError(404, `No salary sheet found for ${monthBs}`);

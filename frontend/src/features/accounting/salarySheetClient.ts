@@ -660,10 +660,11 @@ export const fetchSalarySheetClientFallback = async (
  */
 export const fetchSalarySheet = async (
   monthBs: string,
+  sheetNo = 1,
 ): Promise<SalarySheetResponse & { usedFallback?: boolean }> => {
   try {
     const data = await unwrap<SalarySheetResponse>(
-      api.get("/accounting/salary-sheet", { params: { monthBs } }),
+      api.get("/accounting/salary-sheet", { params: { monthBs, sheetNo } }),
     );
     return data;
   } catch (error: unknown) {
@@ -676,7 +677,7 @@ export const fetchSalarySheet = async (
       "status" in error.response
         ? Number((error.response as { status: number }).status)
         : 0;
-    if (status === 404) {
+    if (status === 404 && sheetNo === 1) {
       const fallback = await fetchSalarySheetClientFallback(monthBs);
       return { ...fallback, usedFallback: true };
     }
@@ -812,16 +813,19 @@ export const fetchSalarySheetMonths = async (): Promise<
 export const deleteSalarySheetMonthClient = async (
   monthBs: string,
   reason = `Deleted entire salary sheet for ${monthBs} by administrator`,
+  /** Delete only this sheet of the month (all sheets when omitted). */
+  sheetNo?: number,
 ): Promise<void> => {
   try {
     await unwrap(
       api.delete(`/accounting/salary-sheet/months/${monthBs}`, {
         data: { reason },
+        params: sheetNo ? { sheetNo } : undefined,
       }),
     );
     return;
   } catch (error: unknown) {
-    if (httpStatus(error) !== 404) throw error;
+    if (httpStatus(error) !== 404 || sheetNo) throw error;
   }
 
   const salaries = await unwrap<SalaryPaymentRecord[]>(
@@ -884,6 +888,9 @@ export type SalarySheetSaveResult = {
  */
 export const saveSalarySheetClient = async (payload: {
   monthBs: string;
+  /** Salary sheet of the month (1, 2, …) and its optional name. */
+  sheetNo?: number;
+  sheetLabel?: string;
   status: "DRAFT" | "PROCESSED" | "PENDING_APPROVAL" | "APPROVED" | "PAID";
   paidDateBs?: string;
   paymentMethod: string;
@@ -1018,11 +1025,11 @@ export const saveSalarySheetClient = async (payload: {
   return { failedRows: [] };
 };
 
-export const submitSalarySheetClient = async (monthBs: string) =>
-  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/submit`));
+export const submitSalarySheetClient = async (monthBs: string, sheetNo = 1) =>
+  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/submit`, {}, { params: { sheetNo } }));
 
-export const approveSalarySheetClient = async (monthBs: string) =>
-  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/approve`));
+export const approveSalarySheetClient = async (monthBs: string, sheetNo = 1) =>
+  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/approve`, {}, { params: { sheetNo } }));
 
-export const rejectSalarySheetClient = async (monthBs: string) =>
-  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/reject`));
+export const rejectSalarySheetClient = async (monthBs: string, sheetNo = 1) =>
+  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/reject`, {}, { params: { sheetNo } }));

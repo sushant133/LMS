@@ -299,6 +299,17 @@ export const SalaryPaymentRecordsPanel = ({
     if (m && /^\d{4}-\d{2}$/.test(m)) return m;
     return currentBsMonth();
   });
+  /**
+   * A month can hold several salary sheets (e.g. Sheet 1 staff, Sheet 2 teachers).
+   * An employee saved on one sheet is not offered on another sheet of that month.
+   */
+  const [sheetNo, setSheetNo] = useState(1);
+  const [sheetLabel, setSheetLabel] = useState("");
+  /** Switch payroll month — always opens that month's first sheet unless told otherwise. */
+  const changeMonth = (nextMonth: string, nextSheet = 1) => {
+    setMonthBs(nextMonth);
+    setSheetNo(nextSheet);
+  };
   /** Sheet filter (table view only) */
   const [listSearch, setListSearch] = useState("");
   const [listDept, setListDept] = useState("");
@@ -309,7 +320,9 @@ export const SalaryPaymentRecordsPanel = ({
    * Sheet rows at the moment of a save. When the sheet reloads afterwards, any row the
    * server did not store stays on the sheet (marked unsaved) instead of vanishing.
    */
-  const rowsBeforeSaveRef = useRef<{ monthBs: string; rows: EditableRow[] } | null>(null);
+  const rowsBeforeSaveRef = useRef<{ monthBs: string; sheetNo: number; rows: EditableRow[] } | null>(
+    null,
+  );
   const [status, setStatus] = useState<SalaryPaymentStatus>("DRAFT");
   const [paidDateBs, setPaidDateBs] = useState("");
   const [paymentMethod, setPaymentMethod] =
@@ -333,7 +346,7 @@ export const SalaryPaymentRecordsPanel = ({
   useEffect(() => {
     const m = focusMonthBs?.trim();
     if (m && /^\d{4}-\d{2}$/.test(m)) {
-      setMonthBs(m);
+      changeMonth(m);
       setViewMode("prepare");
       setAddSectionOpen(false);
       setSignSectionOpen(false);
@@ -349,8 +362,8 @@ export const SalaryPaymentRecordsPanel = ({
 
   /** Full employee catalog + attendance for the month (picker source — not the table) */
   const sheetQuery = useQuery({
-    queryKey: ["accounting-salary-sheet", monthBs],
-    queryFn: () => fetchSalarySheet(monthBs),
+    queryKey: ["accounting-salary-sheet", monthBs, sheetNo],
+    queryFn: () => fetchSalarySheet(monthBs, sheetNo),
     enabled:
       viewMode === "prepare" &&
       Boolean(monthBs && /^\d{4}-\d{2}$/.test(monthBs)),
@@ -378,6 +391,29 @@ export const SalaryPaymentRecordsPanel = ({
   const collegeNameNp = settingsQuery.data?.schoolNameNp?.trim() || "";
   const collegeAddress = formatCollegeAddress(settingsQuery.data?.address);
   const monthLabel = formatPayrollMonthLabel(monthBs);
+  /** Sheets already saved in this month, plus the open one if it is new. */
+  const monthSheets = useMemo(() => {
+    const saved = sheetQuery.data?.sheets ?? [];
+    if (saved.some((s) => s.sheetNo === sheetNo)) return saved;
+    return [
+      ...saved,
+      {
+        sheetNo,
+        sheetLabel: "",
+        employeeCount: 0,
+        employeeTypes: [],
+        status: "DRAFT" as const,
+        totalNetSalaryNpr: 0,
+      },
+    ].sort((a, b) => a.sheetNo - b.sheetNo);
+  }, [sheetQuery.data?.sheets, sheetNo]);
+  /** e.g. "Shrawan 2083 — Teachers" (or "— Sheet 2") when the month has several sheets. */
+  const sheetTitle =
+    sheetLabel.trim()
+      ? `${monthLabel} — ${sheetLabel.trim()}`
+      : monthSheets.length > 1
+        ? `${monthLabel} — Sheet ${sheetNo}`
+        : monthLabel;
 
   /** Catalog of all employees with attendance-derived figures for the month */
   const catalog = sheetQuery.data?.rows ?? [];
@@ -399,7 +435,11 @@ export const SalaryPaymentRecordsPanel = ({
         ),
       }));
     const pending =
-      rowsBeforeSaveRef.current?.monthBs === monthBs ? rowsBeforeSaveRef.current.rows : [];
+      rowsBeforeSaveRef.current?.monthBs === monthBs &&
+      rowsBeforeSaveRef.current.sheetNo === sheetNo
+        ? rowsBeforeSaveRef.current.rows
+        : [];
+    setSheetLabel(sheetQuery.data.sheetLabel ?? "");
     rowsBeforeSaveRef.current = null;
     const savedKeys = new Set(saved.map((r) => employeeKeyOf(r)));
     const unsaved = pending
@@ -433,6 +473,8 @@ export const SalaryPaymentRecordsPanel = ({
   const saveMutation = useMutation({
     mutationFn: (body: {
       monthBs: string;
+      sheetNo?: number;
+      sheetLabel?: string;
       status: SalaryPaymentStatus;
       paidDateBs?: string;
       paymentMethod: string;
@@ -458,7 +500,7 @@ export const SalaryPaymentRecordsPanel = ({
         salaryPaymentId?: string;
       }>;
     }) => {
-      rowsBeforeSaveRef.current = { monthBs, rows };
+      rowsBeforeSaveRef.current = { monthBs, sheetNo, rows };
       return saveSalarySheetClient(body);
     },
     onSuccess: async (saved) => {
@@ -511,9 +553,11 @@ export const SalaryPaymentRecordsPanel = ({
   /** Persist every row as shown (as Draft), then submit the month for approval. */
   const saveAndSubmitMutation = useMutation({
     mutationFn: async () => {
-      rowsBeforeSaveRef.current = { monthBs, rows };
+      rowsBeforeSaveRef.current = { monthBs, sheetNo, rows };
       const saved = await saveSalarySheetClient({
         monthBs,
+        sheetNo,
+        sheetLabel: sheetLabel.trim(),
         status: "DRAFT",
         paidDateBs: paidDateBs || undefined,
         paymentMethod,
@@ -521,7 +565,7 @@ export const SalaryPaymentRecordsPanel = ({
         rows: sheetRowsPayload(),
       });
       // Rows that could not be stored are reported, but never block submission.
-      await submitSalarySheetClient(monthBs);
+      await submitSalarySheetClient(monthBs, sheetNo);
       return saved;
     },
     onSuccess: async (saved) => {
@@ -541,7 +585,7 @@ export const SalaryPaymentRecordsPanel = ({
   });
 
   const approveMutation = useMutation({
-    mutationFn: () => approveSalarySheetClient(monthBs),
+    mutationFn: () => approveSalarySheetClient(monthBs, sheetNo),
     onSuccess: async () => {
       toast.success("Approved");
       await refreshSheet();
@@ -550,7 +594,7 @@ export const SalaryPaymentRecordsPanel = ({
   });
 
   const rejectMutation = useMutation({
-    mutationFn: () => rejectSalarySheetClient(monthBs),
+    mutationFn: () => rejectSalarySheetClient(monthBs, sheetNo),
     onSuccess: async () => {
       toast.success("Returned for correction — accountant can update the sheet");
       await refreshSheet();
@@ -559,16 +603,17 @@ export const SalaryPaymentRecordsPanel = ({
   });
 
   const deleteMonthMutation = useMutation({
-    mutationFn: (targetMonth: string) =>
+    mutationFn: ({ month, sheet }: { month: string; sheet: number }) =>
       deleteSalarySheetMonthClient(
-        targetMonth,
-        `Deleted entire salary sheet for ${targetMonth} by administrator`,
+        month,
+        `Deleted salary sheet ${sheet} for ${month} by administrator`,
+        sheet,
       ),
-    onSuccess: async (_data, targetMonth) => {
-      toast.success(`Salary sheet for ${targetMonth} deleted`);
+    onSuccess: async (_data, { month, sheet }) => {
+      toast.success(`Salary sheet ${sheet} for ${formatPayrollMonthLabel(month)} deleted`);
       await monthsQuery.refetch();
-      // If the open working month was deleted, clear local rows after refetch
-      if (targetMonth === monthBs) {
+      // If the open sheet was deleted, clear local rows after refetch
+      if (month === monthBs && sheet === sheetNo) {
         await sheetQuery.refetch();
       }
       try {
@@ -583,14 +628,14 @@ export const SalaryPaymentRecordsPanel = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const openSavedMonth = (targetMonth: string) => {
-    setMonthBs(targetMonth);
+  const openSavedMonth = (targetMonth: string, targetSheet = 1) => {
+    changeMonth(targetMonth, targetSheet);
     setListSearch("");
     setHighlightEmployee("");
     setAddSectionOpen(false);
     setSignSectionOpen(false);
     setViewMode("prepare");
-    toast.message(`Opened ${formatPayrollMonthLabel(targetMonth)}`);
+    toast.message(`Opened ${formatPayrollMonthLabel(targetMonth)} · Sheet ${targetSheet}`);
   };
 
   const filteredHistoryMonths = useMemo(() => {
@@ -1328,7 +1373,7 @@ export const SalaryPaymentRecordsPanel = ({
         ? `<p class="college-address">${escapeHtml(collegeAddress)}</p>`
         : ""
     }
-    <p class="sheet-title">Salary Sheet of ${escapeHtml(monthLabel)}</p>
+    <p class="sheet-title">Salary Sheet of ${escapeHtml(sheetTitle)}</p>
     <p class="college-address">
       Month days ${calendarDaysInMonth} − Saturdays ${saturdayDaysInMonth} − other holidays ${otherHolidayDaysInMonth} = ${workingDaysInMonth} working days
       · monthly: per-day = monthly ÷ ${calendarDaysInMonth} (month days), leave/absence deduct
@@ -1441,7 +1486,7 @@ export const SalaryPaymentRecordsPanel = ({
       }
 
       const { default: html2pdf } = await import("html2pdf.js");
-      const filename = `Salary_Sheet_${monthBs || "payroll"}.pdf`;
+      const filename = `Salary_Sheet_${monthBs || "payroll"}${monthSheets.length > 1 ? `_Sheet${sheetNo}` : ""}.pdf`;
       const blob = (await html2pdf()
         .set({
           margin: [10, 10, 10, 10],
@@ -1667,6 +1712,8 @@ export const SalaryPaymentRecordsPanel = ({
     }
     saveMutation.mutate({
       monthBs,
+      sheetNo,
+      sheetLabel: sheetLabel.trim(),
       status,
       paidDateBs: paidDateBs || undefined,
       paymentMethod,
@@ -1840,7 +1887,8 @@ export const SalaryPaymentRecordsPanel = ({
                   </TableHead>
                   <TableBody>
                     {filteredHistoryMonths.map((m) => {
-                      const isCurrent = m.monthBs === monthBs;
+                      const rowSheet = m.sheetNo ?? 1;
+                      const isCurrent = m.monthBs === monthBs && rowSheet === sheetNo;
                       // Partly approved: one admin approved, the other still has to.
                       // Admin approved under the old two-step rule — that is final now.
                       const adminApproved =
@@ -1885,7 +1933,7 @@ export const SalaryPaymentRecordsPanel = ({
                       ].filter(Boolean) as Array<{ label: string; date: string }>;
                       return (
                         <tr
-                          key={m.monthBs}
+                          key={`${m.monthBs}-${rowSheet}`}
                           className={cn(
                             "border-t border-slate-100",
                             isCurrent && "bg-brand-50/50",
@@ -1894,6 +1942,15 @@ export const SalaryPaymentRecordsPanel = ({
                           <Td>
                             <div className="font-medium text-slate-900">
                               {formatPayrollMonthLabel(m.monthBs)}
+                            </div>
+                            <div className="text-xs font-medium text-brand-700">
+                              Sheet {rowSheet}
+                              {m.sheetLabel ? ` · ${m.sheetLabel}` : ""}
+                              {m.employeeTypes?.length
+                                ? ` · ${m.employeeTypes
+                                    .map((t) => (t === "TEACHER" ? "Teachers" : "Staff"))
+                                    .join(" + ")}`
+                                : ""}
                             </div>
                             <div className="text-xs text-slate-500">
                               {m.monthBs}
@@ -1945,7 +2002,7 @@ export const SalaryPaymentRecordsPanel = ({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                onClick={() => openSavedMonth(m.monthBs)}
+                                onClick={() => openSavedMonth(m.monthBs, rowSheet)}
                               >
                                 Open
                               </Button>
@@ -1958,17 +2015,18 @@ export const SalaryPaymentRecordsPanel = ({
                                   title="Delete"
                                   disabled={deleteMonthMutation.isPending}
                                   onClick={() => {
-                                    const label = `${formatPayrollMonthLabel(m.monthBs)} (${m.monthBs}) · ${m.employeeCount} employee(s) · ${formatCurrencyNpr(m.totalNetSalaryNpr)}`;
+                                    const label = `${formatPayrollMonthLabel(m.monthBs)} (${m.monthBs}) · Sheet ${rowSheet}${m.sheetLabel ? ` (${m.sheetLabel})` : ""} · ${m.employeeCount} employee(s) · ${formatCurrencyNpr(m.totalNetSalaryNpr)}`;
                                     if (
                                       !window.confirm(
-                                        `Delete entire salary sheet?\n\n${label}\n\nAll employee rows for this month will be removed. If any were Paid, journal and cash book entries are reversed.`,
+                                        `Delete this salary sheet?\n\n${label}\n\nOnly this sheet's employee rows are removed — other sheets of the month stay. If any were Paid, journal and cash book entries are reversed.`,
                                       )
                                     ) {
                                       return;
                                     }
-                                    void deleteMonthMutation.mutateAsync(
-                                      m.monthBs,
-                                    );
+                                    void deleteMonthMutation.mutateAsync({
+                                      month: m.monthBs,
+                                      sheet: rowSheet,
+                                    });
                                   }}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -1986,7 +2044,7 @@ export const SalaryPaymentRecordsPanel = ({
 
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <span>
-                {(monthsQuery.data ?? []).length} saved month
+                {(monthsQuery.data ?? []).length} saved salary sheet
                 {(monthsQuery.data ?? []).length === 1 ? "" : "s"}
                 {historySearch.trim() && filteredHistoryMonths.length !== (monthsQuery.data ?? []).length
                   ? ` · showing ${filteredHistoryMonths.length}`
@@ -2150,7 +2208,7 @@ export const SalaryPaymentRecordsPanel = ({
               <Input
                 placeholder="YYYY-MM e.g. 2082-01"
                 value={monthBs}
-                onChange={(e) => setMonthBs(e.target.value.trim())}
+                onChange={(e) => changeMonth(e.target.value.trim())}
               />
             </FormField>
             <FormField label="Status">
@@ -2227,6 +2285,100 @@ export const SalaryPaymentRecordsPanel = ({
               </FormField>
             ) : null}
           </div>
+          {/* ─── Salary sheets of this month (e.g. Sheet 1 staff, Sheet 2 teachers) ─── */}
+          <div className="space-y-2 rounded-lg border border-brand-100 bg-brand-50/40 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-600">
+                Salary sheets in {monthLabel}:
+              </span>
+              {monthSheets.map((s) => {
+                const active = s.sheetNo === sheetNo;
+                const types = s.employeeTypes
+                  .map((t) => (t === "TEACHER" ? "Teachers" : "Staff"))
+                  .join(" + ");
+                return (
+                  <button
+                    key={s.sheetNo}
+                    type="button"
+                    onClick={() => {
+                      if (active) return;
+                      if (
+                        rows.some((r) => r.dirty) &&
+                        !window.confirm("This sheet has unsaved changes. Switch sheet anyway?")
+                      ) {
+                        return;
+                      }
+                      setSheetNo(s.sheetNo);
+                    }}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-medium transition",
+                      active
+                        ? "border-brand-600 bg-brand-600 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-brand-300",
+                    )}
+                  >
+                    Sheet {s.sheetNo}
+                    {s.sheetLabel ? ` · ${s.sheetLabel}` : types ? ` · ${types}` : ""}
+                    {s.employeeCount > 0 ? ` (${s.employeeCount})` : " (new)"}
+                  </button>
+                );
+              })}
+              {canPrepareSheet ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (
+                      rows.some((r) => r.dirty) &&
+                      !window.confirm("This sheet has unsaved changes. Start a new sheet anyway?")
+                    ) {
+                      return;
+                    }
+                    const next = Math.max(sheetNo, ...monthSheets.map((s) => s.sheetNo)) + 1;
+                    setSheetNo(next);
+                    setSheetLabel("");
+                    toast.message(
+                      `New salary sheet ${next} for ${monthLabel} — add employees who are not on another sheet`,
+                    );
+                  }}
+                >
+                  + New salary sheet for {monthLabel}
+                </Button>
+              ) : null}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,18rem)_1fr] sm:items-end">
+              <FormField label={`Sheet ${sheetNo} name (optional)`}>
+                <Input
+                  placeholder="e.g. Staff, Teachers"
+                  value={sheetLabel}
+                  maxLength={60}
+                  disabled={!canWritePayroll && !canAddToApprovedSheet}
+                  onChange={(e) => setSheetLabel(e.target.value)}
+                />
+              </FormField>
+              <div className="space-y-0.5 text-xs text-slate-500">
+                <p>
+                  Any mix of teachers and staff can go on a sheet. Each sheet is saved,
+                  submitted, approved and printed on its own; anyone already on another sheet
+                  of {monthLabel} is not offered here.
+                </p>
+                {(() => {
+                  // Not on any sheet of the month yet (excludes this sheet, saved or unsaved)
+                  const left = availableCatalog.filter((c) => !editingKey || employeeKeyOf(c) !== editingKey);
+                  const teachers = left.filter((c) => c.employeeType === "TEACHER").length;
+                  return (
+                    <p className={cn("font-medium", left.length ? "text-amber-700" : "text-emerald-700")}>
+                      {left.length
+                        ? `Not yet on any sheet of ${monthLabel}: ${left.length} (${teachers} teacher${teachers === 1 ? "" : "s"}, ${left.length - teachers} staff)`
+                        : `Everyone is on a sheet for ${monthLabel}.`}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
             <span title="Calendar days in this Bikram Sambat month">
               Month days:{" "}
@@ -2800,7 +2952,7 @@ export const SalaryPaymentRecordsPanel = ({
               <p className="mt-0.5 text-xs text-slate-600">{collegeAddress}</p>
             ) : null}
             <p className="mt-2 text-sm font-bold uppercase tracking-wide text-slate-800">
-              Salary Sheet of {monthLabel}
+              Salary Sheet of {sheetTitle}
             </p>
           </div>
 

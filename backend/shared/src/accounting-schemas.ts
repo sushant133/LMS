@@ -319,6 +319,10 @@ export type SalaryPaymentInput = z.infer<typeof salaryPaymentSchema>;
 
 export const salarySheetSaveSchema = z.object({
   monthBs: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM (BS month)"),
+  /** Which salary sheet of the month (1, 2, 3 …). */
+  sheetNo: z.coerce.number().int().min(1).max(50).default(1),
+  /** Optional sheet name, e.g. "Staff" or "Teachers". */
+  sheetLabel: z.string().trim().max(60).optional(),
   status: z.enum(["DRAFT", "PROCESSED", "PENDING_APPROVAL", "APPROVED", "PAID"]).default("DRAFT"),
   paidDateBs: bsDateSchema.optional().or(z.literal("")),
   paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),

@@ -394,8 +394,23 @@ export interface SalarySheetIncompleteEmployee {
   reason: string;
 }
 
+/** One salary sheet inside a payroll month. */
+export interface SalarySheetSummary {
+  sheetNo: number;
+  sheetLabel: string;
+  employeeCount: number;
+  employeeTypes: Array<"TEACHER" | "STAFF">;
+  status: SalaryPaymentStatus | "MIXED";
+  totalNetSalaryNpr: number;
+}
+
 export interface SalarySheetResponse {
   monthBs: string;
+  /** Sheet shown (1 when the month has a single sheet). */
+  sheetNo?: number;
+  sheetLabel?: string;
+  /** Every saved sheet in this month, in order. */
+  sheets?: SalarySheetSummary[];
   /** Working days = calendar days - Saturdays - other holidays. */
   workingDaysInMonth: number;
   /** Every day of the BS month, holidays included. The monthly per-day salary divisor. */
@@ -431,6 +446,10 @@ export interface SalarySheetResponse {
  */
 export interface SalarySheetMonthSummary {
   monthBs: string;
+  /** Each saved sheet of a month is listed separately. */
+  sheetNo?: number;
+  sheetLabel?: string;
+  employeeTypes?: Array<"TEACHER" | "STAFF">;
   employeeCount: number;
   totalNetSalaryNpr: number;
   totalSalaryAmountNpr: number;

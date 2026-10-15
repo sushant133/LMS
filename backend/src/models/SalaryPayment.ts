@@ -8,6 +8,13 @@ const salaryPaymentSchema = new Schema(
     staffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff" },
     staffName: { type: String },
     monthBs: { type: String, required: true },
+    /**
+     * A month can hold several salary sheets (e.g. Sheet 1 = staff, Sheet 2 = teachers).
+     * Rows saved before multi-sheet support have no value and count as sheet 1.
+     */
+    sheetNo: { type: Number, min: 1, default: 1 },
+    /** Optional sheet name shown in lists and on print, e.g. "Staff" / "Teachers". */
+    sheetLabel: { type: String, trim: true, default: "" },
     /** Monthly gross salary (sheet: Monthly Salary). For PERIOD this stores the period rate; for TENDER the contract total. */
     basicSalaryNpr: { type: Number, required: true },
     paymentType: {

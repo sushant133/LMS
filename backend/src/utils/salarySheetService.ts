@@ -513,6 +513,8 @@ export type BuildSalarySheetOptions = {
   employeeType?: "TEACHER" | "STAFF" | "";
   employeeId?: string;
   search?: string;
+  /** Salary sheet of the month to build (default 1). */
+  sheetNo?: number;
 };
 
 export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
@@ -541,10 +543,49 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   ]);
 
   // Prefer exact monthBs match when both exact and prefix hits exist
-  const existingSalaries = existingSalariesRaw.filter((s) => {
+  const monthSalaryRows = existingSalariesRaw.filter((s) => {
     const m = String(s.monthBs || "").trim();
     return m === monthBs || m.startsWith(`${monthBs}`);
   });
+
+  // ── Several salary sheets per month ──
+  // Rows on THIS sheet behave as before. Employees already saved on ANOTHER sheet of
+  // the month are left out entirely, so nobody can be put on two sheets.
+  const sheetNo = Math.max(1, Math.floor(Number(options.sheetNo) || 1));
+  const rowSheetNo = (s: { sheetNo?: unknown }) => Math.max(1, Math.floor(Number(s.sheetNo) || 1));
+  const existingSalaries = monthSalaryRows.filter((s) => rowSheetNo(s) === sheetNo);
+  const onOtherSheetTeacher = new Set(
+    monthSalaryRows.filter((s) => rowSheetNo(s) !== sheetNo && s.teacherId).map((s) => idKey(s.teacherId))
+  );
+  const onOtherSheetStaff = new Set(
+    monthSalaryRows.filter((s) => rowSheetNo(s) !== sheetNo && s.staffId).map((s) => idKey(s.staffId))
+  );
+  const sheetSummaries = (() => {
+    const bySheet = new Map<number, typeof monthSalaryRows>();
+    for (const row of monthSalaryRows) {
+      const n = rowSheetNo(row);
+      bySheet.set(n, [...(bySheet.get(n) ?? []), row]);
+    }
+    return [...bySheet.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([n, list]) => {
+        const statuses = [...new Set(list.map((r) => String(r.status || "DRAFT")))];
+        return {
+          sheetNo: n,
+          sheetLabel: String(list.find((r) => r.sheetLabel)?.sheetLabel ?? ""),
+          employeeCount: list.length,
+          employeeTypes: [...new Set(list.map((r) => r.employeeType as "TEACHER" | "STAFF"))],
+          status: (statuses.length === 1 ? statuses[0] : "MIXED") as
+            | "DRAFT"
+            | "PROCESSED"
+            | "PENDING_APPROVAL"
+            | "APPROVED"
+            | "PAID"
+            | "MIXED",
+          totalNetSalaryNpr: round2(list.reduce((sum, r) => sum + (Number(r.netSalaryNpr) || 0), 0))
+        };
+      });
+  })();
 
   const salaryByTeacher = new Map(
     existingSalaries
@@ -964,6 +1005,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         | null
         | undefined;
       const id = idKey(t._id);
+      if (onOtherSheetTeacher.has(id)) continue;
       const saved = salaryByTeacher.get(id);
       // Skip inactive teachers only when they have no payroll row for this month
       if (
@@ -1078,6 +1120,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   if (!employeeType || employeeType === "STAFF") {
     for (const s of staff) {
       const id = idKey(s._id);
+      if (onOtherSheetStaff.has(id)) continue;
       const saved = salaryByStaff.get(id);
       // Skip inactive staff only when they have no payroll row for this month
       if (!saved && String(s.status || "").toUpperCase() === "INACTIVE") {
@@ -1424,6 +1467,9 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
 
   return {
     monthBs,
+    sheetNo,
+    sheetLabel: String(existingSalaries.find((s) => s.sheetLabel)?.sheetLabel ?? ""),
+    sheets: sheetSummaries,
     workingDaysInMonth,
     calendarDaysInMonth,
     saturdayDaysInMonth,
