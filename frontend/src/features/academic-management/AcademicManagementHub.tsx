@@ -278,7 +278,10 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: filtersReady && activeTab === "syllabus",
+    // Performance: the panel for this tab already loads the same list itself
+    // (with a slightly different query key), so loading it here too made every
+    // list request run twice. Fetch it here only when exporting to Excel.
+    enabled: false,
   });
 
   const sessionPlansQuery = useQuery({
@@ -289,7 +292,10 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: filtersReady && activeTab === "session-plan",
+    // Performance: the panel for this tab already loads the same list itself
+    // (with a slightly different query key), so loading it here too made every
+    // list request run twice. Fetch it here only when exporting to Excel.
+    enabled: false,
   });
 
   const lessonPlansQuery = useQuery({
@@ -300,7 +306,10 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: filtersReady && activeTab === "lesson-plan",
+    // Performance: the panel for this tab already loads the same list itself
+    // (with a slightly different query key), so loading it here too made every
+    // list request run twice. Fetch it here only when exporting to Excel.
+    enabled: false,
   });
 
   const logBookQuery = useQuery({
@@ -311,7 +320,10 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: filtersReady && activeTab === "log-book",
+    // Performance: the panel for this tab already loads the same list itself
+    // (with a slightly different query key), so loading it here too made every
+    // list request run twice. Fetch it here only when exporting to Excel.
+    enabled: false,
   });
 
   useEffect(() => {
@@ -439,54 +451,58 @@ export const AcademicManagementHub = () => {
     setAppliedFilters(reset);
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     if (activeTab === "reports") {
       toast.message("Use Export CSV in the Reports tab");
       return;
     }
     if (activeTab === "syllabus") {
-      if (!syllabiQuery.data?.length) {
+      const rows = (await syllabiQuery.refetch()).data ?? [];
+      if (!rows.length) {
         toast.message("No syllabi to export for the current filters");
         return;
       }
       exportSyllabiExcel(
-        syllabiQuery.data,
+        rows,
         `syllabus-${appliedFilters.academicYearBs || "export"}.xlsx`,
       );
       toast.success("Syllabus exported to Excel");
       return;
     }
     if (activeTab === "session-plan") {
-      if (!sessionPlansQuery.data?.length) {
+      const rows = (await sessionPlansQuery.refetch()).data ?? [];
+      if (!rows.length) {
         toast.message("No session plans to export for the current filters");
         return;
       }
       exportSessionPlansExcel(
-        sessionPlansQuery.data,
+        rows,
         `session-plans-${appliedFilters.academicYearBs || "export"}.xlsx`,
       );
       toast.success("Session Plans exported to Excel");
       return;
     }
     if (activeTab === "lesson-plan") {
-      if (!lessonPlansQuery.data?.length) {
+      const rows = (await lessonPlansQuery.refetch()).data ?? [];
+      if (!rows.length) {
         toast.message("No lesson plans to export for the current filters");
         return;
       }
       exportLessonPlansExcel(
-        lessonPlansQuery.data,
+        rows,
         `lesson-plans-${appliedFilters.academicYearBs || "export"}.xlsx`,
       );
       toast.success("Lesson Plans exported to Excel");
       return;
     }
     if (activeTab === "log-book") {
-      if (!logBookQuery.data?.length) {
+      const rows = (await logBookQuery.refetch()).data ?? [];
+      if (!rows.length) {
         toast.message("No log book entries to export for the current filters");
         return;
       }
       exportLogBookExcel(
-        logBookQuery.data,
+        rows,
         `log-book-${appliedFilters.academicYearBs || "export"}.xlsx`,
       );
       toast.success("Log Book exported to Excel");
@@ -566,7 +582,7 @@ export const AcademicManagementHub = () => {
         onChange={setDraftFilters}
         onSearch={handleSearch}
         onReset={handleReset}
-        onExportExcel={handleExportExcel}
+        onExportExcel={() => void handleExportExcel()}
         onExportPdf={handleExportPdf}
         onPrint={handlePrint}
         activeTab={activeTab}

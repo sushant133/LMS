@@ -104,6 +104,7 @@ import {
   recordApproval,
   sanitizeTeacherOwnedUpdate,
   serializeLessonPlan,
+  serializeLessonPlans,
   serializeLogBookEntry,
   serializeSessionPlan,
   serializeSyllabus,
@@ -1687,23 +1688,9 @@ export const listLessonPlans = asyncHandler(async (req: Request, res: Response) 
   await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   await applyOfficialPlanScopeToFilter(req, filter, filters.teacherId);
 
-  const plans = await AcademicLessonPlan.find(filter).sort({ updatedAt: -1 }).lean();
-  const serialized = (
-    await Promise.all(
-      plans.map(async (plan) => {
-        try {
-          return await serializeLessonPlan(plan._id.toString());
-        } catch (error) {
-          console.error(
-            "[academic-management/lesson-plans] serialize failed",
-            plan._id.toString(),
-            error
-          );
-          return null;
-        }
-      })
-    )
-  ).filter(Boolean);
+  const plans = await AcademicLessonPlan.find(filter).sort({ updatedAt: -1 }).select("_id").lean();
+  // Batched: a handful of queries for the whole list instead of ~5 per plan.
+  const serialized = await serializeLessonPlans(plans.map((plan) => plan._id.toString()));
   const rows = serialized.filter((plan) =>
     matchesKeyword(filters.keyword, [
       plan?.subject?.name,

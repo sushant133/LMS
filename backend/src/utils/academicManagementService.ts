@@ -3096,20 +3096,63 @@ export const serializeSyllabus = async (
   };
 };
 
-export const serializeLessonPlan = async (planId: string) => {
-  const plan = await AcademicLessonPlan.findById(planId)
+// ─── Lesson plan serialization (batched for list endpoints) ──────────────────
+const lessonPlansQuery = (filter: Record<string, unknown>) =>
+  AcademicLessonPlan.find(filter)
     .populate("subjectId", "name code")
     .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .lean();
+const lessonPlanItemsQuery = (filter: Record<string, unknown>) =>
+  AcademicLessonPlanItem.find(filter).sort({ serialNo: 1 }).lean();
+const sessionPlanUnitsByIdQuery = (ids: unknown[]) =>
+  AcademicSessionPlanUnit.find({ _id: { $in: ids } }).lean();
 
+type LeanLessonPlanDoc = Awaited<ReturnType<typeof lessonPlansQuery>>[number];
+type LeanLessonPlanItem = Awaited<ReturnType<typeof lessonPlanItemsQuery>>[number];
+type LeanSessionPlanUnit = Awaited<ReturnType<typeof sessionPlanUnitsByIdQuery>>[number];
+
+export const serializeLessonPlan = async (planId: string) => {
+  const [plan] = await lessonPlansQuery({ _id: planId });
   if (!plan) return null;
-
-  const items = await AcademicLessonPlanItem.find({ lessonPlanId: plan._id }).sort({ serialNo: 1 }).lean();
-  const units = await AcademicSessionPlanUnit.find({
-    _id: { $in: items.map((item) => item.sessionPlanUnitId).filter(Boolean) }
-  }).lean();
+  const items = await lessonPlanItemsQuery({ lessonPlanId: plan._id });
+  const units = await sessionPlanUnitsByIdQuery(
+    items.map((item) => item.sessionPlanUnitId).filter(Boolean)
+  );
   const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
+  return buildLessonPlanRecord(plan, items, unitMap);
+};
 
+/**
+ * Serialize many lesson plans with 3 queries in total instead of ~5 per plan.
+ * Output is identical to serializeLessonPlan and keeps the order of planIds.
+ */
+export const serializeLessonPlans = async (planIds: string[]) => {
+  if (planIds.length === 0) return [];
+  const plans = await lessonPlansQuery({ _id: { $in: planIds } });
+  const items = await lessonPlanItemsQuery({ lessonPlanId: { $in: plans.map((p) => p._id) } });
+  const units = await sessionPlanUnitsByIdQuery(
+    items.map((item) => item.sessionPlanUnitId).filter(Boolean)
+  );
+  const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
+  const itemsByPlan = new Map<string, LeanLessonPlanItem[]>();
+  for (const item of items) {
+    const key = item.lessonPlanId.toString();
+    const list = itemsByPlan.get(key) ?? [];
+    list.push(item);
+    itemsByPlan.set(key, list);
+  }
+  const planById = new Map(plans.map((plan) => [plan._id.toString(), plan]));
+  return planIds
+    .map((id) => planById.get(id))
+    .filter((plan): plan is LeanLessonPlanDoc => Boolean(plan))
+    .map((plan) => buildLessonPlanRecord(plan, itemsByPlan.get(plan._id.toString()) ?? [], unitMap));
+};
+
+const buildLessonPlanRecord = (
+  plan: LeanLessonPlanDoc,
+  items: LeanLessonPlanItem[],
+  unitMap: Map<string, LeanSessionPlanUnit>
+) => {
   const todayBs = getTodayBs();
   const enrichedItems = items.map((item) => {
     const unit = item.sessionPlanUnitId ? unitMap.get(item.sessionPlanUnitId.toString()) : undefined;
