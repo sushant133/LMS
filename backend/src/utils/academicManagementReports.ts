@@ -117,7 +117,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
   switch (reportType) {
     case "session-plan": {
       const plans = await AcademicSessionPlan.find(baseFilter).sort({ updatedAt: -1 }).lean();
-      const rows = await Promise.all(plans.map((plan) => serializeSessionPlan(plan._id.toString())));
+      const rows = await Promise.all(plans.map((plan) => serializeSessionPlan(plan._id.toString(), { readOnly: true })));
       return { title: "Session Plan Report", rows: rows.filter(Boolean) };
     }
     case "lesson-plan": {
@@ -180,7 +180,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
         .sort({ updatedAt: -1 })
         .lean();
       const serialized = (
-        await Promise.all(syllabi.map((row) => serializeSyllabus(row._id.toString())))
+        await Promise.all(syllabi.map((row) => serializeSyllabus(row._id.toString(), { readOnly: true })))
       ).filter(Boolean);
 
       if (serialized.length > 0) {

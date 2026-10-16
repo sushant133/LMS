@@ -63,6 +63,36 @@ import { actorCanAdministerModule, actorMayUseAdminWorkspaceScope } from "./work
 export const actorIsAcademicAdmin = async (req: Request): Promise<boolean> =>
   actorCanAdministerModule(req, "academic-management");
 
+// ─── Read-path progress sync (performance) ───────────────────────────────────
+/**
+ * List pages (syllabi, session plans, dashboard) used to re-run the full
+ * log-book → syllabus → session-plan progress sync for EVERY row on EVERY
+ * request. On a 1-core VPS that made those endpoints take 15–20 seconds.
+ *
+ * Write paths (log book create/update/delete/review, plan edits, approvals)
+ * still sync immediately as before. Read paths now only queue a background
+ * "self-healing" resync, at most once per READ_SYNC_TTL_MS per record, run one
+ * at a time so it never floods the CPU, and never block the HTTP response.
+ */
+const READ_SYNC_TTL_MS = 5 * 60 * 1000;
+const lastReadSyncAt = new Map<string, number>();
+let readSyncQueue: Promise<void> = Promise.resolve();
+
+export const scheduleReadSync = (key: string, task: () => Promise<unknown>): void => {
+  const last = lastReadSyncAt.get(key) ?? 0;
+  if (Date.now() - last < READ_SYNC_TTL_MS) return;
+  lastReadSyncAt.set(key, Date.now());
+  readSyncQueue = readSyncQueue.then(async () => {
+    try {
+      await task();
+    } catch (error) {
+      // Allow a retry on the next read instead of waiting out the TTL.
+      lastReadSyncAt.delete(key);
+      console.error("[read-sync] background sync failed", key, error);
+    }
+  });
+};
+
 /** Nepali month names aligned with BS month index 1–12 (Baisakh=1 … Chaitra=12). */
 export const NEPALI_MONTH_NAMES = [
   "Baisakh",
@@ -2838,7 +2868,10 @@ const formatAudit = (doc: { audit: Record<string, unknown>; createdAt?: Date; up
   verifiedAt: doc.audit.verifiedAt ? new Date(doc.audit.verifiedAt as Date).toISOString() : undefined
 });
 
-export const serializeSessionPlan = async (planId: string) => {
+export const serializeSessionPlan = async (
+  planId: string,
+  options: { readOnly?: boolean } = {}
+) => {
   const plan = await AcademicSessionPlan.findById(planId)
     .populate("subjectId", "name code")
     .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
@@ -2846,13 +2879,17 @@ export const serializeSessionPlan = async (planId: string) => {
 
   if (!plan) return null;
 
-  const units = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id }).sort({ unitNo: 1 }).lean();
-  await syncSessionPlanProgress(plan._id.toString());
-  const refreshedUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id })
+  if (options.readOnly) {
+    // List/detail reads: never block the response on a full progress resync.
+    const id = plan._id.toString();
+    scheduleReadSync(`session-plan:${id}`, () => syncSessionPlanProgress(id));
+  } else {
+    await syncSessionPlanProgress(plan._id.toString());
+  }
+  const displayUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id })
     .sort({ unitNo: 1 })
     .lean();
   const stats = await computeSessionPlanProgressStats(plan._id.toString());
-  const displayUnits = refreshedUnits.length > 0 ? refreshedUnits : units;
 
   return {
     _id: plan._id.toString(),
@@ -2903,7 +2940,10 @@ export const serializeSessionPlan = async (planId: string) => {
   };
 };
 
-export const serializeSyllabus = async (syllabusId: string) => {
+export const serializeSyllabus = async (
+  syllabusId: string,
+  options: { readOnly?: boolean } = {}
+) => {
   const plan = await AcademicSyllabus.findById(syllabusId)
     // masterSubjectId needed so teachers can match syllabus to assigned batch-instance subjects
     .populate("subjectId", "name code masterSubjectId")
@@ -2915,16 +2955,23 @@ export const serializeSyllabus = async (syllabusId: string) => {
   const schoolId = plan.schoolId.toString();
   // Auto-migrate legacy flat units → Chapter → Unit → SubUnit (idempotent)
   await ensureSyllabusHierarchy(syllabusId, schoolId);
-  try {
-    const subjectId =
-      plan.subjectId && typeof plan.subjectId === "object" && "_id" in plan.subjectId
-        ? String((plan.subjectId as { _id: unknown })._id)
-        : plan.subjectId
-          ? String(plan.subjectId)
-          : undefined;
-    await syncSyllabusCompletionFromLogBook(plan.schoolId, syllabusId, subjectId);
-  } catch (error) {
-    console.error("[serializeSyllabus] log-book completion sync failed", syllabusId, error);
+  const syncSubjectId =
+    plan.subjectId && typeof plan.subjectId === "object" && "_id" in plan.subjectId
+      ? String((plan.subjectId as { _id: unknown })._id)
+      : plan.subjectId
+        ? String(plan.subjectId)
+        : undefined;
+  if (options.readOnly) {
+    // List/detail reads: refresh completion in the background, throttled.
+    scheduleReadSync(`syllabus:${syllabusId}`, () =>
+      syncSyllabusCompletionFromLogBook(plan.schoolId, syllabusId, syncSubjectId)
+    );
+  } else {
+    try {
+      await syncSyllabusCompletionFromLogBook(plan.schoolId, syllabusId, syncSubjectId);
+    } catch (error) {
+      console.error("[serializeSyllabus] log-book completion sync failed", syllabusId, error);
+    }
   }
 
   const chapters = await loadSyllabusHierarchy(syllabusId);
@@ -3409,20 +3456,14 @@ const loadSyllabusCompletionRows = async (
   const syllabi = await AcademicSyllabus.find(match).select("_id subjectId").lean();
   if (syllabi.length === 0) return [];
 
+  // Dashboard is read-only: refresh completion in the background, throttled,
+  // instead of re-syncing every syllabus before the response can be sent.
   for (const syllabus of syllabi) {
-    try {
-      await syncSyllabusCompletionFromLogBook(
-        schoolId,
-        String(syllabus._id),
-        syllabus.subjectId ? String(syllabus.subjectId) : undefined
-      );
-    } catch (error) {
-      console.error(
-        "[dashboard] syllabus completion sync failed",
-        String(syllabus._id),
-        error
-      );
-    }
+    const id = String(syllabus._id);
+    const subjectId = syllabus.subjectId ? String(syllabus.subjectId) : undefined;
+    scheduleReadSync(`syllabus:${id}`, () =>
+      syncSyllabusCompletionFromLogBook(schoolId, id, subjectId)
+    );
   }
 
   const syllabusIds = syllabi.map((row) => row._id);

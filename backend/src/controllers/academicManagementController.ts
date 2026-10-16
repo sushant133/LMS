@@ -355,7 +355,7 @@ export const listSessionPlans = asyncHandler(async (req: Request, res: Response)
   await applyOfficialPlanScopeToFilter(req, filter, filters.teacherId);
 
   const plans = await AcademicSessionPlan.find(filter).sort({ updatedAt: -1 }).lean();
-  const serialized = (await Promise.all(plans.map((plan) => serializeSessionPlan(plan._id.toString())))).filter(Boolean);
+  const serialized = (await Promise.all(plans.map((plan) => serializeSessionPlan(plan._id.toString(), { readOnly: true })))).filter(Boolean);
   const rows = serialized.filter((plan) =>
     matchesKeyword(filters.keyword, [
       plan?.subject?.name,
@@ -382,7 +382,7 @@ export const getSessionPlan = asyncHandler(async (req: Request, res: Response) =
     "session plans"
   );
 
-  const serialized = await serializeSessionPlan(plan._id.toString());
+  const serialized = await serializeSessionPlan(plan._id.toString(), { readOnly: true });
   return sendSuccess(res, "Session plan fetched", serialized);
 });
 
@@ -785,7 +785,7 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
     await Promise.all(
       rows.map(async (row) => {
         try {
-          return await serializeSyllabus(row._id.toString());
+          return await serializeSyllabus(row._id.toString(), { readOnly: true });
         } catch (error) {
           console.error("[listSyllabi] serialize failed", String(row._id), error);
           return null;
@@ -979,7 +979,7 @@ export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
     subjectId: plan.subjectId.toString()
   });
 
-  const serialized = await serializeSyllabus(plan._id.toString());
+  const serialized = await serializeSyllabus(plan._id.toString(), { readOnly: true });
   return sendSuccess(res, "Syllabus fetched", serialized);
 });
 

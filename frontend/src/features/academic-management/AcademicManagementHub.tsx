@@ -123,6 +123,22 @@ export const AcademicManagementHub = () => {
   const tabs = allTabs.filter((tab) => !tab.adminOnly || canSyllabusOversight);
 
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  /**
+   * Performance: each panel loads its own (heavy) data as soon as it mounts.
+   * Mounting every tab up front made opening the Dashboard also load Syllabus,
+   * Session Plan, Lesson Plan, Log Book and Reports on a 1-core server.
+   * Mount a panel the first time its tab is opened, then keep it mounted so
+   * unsaved form state survives tab switches.
+   */
+  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(
+    () => new Set<Tab>(["dashboard"]),
+  );
+  useEffect(() => {
+    setVisitedTabs((current) =>
+      current.has(activeTab) ? current : new Set(current).add(activeTab),
+    );
+  }, [activeTab]);
+  const shouldMount = (tab: Tab) => activeTab === tab || visitedTabs.has(tab);
   const [draftFilters, setDraftFilters] = useState<AcademicManagementFilters>(
     defaultAcademicFilters(),
   );
@@ -144,6 +160,15 @@ export const AcademicManagementHub = () => {
     settingsQuery.data?.academicYearBs ||
     user?.school?.academicYearBs ||
     "";
+
+  /**
+   * Performance: wait until the default academic year is applied before any
+   * list loads. Otherwise every list loaded once without the year and again
+   * with it — every heavy request ran twice on each page open.
+   */
+  const filtersReady =
+    !settingsQuery.isLoading &&
+    (!institutionAcademicYearBs || Boolean(appliedFilters.academicYearBs));
 
   // Teachers use /teacher/scope for assigned batch/year/subject lists (no admin matrix dependency).
   const classesQuery = useQuery({
@@ -242,7 +267,7 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: activeTab === "dashboard",
+    enabled: filtersReady && activeTab === "dashboard",
   });
 
   const syllabiQuery = useQuery({
@@ -253,7 +278,7 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: activeTab === "syllabus",
+    enabled: filtersReady && activeTab === "syllabus",
   });
 
   const sessionPlansQuery = useQuery({
@@ -264,7 +289,7 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: activeTab === "session-plan",
+    enabled: filtersReady && activeTab === "session-plan",
   });
 
   const lessonPlansQuery = useQuery({
@@ -275,7 +300,7 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: activeTab === "lesson-plan",
+    enabled: filtersReady && activeTab === "lesson-plan",
   });
 
   const logBookQuery = useQuery({
@@ -286,7 +311,7 @@ export const AcademicManagementHub = () => {
           params: academicListParams,
         }),
       ),
-    enabled: activeTab === "log-book",
+    enabled: filtersReady && activeTab === "log-book",
   });
 
   useEffect(() => {
@@ -591,6 +616,7 @@ export const AcademicManagementHub = () => {
         />
       </div>
       <div className={cn(activeTab === "syllabus" ? "block" : "hidden")}>
+        {filtersReady && shouldMount("syllabus") ? (
         <SyllabusPanel
           filters={appliedFilters}
           subjects={subjects}
@@ -600,8 +626,10 @@ export const AcademicManagementHub = () => {
           isAdminView={isAdmin}
           {...hierarchyProps}
         />
+        ) : null}
       </div>
       <div className={cn(activeTab === "session-plan" ? "block" : "hidden")}>
+        {filtersReady && shouldMount("session-plan") ? (
         <SessionPlanPanel
           filters={appliedFilters}
           subjects={subjects}
@@ -611,8 +639,10 @@ export const AcademicManagementHub = () => {
           isAdminView={isAdmin}
           {...hierarchyProps}
         />
+        ) : null}
       </div>
       <div className={cn(activeTab === "lesson-plan" ? "block" : "hidden")}>
+        {filtersReady && shouldMount("lesson-plan") ? (
         <LessonPlanPanel
           filters={appliedFilters}
           subjects={subjects}
@@ -622,8 +652,10 @@ export const AcademicManagementHub = () => {
           isAdminView={isAdmin}
           {...hierarchyProps}
         />
+        ) : null}
       </div>
       <div className={cn(activeTab === "log-book" ? "block" : "hidden")}>
+        {filtersReady && shouldMount("log-book") ? (
         <LogBookPanel
           filters={appliedFilters}
           teacherId={teacherId}
@@ -634,6 +666,7 @@ export const AcademicManagementHub = () => {
           isAdminView={isAdmin}
           {...hierarchyProps}
         />
+        ) : null}
       </div>
       {canSyllabusOversight && activeTab === "syllabus-oversight" ? (
         <SyllabusOversightPanel
@@ -645,7 +678,9 @@ export const AcademicManagementHub = () => {
         />
       ) : null}
       <div className={cn(activeTab === "reports" ? "block" : "hidden")}>
-        <AcademicReportsPanel filters={appliedFilters} />
+        {filtersReady && shouldMount("reports") ? (
+          <AcademicReportsPanel filters={appliedFilters} />
+        ) : null}
       </div>
     </div>
   );
