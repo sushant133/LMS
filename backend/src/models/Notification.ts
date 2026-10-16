@@ -20,5 +20,8 @@ const notificationSchema = new Schema(
   { timestamps: true }
 );
 
+// The unread badge polls this for every logged-in user; also serves the list (newest first).
+notificationSchema.index({ recipientUserId: 1, read: 1, createdAt: -1 });
+
 export type NotificationDocument = InferSchemaType<typeof notificationSchema>;
 export const Notification = mongoose.model("Notification", notificationSchema);

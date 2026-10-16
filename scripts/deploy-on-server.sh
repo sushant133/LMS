@@ -28,11 +28,45 @@ fi
 echo "==> Build shared + backend (TypeScript → backend/dist)"
 (cd backend && npm run build)
 
-echo "==> Build frontend (Vite → frontend/dist)"
-(cd frontend && npm run build)
+echo "==> Build frontend (Vite → frontend/dist.new, then swap in)"
+# 1. Build into a separate folder, so the live site keeps serving the current
+#    build for the whole ~30 s the build takes (Vite empties its output folder
+#    first; building straight into dist/ broke the site during every deploy).
+# 2. Vite also deletes the previous build's hashed chunks. Tabs and installed
+#    PWAs still running the previous build then fail to lazy-load pages
+#    ("This page needs a refresh" / MIME type text/html). Keep earlier chunks
+#    in a stash and copy them into the new build; chunks are content-hashed,
+#    so old and new files never collide. Stash entries expire after
+#    ASSET_KEEP_DAYS (default 14).
+# 3. Swap folders with two renames, so there is no window with a half-built site.
+ASSET_STASH="$ROOT/frontend/.asset-stash"
+mkdir -p "$ASSET_STASH"
+if [[ -d frontend/dist/assets ]]; then
+  cp -p frontend/dist/assets/* "$ASSET_STASH"/ 2>/dev/null || true
+fi
+rm -rf frontend/dist.new
+(cd frontend && npm run build -- --outDir dist.new)
+if [[ ! -f frontend/dist.new/index.html ]]; then
+  echo "!! Frontend build produced no index.html — live site left unchanged." >&2
+  exit 1
+fi
+find "$ASSET_STASH" -type f -mtime +"${ASSET_KEEP_DAYS:-14}" -delete 2>/dev/null || true
+cp -p --update=none "$ASSET_STASH"/* frontend/dist.new/assets/ 2>/dev/null \
+  || cp -pn "$ASSET_STASH"/* frontend/dist.new/assets/ 2>/dev/null || true
+echo "    Kept $(ls "$ASSET_STASH" | wc -l) earlier asset files for open tabs"
+rm -rf frontend/dist.prev
+if [[ -d frontend/dist ]]; then mv frontend/dist frontend/dist.prev; fi
+mv frontend/dist.new frontend/dist
+echo "    Previous build kept at frontend/dist.prev (instant rollback:"
+echo "      mv frontend/dist frontend/dist.bad && mv frontend/dist.prev frontend/dist)"
 
 # Restart Node API so new backend/dist is loaded
+# Default to the LMS API only, so other apps on this VPS (e.g. project-backend for
+# phit.com.np) are not restarted by an LMS deploy. Override with PM2_APP_NAME.
 PM2_NAME="${PM2_APP_NAME:-}"
+if [[ -z "$PM2_NAME" ]] && command -v pm2 >/dev/null 2>&1 && pm2 describe lms-backend >/dev/null 2>&1; then
+  PM2_NAME="lms-backend"
+fi
 if command -v pm2 >/dev/null 2>&1; then
   if [[ -n "$PM2_NAME" ]]; then
     echo "==> pm2 restart $PM2_NAME"

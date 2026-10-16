@@ -105,6 +105,7 @@ import {
   sanitizeTeacherOwnedUpdate,
   serializeLessonPlan,
   serializeLessonPlans,
+  serializeLogBookEntries,
   serializeLogBookEntry,
   serializeSessionPlan,
   serializeSyllabus,
@@ -2178,7 +2179,7 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
   }
 
   const entries = await AcademicLogBookEntry.find(filter).sort({ dateBs: -1, periodNumber: 1 }).lean();
-  const serialized = (await Promise.all(entries.map((entry) => serializeLogBookEntry(entry._id.toString())))).filter(Boolean);
+  const serialized = await serializeLogBookEntries(entries.map((entry) => entry._id.toString()));
   const rows = serialized.filter((entry) =>
     matchesKeyword(filters.keyword, [
       entry?.topicCovered,

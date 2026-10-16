@@ -100,5 +100,11 @@ entrySchema.index(
   { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
+// Read-performance indexes (non-unique): progress sync counts entries per lesson
+// item / sub-unit, and syllabus completion reads a subject's entries per year.
+entrySchema.index({ lessonPlanItemId: 1, isDeleted: 1 });
+entrySchema.index({ syllabusSubUnitIds: 1 });
+entrySchema.index({ schoolId: 1, subjectId: 1, academicYearBs: 1 });
+
 export type AcademicLogBookEntryDocument = InferSchemaType<typeof entrySchema>;
 export const AcademicLogBookEntry = mongoose.model("AcademicLogBookEntry", entrySchema);

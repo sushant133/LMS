@@ -66,5 +66,8 @@ lessonPlanSchema.index(
   { unique: true, partialFilterExpression: { isDeleted: false, batchId: { $exists: true }, startDateBs: { $gt: "" } } }
 );
 
+// Lookups by session plan (progress sync, coverage) — non-unique, read performance only.
+lessonPlanSchema.index({ sessionPlanId: 1 });
+
 export type AcademicLessonPlanDocument = InferSchemaType<typeof lessonPlanSchema>;
 export const AcademicLessonPlan = mongoose.model("AcademicLessonPlan", lessonPlanSchema);

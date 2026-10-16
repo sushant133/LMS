@@ -656,7 +656,9 @@ export const getSyllabusOversightDetail = async (
   ]);
 
   const sessionPlanRows = (
-    await Promise.all(sessionPlans.map((plan) => serializeSessionPlan(plan._id.toString())))
+    await Promise.all(
+      sessionPlans.map((plan) => serializeSessionPlan(plan._id.toString(), { readOnly: true }))
+    )
   ).filter(Boolean);
 
   let logBookTeacherEntries = 0;

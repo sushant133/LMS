@@ -21,3 +21,10 @@ Desktop.ini
 backend/secrets/
 **/firebase-service-account.json
 *-firebase-adminsdk-*.json
+
+# Previous builds' hashed chunks kept by scripts/deploy-on-server.sh
+frontend/.asset-stash/
+frontend/dist.bak/
+frontend/dist.new/
+frontend/dist.prev/
+*.bak

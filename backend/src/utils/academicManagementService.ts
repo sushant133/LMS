@@ -3293,13 +3293,31 @@ const buildLessonPlanRecord = (
   };
 };
 
-export const serializeLogBookEntry = async (entryId: string) => {
-  const entry = await AcademicLogBookEntry.findById(entryId)
+const logBookEntriesQuery = (filter: Record<string, unknown>) =>
+  AcademicLogBookEntry.find(filter)
     .populate("subjectId", "name code")
     .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .lean();
+type LeanLogBookEntryDoc = Awaited<ReturnType<typeof logBookEntriesQuery>>[number];
 
+export const serializeLogBookEntry = async (entryId: string) => {
+  const [entry] = await logBookEntriesQuery({ _id: entryId });
   if (!entry) return null;
+  return buildLogBookEntryRecord(entry);
+};
+
+/** Serialize many log book entries with one query; keeps the order of entryIds. */
+export const serializeLogBookEntries = async (entryIds: string[]) => {
+  if (entryIds.length === 0) return [];
+  const entries = await logBookEntriesQuery({ _id: { $in: entryIds } });
+  const byId = new Map(entries.map((entry) => [entry._id.toString(), entry]));
+  return entryIds
+    .map((id) => byId.get(id))
+    .filter((entry): entry is LeanLogBookEntryDoc => Boolean(entry))
+    .map((entry) => buildLogBookEntryRecord(entry));
+};
+
+const buildLogBookEntryRecord = (entry: LeanLogBookEntryDoc) => {
 
   const entryAny = entry as {
     subUnitTitle?: string;

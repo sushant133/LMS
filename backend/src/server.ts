@@ -63,7 +63,14 @@ app.use(originCheck);
 
 // Development: detailed logs. Production: Apache combined (no sensitive bodies).
 if (env.NODE_ENV === "production") {
-  app.use(morgan("combined", { skip: (req) => req.url === "/api/health" }));
+  // "combined" plus response time, so slow endpoints can be found from the PM2 log:
+//   grep -oE '"(GET|POST|PUT|PATCH|DELETE) [^ ?"]+.* [0-9.]+ ms$' ~/.pm2/logs/lms-backend-out.log
+app.use(
+  morgan(
+    ':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" :response-time ms',
+    { skip: (req) => req.url === "/api/health" }
+  )
+);
 } else if (env.LOG_LEVEL === "debug" || env.LOG_LEVEL === "info") {
   app.use(morgan("dev"));
 }

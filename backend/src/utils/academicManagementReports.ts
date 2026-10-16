@@ -15,8 +15,8 @@ import {
   buildAcademicFilter,
   computeItemStatus,
   expandCurriculumSubjectIds,
-  serializeLessonPlan,
-  serializeLogBookEntry,
+  serializeLessonPlans,
+  serializeLogBookEntries,
   serializeSessionPlan
 } from "./academicManagementService.js";
 import { getDayOfWeekFromBs, getTodayBs } from "./nepaliDate.js";
@@ -122,13 +122,13 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
     }
     case "lesson-plan": {
       const plans = await AcademicLessonPlan.find(baseFilter).sort({ updatedAt: -1 }).lean();
-      const rows = await Promise.all(plans.map((plan) => serializeLessonPlan(plan._id.toString())));
+      const rows = await serializeLessonPlans(plans.map((plan) => plan._id.toString()));
       return { title: "Lesson Plan Report", rows: rows.filter(Boolean) };
     }
     case "teacher-lesson-plan": {
       if (!filters.teacherId) throw new ApiError(400, "teacherId is required for this report");
       const plans = await AcademicLessonPlan.find({ ...baseFilter, teacherId: filters.teacherId }).lean();
-      const rows = await Promise.all(plans.map((plan) => serializeLessonPlan(plan._id.toString())));
+      const rows = await serializeLessonPlans(plans.map((plan) => plan._id.toString()));
       const names = await teacherNameMap([filters.teacherId]);
       return { title: `Teacher Lesson Plan — ${names.get(filters.teacherId) ?? "Teacher"}`, rows: rows.filter(Boolean) };
     }
@@ -137,7 +137,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       const logFilter = { ...baseFilter, teacherId: filters.teacherId };
       delete (logFilter as Record<string, unknown>).status;
       const entries = await AcademicLogBookEntry.find(logFilter).sort({ dateBs: -1 }).lean();
-      const rows = await Promise.all(entries.map((entry) => serializeLogBookEntry(entry._id.toString())));
+      const rows = await serializeLogBookEntries(entries.map((entry) => entry._id.toString()));
       const names = await teacherNameMap([filters.teacherId]);
       return { title: `Teacher Log Book — ${names.get(filters.teacherId) ?? "Teacher"}`, rows: rows.filter(Boolean) };
     }
@@ -152,7 +152,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
         };
       }
       const entries = await AcademicLogBookEntry.find(logFilter).sort({ dateBs: -1 }).lean();
-      const rows = await Promise.all(entries.map((entry) => serializeLogBookEntry(entry._id.toString())));
+      const rows = await serializeLogBookEntries(entries.map((entry) => entry._id.toString()));
       return { title: "Monthly Teaching Report", rows: rows.filter(Boolean) };
     }
     case "subject-progress": {
@@ -306,7 +306,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       delete logFilter.status;
       if (filters.dateFrom) logFilter.dateBs = filters.dateFrom;
       const entries = await AcademicLogBookEntry.find(logFilter).sort({ periodNumber: 1 }).lean();
-      const rows = await Promise.all(entries.map((entry) => serializeLogBookEntry(entry._id.toString())));
+      const rows = await serializeLogBookEntries(entries.map((entry) => entry._id.toString()));
       return { title: "Daily Teaching Report", rows: rows.filter(Boolean) };
     }
     case "pending-log-book": {
