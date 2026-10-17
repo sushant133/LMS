@@ -19,14 +19,61 @@ import { isChunkLoadError } from "lib/staleChunkRecovery";
  */
 const RETRY_DELAYS_MS = [350, 1200];
 
+/** Every lazily loaded page, so they can be warmed up in the background. */
+const routeChunkFactories = new Set<() => Promise<unknown>>();
+let prefetchStarted = false;
+
+/**
+ * Download every page's code in the background once the app is idle, so the
+ * first click on any section renders immediately instead of waiting for its
+ * chunk. Chunks are content-hashed and cached by the browser / service worker,
+ * so this costs one download per deploy. Runs one chunk at a time, pauses
+ * between them, and is skipped on data-saver or 2G connections.
+ */
+export const prefetchRouteChunks = (): void => {
+  if (prefetchStarted || typeof window === "undefined") return;
+  prefetchStarted = true;
+
+  const connection = (
+    navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }
+  ).connection;
+  if (connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType ?? "")) {
+    return;
+  }
+
+  const whenIdle = (callback: () => void) => {
+    const idle = (
+      window as Window & {
+        requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+      }
+    ).requestIdleCallback;
+    if (idle) idle(callback, { timeout: 2000 });
+    else window.setTimeout(callback, 300);
+  };
+
+  const queue = [...routeChunkFactories];
+  const next = () => {
+    const factory = queue.shift();
+    if (!factory) return;
+    factory()
+      .catch(() => undefined) // a failed warm-up is harmless; the real click retries
+      .finally(() => window.setTimeout(() => whenIdle(next), 150));
+  };
+  // Let the current page finish loading its own data first.
+  window.setTimeout(() => whenIdle(next), 2500);
+};
+
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 // Mirrors React.lazy's own signature so any component shape can be wrapped.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const lazyWithRetry = <T extends ComponentType<any>>(
   factory: () => Promise<{ default: T }>,
-) =>
-  lazy(async () => {
+) => {
+  routeChunkFactories.add(factory);
+  return lazy(async () => {
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
@@ -50,3 +97,4 @@ export const lazyWithRetry = <T extends ComponentType<any>>(
 
     throw lastError;
   });
+};

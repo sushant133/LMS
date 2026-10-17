@@ -27,6 +27,7 @@ import {
   type UserRole,
 } from "@phit-erp/shared";
 import { ErrorBoundary } from "components/shared/ErrorBoundary";
+import { prefetchRouteChunks } from "lib/lazyWithRetry";
 import { LoadingState, PageLoadingState } from "components/shared/LoadingState";
 import { ReadOnlyBanner } from "components/shared/ReadOnlyBanner";
 import { useTranslation } from "react-i18next";
@@ -489,6 +490,11 @@ export const AppLayout = () => {
   useEffect(() => {
     setNativeSystemBarStyle("light");
   }, []);
+
+  // Warm up every section's code in the background so sidebar clicks open instantly.
+  useEffect(() => {
+    if (user) prefetchRouteChunks();
+  }, [user]);
 
   /** Settings name/address are preferred for print/PDF headers when available. */
   const printSettingsQuery = useQuery({

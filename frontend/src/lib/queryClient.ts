@@ -24,7 +24,10 @@ export const queryClient: QueryClient = new QueryClient({
       refetchOnWindowFocus: false,
       // With the default of 0, every page visit / tab switch / remount re-downloaded
       // the same lists (students, batches, settings…). Reuse them for 30s instead.
-      staleTime: 30_000
+      staleTime: 30_000,
+      // Keep each section's last data in memory for 30 min (default 5). Going back
+      // to a section then shows it instantly and refreshes quietly in the background.
+      gcTime: 30 * 60_000
     }
   }
 });
