@@ -18,6 +18,7 @@ import {
   STUDENT_ACADEMIC_STATUSES,
   USER_ROLES
 } from "./constants.js";
+import { studentAudienceSchema } from "./student-audience.js";
 
 export const objectIdSchema = z.string().trim().regex(/^[a-f\d]{24}$/i, "Invalid identifier");
 
@@ -813,7 +814,9 @@ export const noticeSchema = z.object({
   expiresAtBs: bsDateSchema.optional().or(z.literal("")),
   subjectId: objectIdSchema.optional(),
   classId: objectIdSchema.optional(),
-  sectionId: objectIdSchema.optional()
+  sectionId: objectIdSchema.optional(),
+  /** Batch / year / status filter for the Students audience */
+  studentAudience: studentAudienceSchema.optional()
 });
 
 export const bannerSchema = z.object({
@@ -822,6 +825,8 @@ export const bannerSchema = z.object({
   isActive: z.boolean().default(true),
   /** Who can see this banner on their dashboard (independent of notice visibility). */
   visibleTo: z.array(z.enum(BANNER_TARGET_ROLES)).min(1, "Select at least one audience"),
+  /** Batch / year / status filter for the Students audience */
+  studentAudience: studentAudienceSchema.optional(),
   fileSizeBytes: z.number().optional(),
   width: z.number().optional(),
   height: z.number().optional(),

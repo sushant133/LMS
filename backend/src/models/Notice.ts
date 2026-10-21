@@ -1,5 +1,6 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 import { USER_ROLES } from "@phit-erp/shared";
+import { studentAudienceSubSchema } from "./studentAudienceSchema.js";
 
 const noticeImageSchema = new Schema(
   {
@@ -25,6 +26,7 @@ const noticeSchema = new Schema(
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject" },
     classId: { type: Schema.Types.ObjectId, ref: "SchoolClass" },
     sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
+    studentAudience: { type: studentAudienceSubSchema },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     /**

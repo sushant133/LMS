@@ -25,7 +25,9 @@ import {
 } from "features/exams/examDefaults";
 import {
   APPROVE_ADMIN_ONLY_MESSAGE,
+  DEPARTMENT_ADMIN_ONLY_MESSAGE,
   useCanApproveRecords,
+  useCanDeleteRecords,
 } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
@@ -76,6 +78,7 @@ export const ResultReviewPanel = ({
   compact = false,
 }: ResultReviewPanelProps) => {
   const canPerformApprove = useCanApproveRecords();
+  const canDeleteRecords = useCanDeleteRecords();
   const [statusFilter, setStatusFilter] = useState("PENDING_ADMIN_REVIEW");
   const [selectedSubmissionId, setSelectedSubmissionId] = useState("");
   const [reviewComments, setReviewComments] = useState("");
@@ -791,7 +794,8 @@ export const ResultReviewPanel = ({
 
                 <Button
                   variant="destructive"
-                  disabled={deleteSubmissionMutation.isPending}
+                  disabled={!canDeleteRecords || deleteSubmissionMutation.isPending}
+                  title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                   onClick={() => {
                     const label = selectedSubmission.scopeLabel;
                     const first = window.confirm(

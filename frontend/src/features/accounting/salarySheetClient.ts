@@ -180,6 +180,8 @@ const emptyBucket = (): AttendanceBucket => ({
 });
 
 const applyStatus = (b: AttendanceBucket, status: string) => {
+  // Off = not scheduled that day: neither paid as present nor deducted
+  if (status === "OFF") return;
   b.recorded += 1;
   switch (status) {
     case "PRESENT":

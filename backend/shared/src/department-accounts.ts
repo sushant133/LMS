@@ -21,7 +21,8 @@ import { portalLoginIdSchema, portalPasswordSchema } from "./schemas.js";
  *
  * Each account is an Administrator (COLLEGE_ADMIN) login confined to one
  * department, so every existing admin screen and API behaves exactly as it
- * does for the Administrator — only inside that department.
+ * does for the Administrator — only inside that department. Accounting and
+ * Examination work at staff level (see `isDepartmentAdminOnlyRequest`).
  */
 export const DEPARTMENT_ACCOUNT_TYPES = ["ACCOUNTING", "EXAMINATION", "ACADEMICS"] as const;
 
@@ -34,8 +35,10 @@ export const DEPARTMENT_ACCOUNT_LABELS: Record<DepartmentAccountType, string> = 
 };
 
 export const DEPARTMENT_ACCOUNT_DESCRIPTIONS: Record<DepartmentAccountType, string> = {
-  ACCOUNTING: "Accounting, fee management, finance archive, HR payroll, and the academic calendar.",
-  EXAMINATION: "College exams, routines, marks, results, marksheets, CTEVT exam fees, and the academic calendar.",
+  ACCOUNTING:
+    "Accounting, fee management, finance archive, HR payroll, and the academic calendar. Staff-level: delete, approve and setup stay with the Administrator.",
+  EXAMINATION:
+    "College exams, routines, marks, results, marksheets, CTEVT exam fees, and the academic calendar. Staff-level: delete, approve and publish stay with the Administrator.",
   ACADEMICS:
     "Everything academic — students, staff, attendance, academic structure, plans, timetable, library, lab, notices — except Accounting and Examination."
 };
@@ -212,6 +215,75 @@ export const canDepartmentAccessApi = (
   const mode = DEPARTMENT_ACCOUNT_MODULES[type][moduleKey];
   if (mode === "WRITE") return true;
   if (mode === "READ_ONLY") return isRead;
+  return false;
+};
+
+/**
+ * Departments whose account works at staff level, like an Accountant or
+ * exam-office staff: they view, create and edit, but deleting, approving and
+ * setup stay with the Administrator.
+ */
+export const STAFF_LEVEL_DEPARTMENT_ACCOUNTS: readonly DepartmentAccountType[] = [
+  "ACCOUNTING",
+  "EXAMINATION"
+];
+
+export const isStaffLevelDepartmentAccount = (value: unknown): value is DepartmentAccountType =>
+  isDepartmentAccountType(value) && STAFF_LEVEL_DEPARTMENT_ACCOUNTS.includes(value);
+
+export const DEPARTMENT_ADMIN_ONLY_MESSAGE =
+  "Only the Administrator can delete, approve, publish, lock or change setup. Contact the Administrator.";
+
+/** Approve / reject / publish / lock / reverse style actions (last path segments). */
+const DEPARTMENT_ADMIN_ACTION_PATTERN =
+  /\/(?:approve|unapprove|reject|return|review|edit-review|publish|unpublish|lock|unlock|reverse|revoke|void|dispose|close|delete|reset-password)(?:\/|$)/i;
+
+/** Leave / stock request status changes are approvals. */
+const DEPARTMENT_ADMIN_STATUS_PATTERN = /\/(?:leaves|stock-requests)\/[^/]+\/status(?:\/|$)/i;
+
+/** Setup screens Accountant staff cannot change (settings, chart of accounts, staff…). */
+const ACCOUNTING_ADMIN_ONLY_WRITE_PREFIXES = [
+  "/accounting/settings",
+  "/accounting/structures",
+  "/accounting/bank-accounts",
+  "/accounting/chart-of-accounts",
+  "/accounting/fiscal-years",
+  "/accounting/depreciation",
+  "/accounting/budgets",
+  "/accounting/accountants",
+  "/accounting/security-deposits",
+  "/accounting/salaries",
+  "/fees/structures",
+  "/finance/categories",
+  "/finance/staff-access"
+];
+
+/**
+ * True when a staff-level department account may not make this request
+ * because only the Administrator can: any delete, any approval-type action,
+ * editing a posted fee payment, and Accounting setup.
+ */
+export const isDepartmentAdminOnlyRequest = (
+  type: DepartmentAccountType,
+  method: string,
+  apiPath: string
+): boolean => {
+  if (!STAFF_LEVEL_DEPARTMENT_ACCOUNTS.includes(type)) return false;
+  const verb = method.toUpperCase();
+  if (["GET", "HEAD", "OPTIONS"].includes(verb)) return false;
+
+  const path = normalizeApiPath(apiPath);
+  // Own uploads / address lookups are not department records
+  if (DEPARTMENT_SHARED_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) return false;
+  if (verb === "DELETE") return true;
+  if (DEPARTMENT_ADMIN_ACTION_PATTERN.test(path)) return true;
+  if (DEPARTMENT_ADMIN_STATUS_PATTERN.test(path)) return true;
+
+  if (type === "ACCOUNTING") {
+    if (ACCOUNTING_ADMIN_ONLY_WRITE_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) return true;
+    // Editing a posted fee payment is a reversal of the books
+    if (verb === "PUT" && /^\/accounting\/collections\/[^/]+$/.test(path)) return true;
+  }
   return false;
 };
 

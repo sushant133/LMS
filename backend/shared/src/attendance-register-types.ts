@@ -163,5 +163,6 @@ export const ATTENDANCE_REGISTER_STATUS_LABELS: Record<string, string> = {
   NIGHT_DUTY: "Night Duty",
   EVENING_DUTY: "Evening Duty",
   MORNING_DUTY: "Morning Duty",
-  EMERGENCY_DUTY: "Emergency / Field Duty"
+  EMERGENCY_DUTY: "Emergency / Field Duty",
+  OFF: "Off"
 };

@@ -1,12 +1,19 @@
 import { ChevronDown, ChevronRight, BookOpen, GraduationCap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "components/ui/badge";
+import { useIsFullAdministrator } from "hooks/useModuleAccess";
 import { cn } from "lib/utils";
 import type {
   HierarchyFacultyNode,
   HierarchySubjectNode,
   HierarchyYearNode,
 } from "./academicHierarchyUtils";
+import {
+  FacultyRenameForm,
+  facultyValueOf,
+  SubjectMoveForm,
+  TreeRowMenu,
+} from "./FacultyTreeActions";
 
 interface AcademicYearSubjectTreeProps {
   /** Faculty → Year → Subject hierarchy (preferred). */
@@ -26,6 +33,8 @@ interface AcademicYearSubjectTreeProps {
   className?: string;
   /** Teacher-facing syllabus / official plans: never show a teacher name. */
   hideTeacherNames?: boolean;
+  /** Show the ⋮ menus (rename faculty, move subject). Administrator only. */
+  allowStructureEdits?: boolean;
 }
 
 export const AcademicYearSubjectTree = ({
@@ -39,7 +48,11 @@ export const AcademicYearSubjectTree = ({
   defaultExpandAll = true,
   className,
   hideTeacherNames = false,
+  allowStructureEdits = true,
 }: AcademicYearSubjectTreeProps) => {
+  const isFullAdmin = useIsFullAdministrator();
+  const [renamingFaculty, setRenamingFaculty] = useState<string | null>(null);
+  const [movingSubject, setMovingSubject] = useState<string | null>(null);
   const facultyNodes: HierarchyFacultyNode[] = useMemo(() => {
     if (faculties && faculties.length > 0) return faculties;
     if (hierarchy && hierarchy.length > 0) {
@@ -58,6 +71,8 @@ export const AcademicYearSubjectTree = ({
   const showFacultyLevel =
     facultyNodes.length > 1 ||
     (facultyNodes.length === 1 && facultyNodes[0]!.key !== "faculty:general");
+  // Rename / move only make sense once faculties are shown as their own level
+  const canEditStructure = allowStructureEdits && isFullAdmin && showFacultyLevel;
 
   const allFacultyKeys = useMemo(
     () => facultyNodes.map((f) => f.key),
@@ -136,26 +151,48 @@ export const AcademicYearSubjectTree = ({
             !showFacultyLevel || expandedFaculties.has(faculty.key);
           return (
             <li key={faculty.key}>
-              {showFacultyLevel ? (
-                <button
-                  type="button"
-                  onClick={() => toggleFaculty(faculty.key)}
-                  className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50 transition"
-                >
-                  {facultyOpen ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
-                  )}
-                  <GraduationCap className="h-4 w-4 shrink-0 text-brand-600" />
-                  <span className="font-semibold text-slate-900">
-                    {faculty.label}
-                  </span>
-                  <Badge className="ml-auto bg-slate-100 text-slate-700">
-                    {faculty.years.length} year
-                    {faculty.years.length === 1 ? "" : "s"}
-                  </Badge>
-                </button>
+              {showFacultyLevel && renamingFaculty === faculty.key ? (
+                <FacultyRenameForm
+                  facultyValue={facultyValueOf(faculty.key, faculty.label)}
+                  initialLabel={faculty.label}
+                  onClose={() => setRenamingFaculty(null)}
+                />
+              ) : showFacultyLevel ? (
+                <div className="flex items-center gap-1 pr-2 transition hover:bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={() => toggleFaculty(faculty.key)}
+                    className="flex min-w-0 flex-1 items-center gap-2 py-3 pl-4 text-left"
+                  >
+                    {facultyOpen ? (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                    )}
+                    <GraduationCap className="h-4 w-4 shrink-0 text-brand-600" />
+                    <span className="min-w-0 break-words font-semibold text-slate-900">
+                      {faculty.label}
+                    </span>
+                    <Badge className="ml-auto shrink-0 bg-slate-100 text-slate-700">
+                      {faculty.years.length} year
+                      {faculty.years.length === 1 ? "" : "s"}
+                    </Badge>
+                  </button>
+                  {canEditStructure ? (
+                    <TreeRowMenu
+                      label={`Options for ${faculty.label}`}
+                      items={[
+                        {
+                          label:
+                            faculty.key === "faculty:general"
+                              ? "Name this program"
+                              : "Rename",
+                          onSelect: () => setRenamingFaculty(faculty.key),
+                        },
+                      ]}
+                    />
+                  ) : null}
+                </div>
               ) : null}
 
               {facultyOpen ? (
@@ -201,8 +238,36 @@ export const AcademicYearSubjectTree = ({
                                 selectedYearKey === year.key &&
                                 (!selectedFacultyKey ||
                                   selectedFacultyKey === faculty.key);
+                              const subjectComposite = `${yearComposite}-${subject.subjectKey}`;
+                              const moveTargets = facultyNodes
+                                .filter(
+                                  (other) =>
+                                    other.key !== faculty.key &&
+                                    other.key !== "faculty:general",
+                                )
+                                .map((other) => ({
+                                  value: other.label,
+                                  label: other.label,
+                                }));
                               return (
-                                <li key={`${yearComposite}-${subject.subjectKey}`}>
+                                <li
+                                  key={subjectComposite}
+                                  className={cn(canEditStructure && "relative")}
+                                >
+                                  {canEditStructure ? (
+                                    <div className="absolute right-2 top-2 z-10">
+                                      <TreeRowMenu
+                                        label={`Options for ${subject.subjectName}`}
+                                        items={[
+                                          {
+                                            label: "Move to another faculty / program",
+                                            onSelect: () =>
+                                              setMovingSubject(subjectComposite),
+                                          },
+                                        ]}
+                                      />
+                                    </div>
+                                  ) : null}
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -215,6 +280,8 @@ export const AcademicYearSubjectTree = ({
                                     className={cn(
                                       "flex w-full items-start gap-2 py-2.5 text-left text-sm transition",
                                       showFacultyLevel ? "pl-14 pr-4" : "pl-10 pr-4",
+                                      // Room for the ⋮ menu
+                                      canEditStructure && "pr-10",
                                       active
                                         ? "bg-brand-50 text-brand-900 border-l-2 border-brand-600"
                                         : "hover:bg-white text-slate-700",
@@ -262,6 +329,22 @@ export const AcademicYearSubjectTree = ({
                                       </Badge>
                                     ) : null}
                                   </button>
+                                  {movingSubject === subjectComposite ? (
+                                    <SubjectMoveForm
+                                      className={cn(
+                                        "mb-2 mr-4",
+                                        showFacultyLevel ? "ml-14" : "ml-10",
+                                      )}
+                                      subjectName={subject.subjectName}
+                                      subjectIds={subject.subjectIds}
+                                      fromFaculty={facultyValueOf(
+                                        faculty.key,
+                                        faculty.label,
+                                      )}
+                                      faculties={moveTargets}
+                                      onClose={() => setMovingSubject(null)}
+                                    />
+                                  ) : null}
                                 </li>
                               );
                             })}

@@ -6,6 +6,7 @@ import {
   FINANCE_PAYMENT_METHODS,
   FINANCE_TRANSACTION_TYPES,
   canManageInstitution,
+  isStaffLevelDepartmentAccount,
   financeCategorySchema,
   financeTransactionSchema,
   isCollegeViewer,
@@ -121,7 +122,9 @@ const transactionTypeBadgeClass = (type: string) => {
 
 export const FinanceManager = () => {
   const { user } = useAuth();
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin =
+    !isStaffLevelDepartmentAccount(user?.departmentAccount) &&
+    canManageInstitution(user?.role ?? "");
   const isCollegeAdminUser = isCollegeViewer(user?.role ?? "");
   /** Staff with Admin-granted personal finance book (create + view only). */
   const isStaffFinanceUser =

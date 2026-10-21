@@ -289,6 +289,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   let studentDemographics: Array<{
     batchId?: string;
     yearId?: string;
+    academicStatus?: string;
     gender?: string;
     ethnicityCategory?: string;
     religion?: string;
@@ -357,12 +358,13 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     };
 
     if (college) {
-      const [years, batches, activeStudents, passedOutCount, alumniCount] =
+      const [years, batches, allStudents, passedOutCount, alumniCount] =
         await Promise.all([
           Year.find({ schoolId }).select("_id name level isActive batchId").lean(),
           Batch.find({ schoolId }).select("_id name").sort({ name: 1 }).lean(),
-          Student.find(activeStatusFilter)
-            .select("batchId yearId gender ethnicityCategory religion caste")
+          // Every student: a chosen batch shows all of its students, not only active ones
+          Student.find({ schoolId })
+            .select("batchId yearId academicStatus gender ethnicityCategory religion caste")
             .lean(),
           Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
           Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
@@ -385,17 +387,19 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       }> = [];
 
       studentDemographics = [];
-      for (const student of activeStudents) {
+      for (const student of allStudents) {
         const yearId = student.yearId ? student.yearId.toString() : "";
         const batchId = student.batchId ? student.batchId.toString() : "";
+        const academicStatus = student.academicStatus || "ACTIVE";
         const yearName = yearId ? yearNameById.get(yearId) : undefined;
-        if (yearName) {
+        if (yearName && academicStatus === "ACTIVE") {
           countsByYearName.set(yearName, (countsByYearName.get(yearName) ?? 0) + 1);
         }
-        // Full demographics for client batch/year filters (all active students)
+        // Full demographics for client batch/year filters (every student, any status)
         studentDemographics.push({
           batchId: batchId || undefined,
           yearId: yearId || undefined,
+          academicStatus,
           gender: student.gender ?? undefined,
           ethnicityCategory: student.ethnicityCategory ?? undefined,
           religion: student.religion ?? undefined,
@@ -403,6 +407,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         });
         // Default charts: students in currently active (running) academic years.
         // If no year is marked active, fall back to all ACTIVE students.
+        if (academicStatus !== "ACTIVE") continue;
         if (hasActiveYearFilter) {
           if (!yearId || !activeYearIds.has(yearId)) continue;
         }

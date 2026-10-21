@@ -111,8 +111,11 @@ import {
 } from "hooks/useNormalizedRole";
 import {
   APPROVE_ADMIN_ONLY_MESSAGE,
+  DEPARTMENT_ADMIN_ONLY_MESSAGE,
   useCanApproveRecords,
+  useCanDeleteRecords,
   useCanManageGrantedModule,
+  useIsStaffLevelDepartmentAccount,
 } from "hooks/useModuleAccess";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
@@ -448,6 +451,8 @@ const PublishByBatchYearPanel = ({
 };
 
 export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
+  const canDeleteRecords = useCanDeleteRecords();
+  const isStaffLevelDepartment = useIsStaffLevelDepartmentAccount();
   const { user } = useAuth();
   const role = useNormalizedRole();
   const isTeacher = userIsTeacher(user) || role === "TEACHER";
@@ -2014,7 +2019,8 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               <Button
                                 size="sm"
                                 variant="destructive"
-                                disabled={deleteExamMutation.isPending}
+                                disabled={!canDeleteRecords || deleteExamMutation.isPending}
+                                title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                                 onClick={() => {
                                   if (
                                     window.confirm(
@@ -2708,6 +2714,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                         );
                         const workflowStatus = submission?.status ?? "DRAFT";
                         const canDelete =
+                          !isStaffLevelDepartment &&
                           !resultsLockedExamIds.has(result.examId) &&
                           (workflowStatus === "DRAFT" ||
                             workflowStatus === "RETURNED_FOR_CORRECTION");
@@ -2846,7 +2853,8 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                         <Button
                           size="sm"
                           variant="destructive"
-                          disabled={deleteResultMutation.isPending}
+                          disabled={!canDeleteRecords || deleteResultMutation.isPending}
+                          title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                           onClick={() => {
                             const studentName =
                               viewFilteredStudents.find(
@@ -2975,7 +2983,8 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               <Button
                                 size="sm"
                                 variant="destructive"
-                                disabled={deleteResultMutation.isPending}
+                                disabled={!canDeleteRecords || deleteResultMutation.isPending}
+                                title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                                 onClick={() => {
                                   const studentName =
                                     resultStudents.find(

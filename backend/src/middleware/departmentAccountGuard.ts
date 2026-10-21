@@ -1,5 +1,10 @@
 import type { NextFunction, Request, Response } from "express";
-import { canDepartmentAccessApi, DEPARTMENT_ACCOUNT_LABELS } from "@phit-erp/shared";
+import {
+  canDepartmentAccessApi,
+  DEPARTMENT_ACCOUNT_LABELS,
+  DEPARTMENT_ADMIN_ONLY_MESSAGE,
+  isDepartmentAdminOnlyRequest
+} from "@phit-erp/shared";
 import { ApiError } from "../utils/apiError.js";
 import { isModuleAccessBypassPath, resolveRequestPath } from "../utils/moduleAccessService.js";
 
@@ -25,6 +30,11 @@ export const enforceDepartmentAccountScope = (
 
   // Own session, profile, password, notifications, shared academic lists, GET settings
   if (!managesOtherUser && isModuleAccessBypassPath(req.method, path)) return next();
+
+  // Accounting / Examination work at staff level: delete, approve and setup are Administrator-only
+  if (isDepartmentAdminOnlyRequest(department, req.method, path)) {
+    return next(new ApiError(403, DEPARTMENT_ADMIN_ONLY_MESSAGE));
+  }
 
   if (canDepartmentAccessApi(department, req.method, path)) return next();
 

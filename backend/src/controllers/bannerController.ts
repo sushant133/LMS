@@ -18,6 +18,12 @@ import {
   userMatchesBannerTarget
 } from "../utils/bannerScope.js";
 import { deleteReplacedMedia, deleteStoredMediaUrls } from "../utils/mediaCleanup.js";
+import {
+  getStudentAudienceProfile,
+  recordMatchesStudentProfile,
+  resolveStudentAudienceForSave,
+  toStudentAudience
+} from "../utils/studentAudience.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -28,6 +34,7 @@ type BannerLean = {
   thumbnailUrl?: string;
   isActive: boolean;
   visibleTo?: BannerTargetRole[] | string[];
+  studentAudience?: { batchIds?: Types.ObjectId[]; yearNames?: string[]; statuses?: string[] } | null;
   fileSizeBytes?: number;
   width?: number;
   height?: number;
@@ -55,6 +62,7 @@ const serializeBanner = (banner: BannerLean, creatorName?: string) => {
     thumbnailUrl: banner.thumbnailUrl,
     isActive: banner.isActive,
     visibleTo,
+    studentAudience: toStudentAudience(banner.studentAudience),
     fileSizeBytes: banner.fileSizeBytes,
     width: banner.width,
     height: banner.height,
@@ -89,8 +97,14 @@ const getActiveBannerDocs = async (schoolId: ReturnType<typeof tenantObjectId>) 
     .sort({ createdAt: -1 })
     .lean();
 
-const filterBannersForUser = (banners: BannerLean[], userRole: UserRole | undefined) =>
-  banners.filter((banner) => userMatchesBannerTarget(userRole, banner.visibleTo));
+/** Role audience, then (for students) the batch / year / status filter. */
+const filterBannersForUser = async (req: Request, banners: BannerLean[]) => {
+  const userRole = req.user?.role as UserRole | undefined;
+  const byRole = banners.filter((banner) => userMatchesBannerTarget(userRole, banner.visibleTo));
+  if (userRole !== "STUDENT" || !req.user) return byRole;
+  const profile = await getStudentAudienceProfile(tenantObjectId(req), req.user.userId);
+  return byRole.filter((banner) => recordMatchesStudentProfile(banner.studentAudience, profile));
+};
 
 export const listBanners = asyncHandler(async (req: Request, res: Response) => {
   const banners = await Banner.find(withTenantScope(req)).sort({ createdAt: -1 }).lean();
@@ -100,19 +114,21 @@ export const listBanners = asyncHandler(async (req: Request, res: Response) => {
 export const listActiveBanners = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
   const banners = await getActiveBannerDocs(schoolId);
-  const visible = filterBannersForUser(banners as BannerLean[], req.user?.role as UserRole | undefined);
+  const visible = await filterBannersForUser(req, banners as BannerLean[]);
   return sendSuccess(res, "Active banners fetched", await enrichBanners(visible));
 });
 
 export const createBanner = asyncHandler(async (req: Request, res: Response) => {
   const payload = bannerSchema.parse(req.body);
   const visibleTo = normalizeBannerVisibleTo(payload.visibleTo);
+  const studentAudience = resolveStudentAudienceForSave(visibleTo, payload.studentAudience);
 
   const banner = await Banner.create({
     imageUrl: payload.imageUrl,
     thumbnailUrl: payload.thumbnailUrl,
     isActive: payload.isActive,
     visibleTo,
+    studentAudience,
     fileSizeBytes: payload.fileSizeBytes,
     width: payload.width,
     height: payload.height,
@@ -133,6 +149,7 @@ export const createBanner = asyncHandler(async (req: Request, res: Response) => 
 export const updateBanner = asyncHandler(async (req: Request, res: Response) => {
   const payload = bannerSchema.parse(req.body);
   const visibleTo = normalizeBannerVisibleTo(payload.visibleTo);
+  const studentAudience = resolveStudentAudienceForSave(visibleTo, payload.studentAudience);
 
   const existing = await Banner.findOne(withTenantScope(req, { _id: req.params.id })).lean();
   if (!existing) {
@@ -146,6 +163,7 @@ export const updateBanner = asyncHandler(async (req: Request, res: Response) => 
       thumbnailUrl: payload.thumbnailUrl,
       isActive: payload.isActive,
       visibleTo,
+      studentAudience,
       fileSizeBytes: payload.fileSizeBytes,
       width: payload.width,
       height: payload.height,
@@ -245,9 +263,6 @@ export const dismissBanner = asyncHandler(async (_req: Request, res: Response) =
 export const getActiveBannersForUser = async (req: Request) => {
   const schoolId = tenantObjectId(req);
   const banners = await getActiveBannerDocs(schoolId);
-  const visible = filterBannersForUser(
-    banners as BannerLean[],
-    req.user?.role as UserRole | undefined
-  );
+  const visible = await filterBannersForUser(req, banners as BannerLean[]);
   return enrichBanners(visible);
 };

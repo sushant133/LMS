@@ -383,6 +383,8 @@ const applyPeriods = (bucket: AttendanceBucket, periods: unknown): void => {
 };
 
 const applyStatus = (bucket: AttendanceBucket, status: string): void => {
+  // Off = not scheduled that day: neither paid as present nor deducted
+  if (status === "OFF") return;
   bucket.daysRecorded += 1;
   switch (status) {
     case "PRESENT":

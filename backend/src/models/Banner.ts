@@ -1,5 +1,6 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 import { BANNER_TARGET_ROLES } from "@phit-erp/shared";
+import { studentAudienceSubSchema } from "./studentAudienceSchema.js";
 
 const bannerSchema = new Schema(
   {
@@ -16,6 +17,7 @@ const bannerSchema = new Schema(
         message: "Select at least one audience for Visible to"
       }
     },
+    studentAudience: { type: studentAudienceSubSchema },
     fileSizeBytes: { type: Number },
     width: { type: Number },
     height: { type: Number },

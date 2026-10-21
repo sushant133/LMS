@@ -1,3 +1,5 @@
+import type { StudentAudience } from "./student-audience.js";
+
 export type UserRole =
   | "SUPER_ADMIN"
   | "COLLEGE_ADMIN"
@@ -1309,6 +1311,7 @@ export interface NoticeRecord {
   subjectId?: string;
   classId?: string;
   sectionId?: string;
+  studentAudience?: StudentAudience;
   teacherId?: string;
   createdBy: string;
   createdAt?: string;
@@ -1323,6 +1326,7 @@ export interface BannerRecord {
   isActive: boolean;
   /** Roles/audiences that can see this banner on the dashboard. */
   visibleTo: BannerTargetRole[];
+  studentAudience?: StudentAudience;
   fileSizeBytes?: number;
   width?: number;
   height?: number;
@@ -1482,12 +1486,15 @@ export interface DashboardResponse {
   ethnicityChart?: Array<{ name: string; value: number }>;
   ethnicityChartScope?: string;
   /**
-   * Active-student rows for client-side batch/year filtering of demographics charts.
-   * College: batchId + yearId; school: classId + sectionId (mapped to same fields).
+   * Student rows for client-side batch/year filtering of demographics charts.
+   * College: every student (any status) so a chosen batch shows all its students;
+   * school: active students. classId + sectionId map to batchId + yearId.
    */
   studentDemographics?: Array<{
     batchId?: string;
     yearId?: string;
+    /** Academic status (college rows); missing means ACTIVE. */
+    academicStatus?: string;
     gender?: string;
     ethnicityCategory?: string;
     religion?: string;

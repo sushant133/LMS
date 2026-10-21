@@ -402,6 +402,9 @@ const printDemographicsCharts = (opts: {
   }
 };
 
+/** Batch filter value: every batch, including back and passed-out students. */
+const ALL_BATCHES = "__ALL__";
+
 /** Gender + ethnicity + religion donuts with batch / year (or class / section) filters. */
 const StudentDemographicsCharts = ({
   data,
@@ -417,13 +420,14 @@ const StudentDemographicsCharts = ({
   const rows = data.studentDemographics ?? [];
 
   const yearOptions = useMemo(() => {
-    if (!batchId) return years;
+    if (!batchId || batchId === ALL_BATCHES) return years;
     return years.filter((y) => !y.batchId || y.batchId === batchId);
   }, [batchId, years]);
 
+  // College rows include every status, so a chosen batch shows all of its students
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
-      if (batchId && r.batchId !== batchId) return false;
+      if (batchId && batchId !== ALL_BATCHES && r.batchId !== batchId) return false;
       if (yearId && r.yearId !== yearId) return false;
       return true;
     });
@@ -444,11 +448,18 @@ const StudentDemographicsCharts = ({
 
   const batchLabel = isCollege ? "Batch" : "Class";
   const yearLabel = isCollege ? "Year" : "Section";
-  const batchName = batches.find((b) => b._id === batchId)?.name;
+  const batchName =
+    batchId === ALL_BATCHES
+      ? `All ${batchLabel.toLowerCase()}s`
+      : batches.find((b) => b._id === batchId)?.name;
   const yearName = years.find((y) => y._id === yearId)?.name;
   const scopeParts = [
-    "Active students",
-    batchName ? `${batchLabel}: ${batchName}` : null,
+    isCollege ? "All students" : "Active students",
+    batchName
+      ? batchId === ALL_BATCHES
+        ? batchName
+        : `${batchLabel}: ${batchName}`
+      : null,
     yearName ? `${yearLabel}: ${yearName}` : null,
     !batchId && !yearId ? "all batches & years" : null,
   ].filter(Boolean);
@@ -540,7 +551,14 @@ const StudentDemographicsCharts = ({
                   setYearId("");
                 }}
               >
-                <option value="">All {batchLabel.toLowerCase()}s</option>
+                <option value="">
+                  {isCollege
+                    ? "Running batches (default)"
+                    : `All ${batchLabel.toLowerCase()}s`}
+                </option>
+                {isCollege ? (
+                  <option value={ALL_BATCHES}>All batches (every student)</option>
+                ) : null}
                 {batches.map((b) => (
                   <option key={b._id} value={b._id}>
                     {b.name}

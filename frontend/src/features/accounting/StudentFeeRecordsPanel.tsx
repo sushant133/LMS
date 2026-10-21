@@ -61,7 +61,11 @@ import {
   getPrintInstitutionBranding,
   PRINT_INSTITUTION_HEADER_CSS,
 } from "lib/printBranding";
-import { canManageInstitution, normalizeUserRole } from "lib/roles";
+import {
+  canManageInstitution,
+  isStaffLevelDepartmentAccount,
+  normalizeUserRole,
+} from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import {
   adDateToBsString,
@@ -248,6 +252,7 @@ const resolveCollectionStudentId = (
 const useCanEditFeePayments = (): boolean => {
   const { user } = useAuth();
   if (!user) return false;
+  if (isStaffLevelDepartmentAccount(user.departmentAccount)) return false;
   const roles = [user.role, ...(user.secondaryRoles ?? [])].filter(Boolean);
   return roles.some((role) => canManageInstitution(normalizeUserRole(String(role))));
 };

@@ -111,7 +111,10 @@ const summarize = (
     holiday: 0,
     pending: 0
   };
-  for (const e of entries) {
+  // Off = not on duty that day; left out of the day totals
+  const onDuty = entries.filter((e) => e.status !== "OFF");
+  s.total = onDuty.length;
+  for (const e of onDuty) {
     if (e.status === "PRESENT") s.present += 1;
     else if (e.status === "ABSENT") s.absent += 1;
     else if (e.status === "LEAVE") s.leave += 1;
@@ -909,6 +912,8 @@ export const getEmployeeAttendanceRegister = asyncHandler(
     for (const rec of records) {
       for (const e of (rec.entries as unknown as Array<Record<string, unknown>>)) {
         if (!isActiveEntry(e, activeIds)) continue;
+        // Off = not on duty that day: never listed in the register
+        if (String(e.status) === "OFF") continue;
         if (statusFilter && String(e.status) !== statusFilter) continue;
         if (deptFilter && !String(e.department || "").toLowerCase().includes(deptFilter)) {
           continue;
@@ -1031,7 +1036,7 @@ export const getMyEmployeeAttendance = asyncHandler(async (req: Request, res: Re
     else if (h.status === "OFFICIAL_DUTY") counts.officialDuty += 1;
     else if (h.status === "HOLIDAY") counts.holiday += 1;
   }
-  const totalMarked = filtered.length;
+  const totalMarked = filtered.filter((h) => h.status !== "OFF").length;
   const good =
     counts.present + counts.late + counts.halfDay + counts.officialDuty + counts.holiday;
   const attendancePercent =

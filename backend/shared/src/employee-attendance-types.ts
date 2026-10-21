@@ -13,9 +13,14 @@ export const EMPLOYEE_ATTENDANCE_STATUSES = [
   "HALF_DAY",
   "LATE",
   "OFFICIAL_DUTY",
-  "HOLIDAY"
+  "HOLIDAY",
+  /** Not on duty that day (day off / not scheduled). Left out of the register, totals and payroll. */
+  "OFF"
 ] as const;
 export type EmployeeAttendanceStatus = (typeof EMPLOYEE_ATTENDANCE_STATUSES)[number];
+
+export const isEmployeeOffStatus = (status?: string | null): boolean =>
+  String(status ?? "").toUpperCase() === "OFF";
 
 /**
  * Day-sheet lifecycle for teacher/staff attendance:

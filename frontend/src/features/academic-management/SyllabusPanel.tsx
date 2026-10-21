@@ -76,6 +76,12 @@ import {
   isPhoneViewport,
 } from "./AcademicSubjectMasterDetail";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
+import { AlreadyMadeNotice } from "./AlreadyMadeNotice";
+import {
+  findExistingForSubject,
+  useExistingAcademicRecords,
+  type ExistingAcademicRecord,
+} from "./existingAcademicRecords";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
@@ -217,6 +223,38 @@ export const SyllabusPanel = ({
     () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
     [form.subjectId, subjectOptions],
   );
+
+  /**
+   * Syllabi already made this academic year. Their subjects are left out of
+   * the create list (one syllabus per subject + year level) and listed as
+   * "Already made" with a link to the existing syllabus.
+   */
+  const existingQuery = useExistingAcademicRecords(
+    "syllabus",
+    form.academicYearBs,
+    showForm,
+  );
+  const existingForSubject = (subject: (typeof subjectOptions)[number]) =>
+    findExistingForSubject({
+      records: existingQuery.data ?? [],
+      subject,
+      scope: { yearId: form.yearId, classId: form.classId },
+      years,
+      kind: "syllabus",
+      excludeId: editingId,
+    });
+  const availableSubjectOptions = subjectOptions.filter(
+    (subject) =>
+      subject._id === subjectSelectValue || !existingForSubject(subject),
+  );
+  const alreadyMadeRecords = [
+    ...new Map(
+      subjectOptions
+        .map((subject) => existingForSubject(subject))
+        .filter((record): record is ExistingAcademicRecord => Boolean(record))
+        .map((record) => [record._id, record]),
+    ).values(),
+  ];
 
   const selectedFormSubject = useMemo(() => {
     if (!form.subjectId) return undefined;
@@ -1796,6 +1834,22 @@ export const SyllabusPanel = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
+            {!editingId ? (
+              <AlreadyMadeNotice
+                records={alreadyMadeRecords}
+                noun="syllabus"
+                lockedText="View it from the subject list"
+                canOpen={() => canManageStructure}
+                onOpen={(record) => {
+                  const listed = (plansQuery.data ?? []).find(
+                    (plan) => plan._id === record._id,
+                  );
+                  void openEditForm(
+                    listed ?? ({ _id: record._id } as AcademicSyllabusRecord),
+                  );
+                }}
+              />
+            ) : null}
             <div className="grid gap-3 md:grid-cols-3">
               {yearOptions.length > 0 ? (
                 <FormField label="Year">
@@ -1879,11 +1933,13 @@ export const SyllabusPanel = ({
                           ? formNepaliText
                             ? nepaliFormLabels.noSubjects
                             : "No subjects for this year"
+                          : availableSubjectOptions.length === 0
+                            ? "All subjects already have a syllabus"
                           : formNepaliText
                             ? nepaliFormLabels.selectSubject
                             : "Select subject"}
                   </option>
-                  {subjectOptions.map((subject) => (
+                  {availableSubjectOptions.map((subject) => (
                     <option key={subject._id} value={subject._id}>
                       {subject.name}
                       {subject.code ? ` (${subject.code})` : ""}

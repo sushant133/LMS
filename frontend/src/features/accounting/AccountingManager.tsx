@@ -7,6 +7,7 @@ import {
   ACCOUNTING_MANAGER_ROLES,
   hasAccountingPermission,
   isInstitutionAdmin,
+  isStaffLevelDepartmentAccount,
   normalizeUserRole,
   EXPENSE_CATEGORIES,
   FEE_TYPES,
@@ -411,18 +412,20 @@ export const AccountingManager = () => {
   /**
    * Institution admin from primary or secondary roles — never demote Super Admin /
    * College Admin just because finance "normalizedRole" resolved to ACCOUNTANT.
+   * The Accounting Department Account works at Accountant level.
    */
   const primaryRole = normalizeUserRole(user?.role ?? "");
   const isAdmin =
-    primaryRole === "SUPER_ADMIN" ||
-    primaryRole === "COLLEGE_ADMIN" ||
-    isInstitutionAdmin(primaryRole) ||
-    allRoles.some(
-      (r) =>
-        r === "SUPER_ADMIN" ||
-        r === "COLLEGE_ADMIN" ||
-        isInstitutionAdmin(r),
-    );
+    !isStaffLevelDepartmentAccount(user?.departmentAccount) &&
+    (primaryRole === "SUPER_ADMIN" ||
+      primaryRole === "COLLEGE_ADMIN" ||
+      isInstitutionAdmin(primaryRole) ||
+      allRoles.some(
+        (r) =>
+          r === "SUPER_ADMIN" ||
+          r === "COLLEGE_ADMIN" ||
+          isInstitutionAdmin(r),
+      ));
   const isAuditor = normalizedRole === "AUDITOR" || allRoles.includes("AUDITOR");
   const isPrincipal =
     normalizedRole === "PRINCIPAL" || allRoles.includes("PRINCIPAL");
@@ -445,8 +448,9 @@ export const AccountingManager = () => {
    */
   const canDelete = isAdmin;
   const canApprove =
-    ACCOUNTING_APPROVER_ROLES.some((r) => allRoles.includes(r)) ||
-    allRoles.some(isInstitutionAdmin);
+    !isStaffLevelDepartmentAccount(user?.departmentAccount) &&
+    (ACCOUNTING_APPROVER_ROLES.some((r) => allRoles.includes(r)) ||
+      allRoles.some(isInstitutionAdmin));
   const canViewAudit =
     hasAccountingPermission(normalizedRole, "view_audit") ||
     allRoles.some((r) => hasAccountingPermission(r, "view_audit"));

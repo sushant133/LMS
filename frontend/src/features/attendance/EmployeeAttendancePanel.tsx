@@ -37,6 +37,8 @@ const STATUSES: EmployeeAttendanceStatus[] = [
   "LATE",
   "OFFICIAL_DUTY",
   "HOLIDAY",
+  // Not on duty that day — left out of the register
+  "OFF",
 ];
 
 /** Check-in / check-out only apply when the employee is considered on-duty. */
@@ -427,7 +429,7 @@ export const EmployeeAttendancePanel = ({
       <option value="">— Select —</option>
       {STATUSES.map((st) => (
         <option key={st} value={st}>
-          {st.replace(/_/g, " ")}
+          {st === "OFF" ? "Off" : st.replace(/_/g, " ")}
         </option>
       ))}
     </Select>

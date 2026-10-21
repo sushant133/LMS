@@ -39,7 +39,9 @@ import {
 import { defaultRoutineValue } from "features/exams/examDefaults";
 import {
   APPROVE_ADMIN_ONLY_MESSAGE,
+  DEPARTMENT_ADMIN_ONLY_MESSAGE,
   useCanApproveRecords,
+  useCanDeleteRecords,
 } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { printBulkResultsElement } from "lib/printUtils";
@@ -129,6 +131,7 @@ export const ExamRoutinePanel = ({
   readOnly = false,
 }: ExamRoutinePanelProps) => {
   const canPerformApprove = useCanApproveRecords();
+  const canDeleteRecords = useCanDeleteRecords();
   const [routineForm, setRoutineForm] =
     useState<ExamRoutineInput>(defaultRoutineValue);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
@@ -715,8 +718,11 @@ export const ExamRoutinePanel = ({
                 size="sm"
                 variant="destructive"
                 disabled={
-                  deleteRoutineScopeMutation.isPending || routines.length === 0
+                  !canDeleteRecords ||
+                  deleteRoutineScopeMutation.isPending ||
+                  routines.length === 0
                 }
+                title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                 onClick={() => {
                   if (
                     window.confirm(
@@ -1238,7 +1244,8 @@ export const ExamRoutinePanel = ({
                     <Button
                       size="sm"
                       variant="destructive"
-                      disabled={deleteRoutineScopeMutation.isPending}
+                      disabled={!canDeleteRecords || deleteRoutineScopeMutation.isPending}
+                      title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                       onClick={() => {
                         if (
                           window.confirm(
@@ -1314,7 +1321,8 @@ export const ExamRoutinePanel = ({
                                   <Button
                                     size="sm"
                                     variant="destructive"
-                                    disabled={deleteMutation.isPending}
+                                    disabled={!canDeleteRecords || deleteMutation.isPending}
+                                    title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                                     onClick={() => {
                                       const subjectLabel =
                                         routine.subjectName ?? "this subject";

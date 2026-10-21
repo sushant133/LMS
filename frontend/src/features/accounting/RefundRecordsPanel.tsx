@@ -42,7 +42,11 @@ import {
   buildPrintInstitutionHeaderHtml,
   PRINT_INSTITUTION_HEADER_CSS,
 } from "lib/printBranding";
-import { canManageInstitution, normalizeUserRole } from "lib/roles";
+import {
+  canManageInstitution,
+  isStaffLevelDepartmentAccount,
+  normalizeUserRole,
+} from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
 import { printHtmlViaIframe } from "./voucherPrint";
@@ -56,9 +60,10 @@ const useRefundAdminRoles = () => {
   const isSuperAdmin = roles.includes("SUPER_ADMIN");
   const isCollegeAdmin = roles.includes("COLLEGE_ADMIN");
   const isAdmin =
-    isSuperAdmin ||
-    isCollegeAdmin ||
-    roles.some((role) => canManageInstitution(role));
+    !isStaffLevelDepartmentAccount(user?.departmentAccount) &&
+    (isSuperAdmin ||
+      isCollegeAdmin ||
+      roles.some((role) => canManageInstitution(role)));
   return { isSuperAdmin, isCollegeAdmin, isAdmin };
 };
 

@@ -765,6 +765,40 @@ const sameOrUnsetScope = (filter: Record<string, unknown>): void => {
 };
 
 /**
+ * Year ids of the same level as `yearId` (the 1st Year row of every batch).
+ * The forms pick a year by level, so each batch's "1st Year" row must count
+ * as the same year when checking for an existing syllabus or plan.
+ */
+export const expandYearLevelIds = async (
+  schoolId: mongoose.Types.ObjectId,
+  yearId: string
+): Promise<string[]> => {
+  if (!mongoose.Types.ObjectId.isValid(yearId)) return [yearId];
+  const year = await Year.findOne({ _id: yearId, schoolId }).select("name level").lean();
+  if (!year) return [yearId];
+  const siblings = await Year.find({
+    schoolId,
+    $or: [...(typeof year.level === "number" ? [{ level: year.level }] : []), { name: year.name }]
+  })
+    .select("_id")
+    .lean();
+  const ids = siblings.map((row) => row._id.toString());
+  if (!ids.includes(yearId)) ids.push(yearId);
+  return ids;
+};
+
+/** Same year level or unset — replaces the single-year match from `sameOrUnsetScope`. */
+const applyYearLevelScope = async (
+  filter: Record<string, unknown>,
+  schoolId: mongoose.Types.ObjectId,
+  yearId?: string
+): Promise<void> => {
+  if (!yearId) return;
+  const ids = await expandYearLevelIds(schoolId, yearId);
+  filter.yearId = { $in: [...ids, null] };
+};
+
+/**
  * One official syllabus per subject + academic year + year level / class, whatever its
  * status. A second one is refused until the existing syllabus is deleted.
  */
@@ -790,6 +824,7 @@ export const assertNoDuplicateSyllabus = async (
   if (payload.classId) filter.classId = payload.classId;
   if (excludeId) filter._id = { $ne: excludeId };
   sameOrUnsetScope(filter);
+  await applyYearLevelScope(filter, schoolId, payload.yearId);
   const existing = await AcademicSyllabus.findOne(filter).select("_id status").lean();
   if (existing) {
     throw new ApiError(
@@ -825,6 +860,7 @@ export const assertNoDuplicateOfficialSessionPlan = async (
   if (payload.sectionId) filter.sectionId = payload.sectionId;
   if (excludeId) filter._id = { $ne: excludeId };
   sameOrUnsetScope(filter);
+  await applyYearLevelScope(filter, schoolId, payload.yearId);
   const existing = await AcademicSessionPlan.findOne(filter).select("_id").lean();
   if (existing) {
     throw new ApiError(
@@ -864,6 +900,7 @@ export const assertNoDuplicateOfficialLessonPlan = async (
   if (payload.sectionId) filter.sectionId = payload.sectionId;
   if (excludeId) filter._id = { $ne: excludeId };
   sameOrUnsetScope(filter);
+  await applyYearLevelScope(filter, schoolId, payload.yearId);
   const existing = await AcademicLessonPlan.findOne(filter).select("_id").lean();
   if (existing) {
     throw new ApiError(

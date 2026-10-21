@@ -32,6 +32,10 @@ import { api, unwrap } from "lib/api";
 import { fetchAuthenticatedBlobUrl } from "lib/attachments";
 import { getPrintInstitutionBranding } from "lib/printBranding";
 import { queryClient } from "lib/queryClient";
+import {
+  DEPARTMENT_ADMIN_ONLY_MESSAGE,
+  useCanDeleteRecords,
+} from "hooks/useModuleAccess";
 import { getPdfErrorMessage, printAdmitCardsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -421,6 +425,7 @@ export const AdmitCardPanel = ({
   sections,
   students,
 }: AdmitCardPanelProps) => {
+  const canDeleteRecords = useCanDeleteRecords();
   const [examId, setExamId] = useState("");
   const [batchId, setBatchId] = useState("");
   const [yearId, setYearId] = useState("");
@@ -1120,8 +1125,11 @@ export const AdmitCardPanel = ({
                     size="sm"
                     variant="outline"
                     disabled={
-                      clearSymbolsMutation.isPending || savedSymbols.size === 0
+                      !canDeleteRecords ||
+                      clearSymbolsMutation.isPending ||
+                      savedSymbols.size === 0
                     }
+                    title={canDeleteRecords ? undefined : DEPARTMENT_ADMIN_ONLY_MESSAGE}
                     onClick={() => {
                       if (
                         !window.confirm(

@@ -5,12 +5,15 @@ import {
   canAccessModule,
   canApproveRecords,
   canEditOrDeleteRecords,
+  DEPARTMENT_ADMIN_ONLY_MESSAGE,
   hasModuleAction,
   isGrantedAdminEditModule,
   canUseAcademicManagementAdminHub,
   isInstitutionAdmin,
   isPortalRole,
+  isStaffLevelDepartmentAccount,
   isSystemAdministrator,
+  normalizeUserRole,
   resolveModuleAccessMode,
   resolveModuleFromRoutePath,
   TEACHER_BASELINE_MODULE_KEYS,
@@ -196,9 +199,36 @@ export const useIsGrantedAdmin = (moduleKey: ErpModuleKey): boolean => {
   return true;
 };
 
+/**
+ * Full Administrator rights (delete, approve, setup). False for Accounting /
+ * Examination Department Accounts — they sign in as Administrator but work
+ * at staff level.
+ */
+export const useIsFullAdministrator = (): boolean => {
+  const { user } = useAuth();
+  if (!user || isStaffLevelDepartmentAccount(user.departmentAccount)) return false;
+  return [user.role, ...(user.secondaryRoles ?? [])].some((role) =>
+    isInstitutionAdmin(normalizeUserRole(String(role))),
+  );
+};
+
+/** Accounting / Examination Department Account (staff-level rights). */
+export const useIsStaffLevelDepartmentAccount = (): boolean => {
+  const { user } = useAuth();
+  return isStaffLevelDepartmentAccount(user?.departmentAccount);
+};
+
+/** Delete existing records — Administrator only, never a staff-level Department Account. */
+export const useCanDeleteRecords = (): boolean => {
+  const { user } = useAuth();
+  if (isStaffLevelDepartmentAccount(user?.departmentAccount)) return false;
+  return canEditOrDeleteRecords(user?.role ?? "");
+};
+
 /** Edit / Delete on existing records — Administrator and System Administrator only. */
 export const useCanEditOrDeleteRecords = (): boolean => {
   const { user } = useAuth();
+  if (isStaffLevelDepartmentAccount(user?.departmentAccount)) return false;
   return canEditOrDeleteRecords(user?.role ?? "");
 };
 
@@ -214,6 +244,7 @@ export const useCanEditOrDeleteModuleRecords = (
 ): boolean => {
   const { user } = useAuth();
   const isGrantedAdmin = useIsGrantedAdmin(moduleKey);
+  if (isStaffLevelDepartmentAccount(user?.departmentAccount)) return false;
   if (canEditOrDeleteRecords(user?.role ?? "")) return true;
   return isGrantedAdminEditModule(moduleKey) && isGrantedAdmin;
 };
@@ -225,10 +256,10 @@ export const useCanEditOrDeleteModuleRecords = (
  */
 export const useCanApproveRecords = (): boolean => {
   const { user } = useAuth();
-  if (!user) return false;
+  if (!user || isStaffLevelDepartmentAccount(user.departmentAccount)) return false;
   return [user.role, ...(user.secondaryRoles ?? [])].some((role) =>
     canApproveRecords(String(role)),
   );
 };
 
-export { APPROVE_ADMIN_ONLY_MESSAGE };
+export { APPROVE_ADMIN_ONLY_MESSAGE, DEPARTMENT_ADMIN_ONLY_MESSAGE };

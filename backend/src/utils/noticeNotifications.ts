@@ -8,6 +8,7 @@ import { User } from "../models/User.js";
 import { getTodayBs } from "./nepaliDate.js";
 import { sendNotification } from "./notificationService.js";
 import { approvedParentLinkFilter } from "./parentScope.js";
+import { buildStudentAudienceFilter } from "./studentAudience.js";
 
 const MESSAGE_PREVIEW_LENGTH = 240;
 
@@ -21,6 +22,7 @@ interface DispatchableNotice {
   classId?: Types.ObjectId | null;
   sectionId?: Types.ObjectId | null;
   subjectId?: Types.ObjectId | null;
+  studentAudience?: { batchIds?: Types.ObjectId[]; yearNames?: string[]; statuses?: string[] } | null;
   createdBy: Types.ObjectId;
 }
 
@@ -73,10 +75,16 @@ const resolveRecipientUserIds = async (notice: DispatchableNotice): Promise<stri
 
   const needsStudentScope = roles.has("STUDENT") || roles.has("PARENT");
   const audience = needsStudentScope ? await resolveStudentAudience(notice) : null;
+  // Batch / year / status filter narrows the Students audience only
+  const studentFilter = roles.has("STUDENT")
+    ? await buildStudentAudienceFilter(notice.schoolId, notice.studentAudience)
+    : null;
 
   // Roles addressed school-wide. Scoped notices only reach the matching students/parents.
   const schoolWideRoles = [...roles].filter(
-    (role) => !(audience?.scoped && (role === "STUDENT" || role === "PARENT"))
+    (role) =>
+      !(audience?.scoped && (role === "STUDENT" || role === "PARENT")) &&
+      !(studentFilter && role === "STUDENT")
   );
 
   if (schoolWideRoles.length > 0) {
@@ -90,8 +98,21 @@ const resolveRecipientUserIds = async (notice: DispatchableNotice): Promise<stri
     users.forEach((user) => recipients.add(user._id.toString()));
   }
 
+  if (studentFilter) {
+    const students = await Student.find({
+      schoolId: notice.schoolId,
+      ...studentFilter,
+      ...(audience?.scoped ? { _id: { $in: audience.students.map((student) => student._id) } } : {})
+    })
+      .select("user")
+      .lean();
+    students.forEach((student) => {
+      if (student.user) recipients.add(student.user.toString());
+    });
+  }
+
   if (audience?.scoped) {
-    if (roles.has("STUDENT")) {
+    if (roles.has("STUDENT") && !studentFilter) {
       audience.students.forEach((student) => recipients.add(student.user.toString()));
     }
     if (roles.has("PARENT") && audience.students.length > 0) {

@@ -17,7 +17,7 @@ const entrySchema = new Schema(
     designation: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["PRESENT", "ABSENT", "LEAVE", "HALF_DAY", "LATE", "OFFICIAL_DUTY", "HOLIDAY"],
+      enum: ["PRESENT", "ABSENT", "LEAVE", "HALF_DAY", "LATE", "OFFICIAL_DUTY", "HOLIDAY", "OFF"],
       required: true
     },
     checkInTime: { type: String, default: "" },

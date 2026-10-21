@@ -46,7 +46,11 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
-import { canManageInstitution, normalizeUserRole } from "lib/roles";
+import {
+  canManageInstitution,
+  isStaffLevelDepartmentAccount,
+  normalizeUserRole,
+} from "lib/roles";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
 import {
@@ -283,10 +287,11 @@ export const SalaryPaymentRecordsPanel = ({
   const isCollegeAdmin = allRoles.includes("COLLEGE_ADMIN");
   const isAdmin = useMemo(
     () =>
-      isSuperAdmin ||
-      isCollegeAdmin ||
-      allRoles.some((role) => canManageInstitution(role)),
-    [allRoles, isSuperAdmin, isCollegeAdmin],
+      !isStaffLevelDepartmentAccount(user?.departmentAccount) &&
+      (isSuperAdmin ||
+        isCollegeAdmin ||
+        allRoles.some((role) => canManageInstitution(role))),
+    [allRoles, isSuperAdmin, isCollegeAdmin, user?.departmentAccount],
   );
   const isAccountant = allRoles.includes("ACCOUNTANT");
   const canPrepareSheet = isAdmin || isAccountant;

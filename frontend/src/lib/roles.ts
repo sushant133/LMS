@@ -18,6 +18,7 @@ import {
   isExaminationManagementPath,
   isInstitutionAdmin,
   isStaffDirectoryPath,
+  isStaffLevelDepartmentAccount,
   isSystemAdministrator,
   normalizeUserRole,
   resolveModuleFromRoutePath,
@@ -34,6 +35,7 @@ export {
   canManageInstitution,
   hasInstitutionAccess,
   isInstitutionAdmin,
+  isStaffLevelDepartmentAccount,
   isSystemAdministrator,
   normalizeUserRole
 };

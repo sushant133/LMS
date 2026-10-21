@@ -19,6 +19,7 @@ export * from "./data/nepal-addresses.js";
 export * from "./grades.js";
 export * from "./module-access.js";
 export * from "./department-accounts.js";
+export * from "./student-audience.js";
 export * from "./module-schemas.js";
 export * from "./module-types.js";
 export * from "./field-duty-types.js";

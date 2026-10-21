@@ -751,6 +751,8 @@ const loadEmployeeRegister = async (
     .lean();
 
   const byPerson = new Map<string, Map<string, AttendanceRegisterCell>>();
+  // People marked Off this month (Off days are not shown in the register)
+  const markedOff = new Set<string>();
   for (const sheet of sheets) {
     for (const entry of sheet.entries ?? []) {
       const pid =
@@ -758,6 +760,10 @@ const loadEmployeeRegister = async (
           ? entry.teacherId?.toString()
           : entry.staffId?.toString();
       if (!pid) continue;
+      if (entry.status === "OFF") {
+        markedOff.add(pid);
+        continue;
+      }
       if (!byPerson.has(pid)) byPerson.set(pid, new Map());
       byPerson.get(pid)!.set(sheet.dateBs, {
         dateBs: sheet.dateBs,
@@ -775,6 +781,9 @@ const loadEmployeeRegister = async (
       });
     }
   }
+
+  // Someone who was only ever marked Off this month is left out entirely
+  people = people.filter((person) => !markedOff.has(person.id) || byPerson.has(person.id));
 
   const rows: AttendanceRegisterPersonRow[] = people.map((person, index) => {
     const dayMap = byPerson.get(person.id) ?? new Map();

@@ -6,6 +6,7 @@ import {
   noticeSchema,
   USER_ROLE_LABELS,
   USER_ROLES,
+  type BatchRecord,
   type NoticeInput,
   type NoticeRecord,
 } from "@phit-erp/shared";
@@ -31,6 +32,10 @@ import {
   type EnrichedNoticeRecord,
 } from "features/notices/StudentNoticeBoard";
 import { BANNER_ACCEPT, uploadBannerImage } from "features/notices/bannerUtils";
+import {
+  formatStudentAudience,
+  StudentAudienceFilter,
+} from "features/notices/StudentAudienceFilter";
 import { api, resolveMediaUrl, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import {
@@ -121,6 +126,16 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
     queryKey: ["notices"],
     queryFn: () => unwrap<NoticeRecord[]>(api.get("/notices")),
   });
+
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
+    enabled: canManageNotices && !isTeacher,
+  });
+  const batchNameById = useMemo(
+    () => new Map((batchesQuery.data ?? []).map((batch) => [batch._id, batch.name])),
+    [batchesQuery.data],
+  );
 
   const noticeMutation = useMutation({
     mutationFn: async (payload: NoticeInput) =>
@@ -383,6 +398,16 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                     </div>
                   </FormField>
                 )}
+                {!isTeacher && form.visibleTo.includes("STUDENT") ? (
+                  <div className="md:col-span-2">
+                    <StudentAudienceFilter
+                      value={form.studentAudience}
+                      onChange={(studentAudience) =>
+                        setForm((current) => ({ ...current, studentAudience }))
+                      }
+                    />
+                  </div>
+                ) : null}
                 <FormField label="Publish Date (BS)">
                   <NepaliDateField
                     value={form.publishDateBs}
@@ -670,6 +695,16 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                           : notice.visibleTo
                               .map((role) => USER_ROLE_LABELS[role] ?? role)
                               .join(", ")}
+                        {!isTeacher && notice.visibleTo.includes("STUDENT") &&
+                        formatStudentAudience(notice.studentAudience, batchNameById) ? (
+                          <div className="mt-1 text-xs text-slate-500">
+                            Students:{" "}
+                            {formatStudentAudience(
+                              notice.studentAudience,
+                              batchNameById,
+                            )}
+                          </div>
+                        ) : null}
                       </Td>
                       <Td>{notice.publishDateBs}</Td>
                       <Td className="text-right">
@@ -692,6 +727,8 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                   classId: notice.classId,
                                   sectionId: notice.sectionId,
                                   subjectId: notice.subjectId,
+                                  studentAudience:
+                                    notice.studentAudience ?? undefined,
                                 });
                               }}
                             >

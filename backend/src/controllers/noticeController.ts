@@ -16,6 +16,11 @@ import {
 } from "../utils/noticeNotifications.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import {
+  getStudentAudienceProfile,
+  recordMatchesStudentProfile,
+  resolveStudentAudienceForSave
+} from "../utils/studentAudience.js";
+import {
   assertTeacherClassSection,
   assertTeacherSubject,
   assertTeacherSubjectAcademicScope,
@@ -37,6 +42,7 @@ type NoticeLean = {
   subjectId?: Types.ObjectId;
   classId?: Types.ObjectId;
   sectionId?: Types.ObjectId;
+  studentAudience?: { batchIds?: Types.ObjectId[]; yearNames?: string[]; statuses?: string[] } | null;
   teacherId?: Types.ObjectId;
   createdBy: Types.ObjectId;
   createdAt?: Date;
@@ -185,7 +191,12 @@ export const listNotices = asyncHandler(async (req: Request, res: Response) => {
     })
       .sort({ publishDateBs: -1, createdAt: -1 })
       .lean();
-    return sendSuccess(res, "Notices fetched", await enrichNotices(notices as NoticeLean[]));
+    // Batch / year / status filter set for the Students audience
+    const audienceProfile = await getStudentAudienceProfile(schoolId, req.user!.userId);
+    const visibleNotices = (notices as NoticeLean[]).filter((notice) =>
+      recordMatchesStudentProfile(notice.studentAudience, audienceProfile)
+    );
+    return sendSuccess(res, "Notices fetched", await enrichNotices(visibleNotices));
   }
 
   if (req.user?.role === "PARENT") {
@@ -264,9 +275,14 @@ export const createNotice = asyncHandler(async (req: Request, res: Response) => 
     }
   }
 
+  // Teacher notices are scoped by class / subject instead
+  const studentAudience =
+    req.user?.role === "TEACHER" ? null : resolveStudentAudienceForSave(payload.visibleTo, payload.studentAudience);
+
   const notice = await Notice.create({
     ...payload,
     images,
+    studentAudience,
     schoolId: tenantObjectId(req),
     expiresAtBs: payload.expiresAtBs || undefined,
     teacherId,
@@ -313,11 +329,15 @@ export const updateNotice = asyncHandler(async (req: Request, res: Response) => 
     }
   }
 
+  const studentAudience =
+    req.user?.role === "TEACHER" ? null : resolveStudentAudienceForSave(payload.visibleTo, payload.studentAudience);
+
   const notice = await Notice.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id }),
     {
       ...payload,
       images,
+      studentAudience,
       expiresAtBs: payload.expiresAtBs || undefined
     },
     { new: true }

@@ -59,6 +59,12 @@ import {
 import { SubjectApproveAllButton } from "./SubjectApproveAllButton";
 import { ReviewUndoActions } from "./ReviewUndoActions";
 import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
+import { AlreadyMadeNotice } from "./AlreadyMadeNotice";
+import {
+  findExistingForSubject,
+  useExistingAcademicRecords,
+  type ExistingAcademicRecord,
+} from "./existingAcademicRecords";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
@@ -279,6 +285,43 @@ export const SessionPlanPanel = ({
     () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
     [subjectOptions, form.subjectId],
   );
+
+  /**
+   * Session plans already made this academic year (any teacher). Their subjects
+   * are left out of the create list — the server refuses a second one anyway —
+   * and listed as "Already made" with a link to the existing plan.
+   */
+  const existingQuery = useExistingAcademicRecords(
+    "session-plan",
+    form.academicYearBs,
+    showForm,
+  );
+  const existingForSubject = (subject: (typeof subjectOptions)[number]) =>
+    findExistingForSubject({
+      records: existingQuery.data ?? [],
+      subject,
+      scope: {
+        yearId: form.yearId,
+        batchId: form.batchId,
+        classId: form.classId,
+        sectionId: form.sectionId,
+      },
+      years,
+      kind: "session-plan",
+      excludeId: editingId,
+    });
+  const availableSubjectOptions = subjectOptions.filter(
+    (subject) =>
+      subject._id === subjectSelectValue || !existingForSubject(subject),
+  );
+  const alreadyMadeRecords = [
+    ...new Map(
+      subjectOptions
+        .map((subject) => existingForSubject(subject))
+        .filter((record): record is ExistingAcademicRecord => Boolean(record))
+        .map((record) => [record._id, record]),
+    ).values(),
+  ];
 
   const selectedFormSubject = useMemo(() => {
     if (!form.subjectId) return undefined;
@@ -1167,6 +1210,22 @@ export const SessionPlanPanel = ({
                 </Button>
               </div>
             ) : null}
+            {!editingId ? (
+              <AlreadyMadeNotice
+                records={alreadyMadeRecords}
+                noun="session plan"
+                canOpen={(record) =>
+                  isAdmin || !record.teacherId || record.teacherId === teacherId
+                }
+                onOpen={(record) => {
+                  void unwrap<AcademicSessionPlanRecord>(
+                    api.get(`/academic-management/session-plans/${record._id}`),
+                  )
+                    .then((plan) => openEditForm(plan))
+                    .catch((error) => toast.error(parseErrorMessage(error)));
+                }}
+              />
+            ) : null}
             <div className="grid gap-3 md:grid-cols-3">
               {yearOptions.length > 0 ? (
                 <FormField label="Year">
@@ -1239,9 +1298,11 @@ export const SessionPlanPanel = ({
                         ? "Select class first"
                         : subjectOptions.length === 0
                           ? "No subjects for this year"
-                          : "Select subject"}
+                          : availableSubjectOptions.length === 0
+                            ? "All subjects already have a session plan"
+                            : "Select subject"}
                   </option>
-                  {subjectOptions.map((subject) => (
+                  {availableSubjectOptions.map((subject) => (
                     <option key={subject._id} value={subject._id}>
                       {subject.name}
                       {subject.code ? ` (${subject.code})` : ""}

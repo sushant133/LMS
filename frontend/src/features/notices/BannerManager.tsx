@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   BANNER_TARGET_ROLE_LABELS,
@@ -7,6 +7,7 @@ import {
   type BannerInput,
   type BannerRecord,
   type BannerTargetRole,
+  type BatchRecord,
 } from "@phit-erp/shared";
 import { Eye, ImageIcon, Pencil, RefreshCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +29,7 @@ import {
   uploadBannerImage,
   type UploadedBannerImage,
 } from "./bannerUtils";
+import { formatStudentAudience, StudentAudienceFilter } from "./StudentAudienceFilter";
 
 const defaultVisibleTo = (): BannerTargetRole[] => [...BANNER_TARGET_ROLES];
 
@@ -73,6 +75,15 @@ export const BannerManager = () => {
     queryKey: ["banners", "manage"],
     queryFn: () => unwrap<BannerRecord[]>(api.get("/banners")),
   });
+
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
+  });
+  const batchNameById = useMemo(
+    () => new Map((batchesQuery.data ?? []).map((batch) => [batch._id, batch.name])),
+    [batchesQuery.data],
+  );
 
   const invalidateBannerQueries = async () => {
     await Promise.all([
@@ -184,6 +195,7 @@ export const BannerManager = () => {
       width: banner.width,
       height: banner.height,
       originalFileName: banner.originalFileName,
+      studentAudience: banner.studentAudience,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -374,6 +386,14 @@ export const BannerManager = () => {
                     Select at least one audience.
                   </p>
                 ) : null}
+                {form.visibleTo.includes("STUDENT") ? (
+                  <StudentAudienceFilter
+                    value={form.studentAudience}
+                    onChange={(studentAudience) =>
+                      setForm((current) => ({ ...current, studentAudience }))
+                    }
+                  />
+                ) : null}
               </div>
             </FormField>
 
@@ -511,6 +531,13 @@ export const BannerManager = () => {
                       </Td>
                       <Td className="max-w-[14rem] text-xs text-slate-700">
                         {formatVisibleToSummary(banner.visibleTo)}
+                        {banner.visibleTo?.includes("STUDENT") &&
+                        formatStudentAudience(banner.studentAudience, batchNameById) ? (
+                          <div className="mt-1 text-slate-500">
+                            Students:{" "}
+                            {formatStudentAudience(banner.studentAudience, batchNameById)}
+                          </div>
+                        ) : null}
                       </Td>
                       <Td className="text-xs">
                         {formatFileSize(banner.fileSizeBytes)}

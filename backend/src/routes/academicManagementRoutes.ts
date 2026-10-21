@@ -53,12 +53,24 @@ import {
   verifyLogBookEntry,
   verifySessionPlan
 } from "../controllers/academicManagementController.js";
+import { moveSubjectToFaculty, renameFaculty } from "../controllers/academicFacultyController.js";
+import { listExistingAcademicRecords } from "../controllers/academicExistingController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
 router.use(protect, tenantGuard);
+
+// Faculty / Program rename and subject move (Academic Management tree)
+router.post("/faculties/rename", authorizeInstitutionAdmin, renameFaculty);
+router.post("/faculties/move-subject", authorizeInstitutionAdmin, moveSubjectToFaculty);
+// Syllabi / session plans already made for an academic year (create forms hide those subjects)
+router.get(
+  "/existing",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "COLLEGE_STAFF"),
+  listExistingAcademicRecords
+);
 
 router.get(
   "/dashboard",
