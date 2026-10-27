@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import nodemailer, { type Transporter } from "nodemailer";
+import nodemailer, { type Transporter, type TransportOptions } from "nodemailer";
 import { env } from "../config/env.js";
 
 let transporter: Transporter | null = null;
@@ -33,7 +33,7 @@ export const getMailTransporter = (): Transporter | null => {
       connectionTimeout: 30_000,
       greetingTimeout: 20_000,
       socketTimeout: 40_000
-    } as nodemailer.TransportOptions);
+    } as TransportOptions);
   }
 
   return transporter;
