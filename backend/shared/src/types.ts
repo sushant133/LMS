@@ -346,6 +346,8 @@ export interface StudentRecord {
    * 0 when not a back student.
    */
   backCount?: number;
+  /** Back papers: subject and the program year it was failed in. */
+  backPapers?: Array<{ subjectName: string; subjectCode?: string; programYear: number }>;
   admissionDateBs: string;
   /** Set when the student was marked PASSED_OUT (BS). */
   passedOutAtBs?: string;
@@ -768,6 +770,9 @@ export interface DailyAttendanceAssignment {
 }
 
 export interface DailyAttendanceDashboard {
+  /** Day the summary cards describe: today, or the latest day with attendance. */
+  summaryDateBs?: string;
+  isToday?: boolean;
   totalStudents: number;
   presentToday: number;
   absentToday: number;
@@ -1234,6 +1239,8 @@ export interface MarksheetViewResponse {
   result: ResultRecord;
   exam: ExamRecord;
   student: StudentRecord;
+  /** Symbol number issued for this exam (blank when none was issued). */
+  symbolNumber?: string;
   section?: SectionRecord;
   batch?: { _id: string; name: string };
   year?: { _id: string; name: string };

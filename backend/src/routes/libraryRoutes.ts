@@ -1,5 +1,15 @@
 import { Router } from "express";
 import {
+  adjustLibraryFine,
+  clearLibraryFine,
+  getLibraryFineSettings,
+  listLibraryFinePayments,
+  listLibraryFines,
+  setLibraryGroupFineRate,
+  setLibraryStudentFineRate,
+  updateLibraryFineSettings
+} from "../controllers/libraryFineController.js";
+import {
   createBook,
   createLibraryStaff,
   deleteBook,
@@ -108,6 +118,16 @@ router.put("/issues/:id/return", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), re
 /** Due-date edit / void mistaken issues — institution admin only (not library staff). */
 router.put("/issues/:id", authorizeInstitutionAdmin, updateIssue);
 router.delete("/issues/:id", authorizeInstitutionAdmin, deleteIssue);
+
+// Overdue Fines — Administrator only
+router.get("/fines/settings", authorizeInstitutionAdmin, getLibraryFineSettings);
+router.put("/fines/settings", authorizeInstitutionAdmin, updateLibraryFineSettings);
+router.put("/fines/student-rates", authorizeInstitutionAdmin, setLibraryStudentFineRate);
+router.put("/fines/group-rates", authorizeInstitutionAdmin, setLibraryGroupFineRate);
+router.get("/fines", authorizeInstitutionAdmin, listLibraryFines);
+router.get("/fines/payments", authorizeInstitutionAdmin, listLibraryFinePayments);
+router.put("/fines/:issueId", authorizeInstitutionAdmin, adjustLibraryFine);
+router.post("/fines/:issueId/clear", authorizeInstitutionAdmin, clearLibraryFine);
 
 router.get("/staff", authorizeInstitutionAdmin, listLibraryStaff);
 router.post("/staff", authorizeInstitutionAdmin, createLibraryStaff);

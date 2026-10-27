@@ -30,6 +30,8 @@ export interface MarksheetTemplateData {
   examHeldDateBs?: string;
   studentName: string;
   registrationNumber?: string;
+  /** Exam symbol number; printed instead of the registration number when issued. */
+  symbolNumber?: string;
   rollNumber: number;
   batchName?: string;
   yearName?: string;
@@ -67,7 +69,8 @@ export const buildMarksheetHtml = (data: MarksheetTemplateData): string => {
   const isPass = isPassStatus(data.passFailStatus);
 
   const studentRows = [infoRow("Student Name", escapeHtml(data.studentName))];
-  if (data.registrationNumber) studentRows.push(infoRow("Registration No.", escapeHtml(data.registrationNumber)));
+  if (data.symbolNumber) studentRows.push(infoRow("Symbol No.", escapeHtml(data.symbolNumber)));
+  else if (data.registrationNumber) studentRows.push(infoRow("Registration No.", escapeHtml(data.registrationNumber)));
   studentRows.push(infoRow("Roll No.", escapeHtml(data.rollNumber)));
   if (data.batchName) studentRows.push(infoRow("Batch", escapeHtml(data.batchName)));
   if (data.yearName) studentRows.push(infoRow("Year", escapeHtml(data.yearName)));

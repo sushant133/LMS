@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { printPageCss } from "lib/printPage";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import { libraryReturnSchema, type LibraryIssueRecord } from "@phit-erp/shared";
@@ -143,6 +144,7 @@ const buildIssuesPrintHtml = (opts: {
     tfoot td { font-weight: 600; background: #f8fafc; }
     @page { size: A4 landscape; margin: 8mm; }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "8mm")}
   </style>
 </head>
 <body>
@@ -280,10 +282,17 @@ export const LibraryReturnsPanel = ({
       returnedDateBs: string;
     }) =>
       unwrap(
-        api.put(`/library/issues/${id}/return`, { returnedDateBs, fineNpr: 0 }),
-      ),
-    onSuccess: async () => {
-      toast.success("Book returned and cleared from active borrowing");
+        // No fineNpr: the server charges the overdue fine (Library → Overdue Fines)
+        api.put(`/library/issues/${id}/return`, { returnedDateBs }),
+      ) as Promise<{ fineNpr?: number; fineCarriedNpr?: number }>,
+    onSuccess: async (returned) => {
+      // Owed after return (fine already paid while the book was out is not counted)
+      const fine = Number(returned?.fineCarriedNpr ?? returned?.fineNpr) || 0;
+      toast.success(
+        fine > 0
+          ? `Book returned. Overdue fine of NPR ${fine} recorded — collect it under Overdue Fines.`
+          : "Book returned and cleared from active borrowing",
+      );
       setSelectedIssueId(null);
       setReturnedDateBs(defaultReturnDateBs());
       await invalidateLibrary();
@@ -306,10 +315,7 @@ export const LibraryReturnsPanel = ({
       return toast.error("Select a borrowed book to process the return");
     }
 
-    const parsed = libraryReturnSchema.safeParse({
-      returnedDateBs,
-      fineNpr: 0,
-    });
+    const parsed = libraryReturnSchema.safeParse({ returnedDateBs });
     if (!parsed.success) {
       return toast.error("Enter a valid return date");
     }
@@ -628,6 +634,11 @@ export const LibraryReturnsPanel = ({
                           >
                             {issue.status}
                           </Badge>
+                          {(issue.fine?.outstandingNpr ?? 0) > 0 ? (
+                            <div className="mt-1 whitespace-nowrap text-xs font-medium text-amber-800">
+                              Fine owed NPR {issue.fine!.outstandingNpr}
+                            </div>
+                          ) : null}
                         </Td>
                         <Td>
                           <Button

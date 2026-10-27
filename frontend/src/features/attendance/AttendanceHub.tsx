@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { canManageInstitution, hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
-import { useIsGrantedAdmin } from "hooks/useModuleAccess";
+import { useIsGrantedAdmin, useStudentAttendanceGrant } from "hooks/useModuleAccess";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { api, unwrap } from "lib/api";
@@ -70,6 +70,16 @@ export const AttendanceHub = () => {
     grantedAttendanceAdmin ||
     grantedDailyAttendanceAdmin;
   const isTeacher = userIsTeacher(user);
+  /**
+   * "Student Attendance" grant: student tabs (daily, subject-wise, early
+   * leave, register) for every class. Kept apart from canWriteAdmin, which
+   * also opens the Teacher / Staff HR sheets this grant does not cover.
+   */
+  const studentGrant = useStudentAttendanceGrant();
+  const canReadStudents = hasInstitutionRead || studentGrant.read;
+  const canWriteStudents = canWriteAdmin || studentGrant.write;
+  /** A teacher working only their own classes (no college-wide student access). */
+  const isClassTeacherOnly = isTeacher && !canWriteAdmin && !studentGrant.read;
   const isStaff = user?.role === "COLLEGE_STAFF";
   const isStudent = user?.role === "STUDENT";
   const isParent = user?.role === "PARENT";
@@ -106,7 +116,7 @@ export const AttendanceHub = () => {
 
   /** Traditional register */
   const showRegister =
-    hasInstitutionRead ||
+    canReadStudents ||
     canWriteAdmin ||
     isTeacher ||
     showTeacherHr ||
@@ -132,7 +142,7 @@ export const AttendanceHub = () => {
 
   // Prefer HR tabs when the user is not a classroom teacher / institution admin
   const defaultTab: AttendanceTab =
-    !canWriteAdmin && !hasInstitutionRead && !isTeacher
+    !canWriteAdmin && !canReadStudents && !isTeacher
       ? isStaff
         ? "staff"
         : showEarlyLeave
@@ -177,16 +187,15 @@ export const AttendanceHub = () => {
     }> = [];
 
     // Student classroom attendance — teachers + admins
-    if (hasInstitutionRead || isTeacher || canWriteAdmin) {
+    if (canReadStudents || isTeacher || canWriteAdmin) {
       list.push({
         id: "daily",
-        label: isTeacher && !canWriteAdmin ? "Daily" : "Student Daily",
+        label: isClassTeacherOnly ? "Daily Attendance" : "Student Daily Attendance",
         icon: CalendarCheck,
       });
       list.push({
         id: "subject",
-        label:
-          isTeacher && !canWriteAdmin ? "Subject-wise" : "Student Subject-wise",
+        label: isClassTeacherOnly ? "Subject-wise" : "Student Subject-wise",
         icon: ClipboardList,
       });
     }
@@ -225,7 +234,8 @@ export const AttendanceHub = () => {
 
     return list;
   }, [
-    hasInstitutionRead,
+    canReadStudents,
+    isClassTeacherOnly,
     isTeacher,
     canWriteAdmin,
     showEarlyLeave,
@@ -246,12 +256,12 @@ export const AttendanceHub = () => {
     <div className="space-y-6">
       <PageHeader
         title={
-          isTeacher && !canWriteAdmin
+          isClassTeacherOnly
             ? "My Attendance"
             : "Attendance Management"
         }
         description={
-          isTeacher && !canWriteAdmin
+          isClassTeacherOnly
             ? "Mark daily class attendance or subject-wise periods. Use Early Leave when a student leaves campus early (parents are notified)."
             : "Student daily & subject attendance, Early Leave (with parent notification), teacher/staff attendance, and monthly register."
         }
@@ -277,9 +287,9 @@ export const AttendanceHub = () => {
 
       {safeTab === "daily" ? (
         <DailyAttendanceManager
-          hasInstitutionRead={hasInstitutionRead}
-          canWriteAdmin={canWriteAdmin}
-          isTeacher={isTeacher}
+          hasInstitutionRead={canReadStudents}
+          canWriteAdmin={canWriteStudents}
+          isTeacher={isClassTeacherOnly}
         />
       ) : null}
 

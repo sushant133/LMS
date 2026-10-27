@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -245,7 +246,7 @@ export const PrintResultsPanel = ({
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>Print Results</CardTitle>
+            <CardTitle>Results</CardTitle>
             <p className="text-sm text-slate-600">
               View and print published exam results only. Results appear here
               after admin review and publishing.
@@ -550,9 +551,10 @@ export const PrintResultsPanel = ({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() =>
-                                        setStudentId(row.studentId)
-                                      }
+                                      onClick={() => {
+                                        setStudentId(row.studentId);
+                                        scrollToForm("marksheet-preview");
+                                      }}
                                     >
                                       Marksheet
                                     </Button>
@@ -560,9 +562,10 @@ export const PrintResultsPanel = ({
                                       size="sm"
                                       variant="ghost"
                                       title="Open marksheet to download PDF"
-                                      onClick={() =>
-                                        setStudentId(row.studentId)
-                                      }
+                                      onClick={() => {
+                                        setStudentId(row.studentId);
+                                        scrollToForm("marksheet-preview");
+                                      }}
                                     >
                                       <Download className="h-4 w-4" />
                                     </Button>
@@ -583,9 +586,8 @@ export const PrintResultsPanel = ({
           {/*
             CTEVT Internal Assessment Report — Print Bulk only.
             Header nesting matches the official PDF:
-            SN | Regd | Symbol | Name | [Subjects / T / Full / Pass labels] | one column per
-            subject | Total | % | Grade | Remarks
-            Body rows include an empty cell under the label column so columns stay aligned.
+            SN | Regd | Symbol | Name (header rows: Student's Name / Full Marks /
+            Pass Marks) | one column per subject | Total | % | Grade | Status | Remarks
           */}
           <div ref={bulkResultsRef} className="print-results-bulk-table iar-report">
             <div className="iar-title">INTERNAL ASSESSMENT REPORT</div>
@@ -641,35 +643,33 @@ export const PrintResultsPanel = ({
                 <col className="iar-col-regd" />
                 <col className="iar-col-symbol" />
                 <col className="iar-col-name" />
-                <col className="iar-col-label" />
                 {Array.from({ length: markColumnCount }).map((_, i) => (
                   <col key={`mcol-${i}`} className="iar-col-mark" />
                 ))}
                 <col className="iar-col-total" />
                 <col className="iar-col-pct" />
                 <col className="iar-col-grade" />
+                <col className="iar-col-status" />
                 <col className="iar-col-remarks" />
               </colgroup>
               <thead>
-                {/* Row 1: fixed cols + Subjects label + subject names + summary cols */}
+                {/* Row 1: fixed cols + subject names + summary cols */}
                 <tr>
-                  <th rowSpan={4} className="iar-sn">
+                  <th rowSpan={3} className="iar-sn">
                     S.N.
                   </th>
-                  <th rowSpan={4} className="iar-regd">
+                  <th rowSpan={3} className="iar-regd">
                     Regd.No.
                   </th>
-                  <th rowSpan={4} className="iar-symbol">
+                  <th rowSpan={3} className="iar-symbol">
                     Symbol
                     <br />
                     No.
                   </th>
-                  <th rowSpan={4} className="iar-name">
-                    Student&apos;s
-                    <br />
-                    Name
+                  {/* Name header + the two labels below read as one cell (no inner lines) */}
+                  <th className="iar-name iar-name-head">
+                    Student&apos;s Name
                   </th>
-                  <th className="iar-corner">Subjects</th>
                   {grid.subjects.map((subject) => (
                     <th
                       key={subject.subjectId}
@@ -678,37 +678,27 @@ export const PrintResultsPanel = ({
                       {subject.subjectName}
                     </th>
                   ))}
-                  <th rowSpan={4} className="iar-total">
+                  <th rowSpan={3} className="iar-total">
                     Total
                     <br />
                     Marks
                   </th>
-                  <th rowSpan={4} className="iar-pct">
+                  <th rowSpan={3} className="iar-pct">
                     %
                   </th>
-                  <th rowSpan={4} className="iar-grade">
+                  <th rowSpan={3} className="iar-grade">
                     Grade
                   </th>
-                  <th rowSpan={4} className="iar-remarks">
+                  <th rowSpan={3} className="iar-status">
+                    Status
+                  </th>
+                  <th rowSpan={3} className="iar-remarks">
                     Remarks
                   </th>
                 </tr>
-                {/* Row 2: empty corner + T under each subject (single column) */}
+                {/* Row 2: Full Marks — the subject total the teacher fixed for this exam */}
                 <tr>
-                  <th className="iar-corner iar-corner-empty" />
-                  {grid.subjects.map((subject) => (
-                    <th key={`${subject.subjectId}-t`} className="iar-tp">
-                      T
-                    </th>
-                  ))}
-                </tr>
-                {/* Row 3: Full Marks — the subject total the teacher fixed for this exam */}
-                <tr>
-                  <th className="iar-corner">
-                    Full
-                    <br />
-                    Marks
-                  </th>
+                  <th className="iar-corner iar-name-label">Full Marks</th>
                   {grid.subjects.map((subject) => (
                     <th
                       key={`${subject.subjectId}-fm`}
@@ -718,12 +708,10 @@ export const PrintResultsPanel = ({
                     </th>
                   ))}
                 </tr>
-                {/* Row 4: Pass Marks */}
+                {/* Row 3: Pass Marks */}
                 <tr>
-                  <th className="iar-corner">
-                    Pass
-                    <br />
-                    Marks
+                  <th className="iar-corner iar-name-label iar-name-label-last">
+                    Pass Marks
                   </th>
                   {grid.subjects.map((subject) => (
                     <th
@@ -742,8 +730,6 @@ export const PrintResultsPanel = ({
                     <td className="iar-regd">{row.registrationNumber}</td>
                     <td className="iar-symbol">{row.symbolNumber || ""}</td>
                     <td className="iar-name">{row.studentName}</td>
-                    {/* Align under Subjects / Full / Pass corner column */}
-                    <td className="iar-corner iar-corner-empty" />
                     {/* One column per subject: the total mark the teacher recorded. */}
                     {grid.subjects.map((subject) => (
                       <td
@@ -763,6 +749,18 @@ export const PrintResultsPanel = ({
                         : ""}
                     </td>
                     <td className="iar-grade">{row.grade || ""}</td>
+                    <td
+                      className={cn(
+                        "iar-status",
+                        row.passFailStatus === "FAIL" && "iar-status-fail",
+                      )}
+                    >
+                      {row.passFailStatus === "PASS"
+                        ? "Pass"
+                        : row.passFailStatus === "FAIL"
+                          ? "Fail"
+                          : ""}
+                    </td>
                     {/* Left blank on purpose — remarks are written by hand on the
                         printed IAR sheet, never auto-filled from subject marks. */}
                     <td className="iar-remarks" />
@@ -774,17 +772,21 @@ export const PrintResultsPanel = ({
             <div className="iar-signatures">
               <div className="iar-sign">
                 <div className="iar-sign-line" />
-                <div>Checked By</div>
+                <div>Prepared By</div>
               </div>
               <div className="iar-sign">
                 <div className="iar-sign-line" />
-                <div>Verified By</div>
+                <div>Submitted By</div>
+              </div>
+              <div className="iar-sign">
+                <div className="iar-sign-line" />
+                <div>Approved By</div>
               </div>
             </div>
           </div>
 
           {studentId ? (
-            <div className="print:hidden space-y-3">
+            <div id="marksheet-preview" className="print:hidden space-y-3">
               <div className="flex justify-end">
                 <Button
                   size="sm"

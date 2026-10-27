@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   canManageInstitution,
@@ -322,7 +323,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
       ) : null}
 
       {canManageNotices ? (
-        <Card>
+        <Card id="notice-form">
           <CardHeader>
             <CardTitle>{editingId ? "Edit Notice" : "Create Notice"}</CardTitle>
           </CardHeader>
@@ -714,6 +715,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                               size="sm"
                               variant="outline"
                               onClick={() => {
+                                scrollToForm("notice-form");
                                 setEditingId(notice._id);
                                 setForm({
                                   title: notice.title,

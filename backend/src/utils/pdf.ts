@@ -39,6 +39,8 @@ interface ReceiptData {
   transactionNumber?: string;
   verificationCode?: string;
   feeBreakdown?: Array<{ feeType: string; title: string; amountNpr: number }>;
+  /** Part of the amount paid that is advance for later program years. */
+  advanceAllocations?: Array<{ programYear: number; amountNpr: number }>;
   isDuplicate?: boolean;
 }
 
@@ -233,6 +235,14 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   const summaryItems: Array<{ label: string; value: string; emphasis?: boolean }> = [
     { label: "Amount Paid", value: formatCurrencyNpr(data.amountPaidNpr) }
   ];
+  const yearName: Record<number, string> = { 2: "2nd year", 3: "3rd year" };
+  for (const advance of data.advanceAllocations ?? []) {
+    if (!(advance.amountNpr > 0)) continue;
+    summaryItems.push({
+      label: `Advance: ${yearName[advance.programYear] ?? `Year ${advance.programYear}`}`,
+      value: formatCurrencyNpr(advance.amountNpr)
+    });
+  }
 
   if (data.discountNpr > 0) summaryItems.push({ label: "Discount", value: `- ${formatCurrencyNpr(data.discountNpr)}` });
   if ((data.scholarshipNpr ?? 0) > 0) {

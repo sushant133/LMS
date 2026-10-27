@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FacultySelect, facultyNamesFrom } from "./FacultyTreeActions";
 import {
   type AcademicSyllabusInput,
   type AcademicSyllabusRecord,
@@ -938,6 +939,16 @@ export const SyllabusPanel = ({
       isAdmin,
       keywordFilteredPlans,
     ],
+  );
+
+  // Create / edit forms pick from faculties already listed, never free text
+  const facultyOptions = useMemo(
+    () =>
+      facultyNamesFrom(
+        faculties.map((f) => (f.key === "faculty:general" ? "" : f.label)),
+        assignments.map((a) => a.faculty),
+      ),
+    [faculties, assignments],
   );
 
   const yearIdToLevelKey = useMemo(
@@ -1973,16 +1984,12 @@ export const SyllabusPanel = ({
                     : "Faculty / Program"
                 }
               >
-                <Input
-                  nepali={formNepaliText}
+                <FacultySelect
                   value={form.faculty ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      faculty: event.target.value,
-                    }))
+                  options={facultyOptions}
+                  onChange={(faculty) =>
+                    setForm((current) => ({ ...current, faculty }))
                   }
-                  placeholder="e.g. Health Assistant / Nursing"
                 />
               </FormField>
               <FormField

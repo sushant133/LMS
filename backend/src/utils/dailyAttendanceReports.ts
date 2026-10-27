@@ -393,3 +393,59 @@ export const buildStatusReport = async (
 
   return rows;
 };
+const groupDayKey = (record: Pick<ReportAttendanceRecord, "dateBs" | "classId" | "sectionId" | "batchId" | "yearId">) =>
+  [record.dateBs, record.classId, record.sectionId, record.batchId, record.yearId]
+    .map((part) => part?.toString() ?? "")
+    .join("|");
+
+/**
+ * Subject-wise marks count as daily attendance where no daily mark exists:
+ * a student on the day's daily sheet keeps that status; anyone else takes their
+ * status from the earliest subject-wise sheet of that day (the first period).
+ * Read-only: builds report rows, never writes.
+ */
+export const withSubjectWiseFallback = (
+  dailyRecords: ReportAttendanceRecord[],
+  subjectRecords: Array<Omit<ReportAttendanceRecord, "status"> & { createdAt?: Date }>
+): ReportAttendanceRecord[] => {
+  const derived = new Map<string, ReportAttendanceRecord & { seen: Set<string> }>();
+  // Daily sheets come first so their students keep the daily status
+  for (const record of dailyRecords) {
+    const key = groupDayKey(record);
+    const day = derived.get(key);
+    if (!day) {
+      derived.set(key, {
+        ...record,
+        entries: [...(record.entries ?? [])],
+        seen: new Set((record.entries ?? []).map((entry) => entry.studentId.toString()))
+      });
+      continue;
+    }
+    for (const entry of record.entries ?? []) {
+      const studentId = entry.studentId.toString();
+      if (day.seen.has(studentId)) continue;
+      day.seen.add(studentId);
+      day.entries.push(entry);
+    }
+  }
+
+  const ordered = [...subjectRecords].sort(
+    (a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0)
+  );
+  for (const record of ordered) {
+    const key = groupDayKey(record);
+    let day = derived.get(key);
+    if (!day) {
+      day = { ...record, entries: [], status: "SUBJECT_WISE", seen: new Set() };
+      derived.set(key, day);
+    }
+    for (const entry of record.entries ?? []) {
+      const studentId = entry.studentId.toString();
+      if (day.seen.has(studentId)) continue;
+      day.seen.add(studentId);
+      day.entries.push(entry);
+    }
+  }
+
+  return [...derived.values()].map(({ seen: _seen, ...record }) => record);
+};

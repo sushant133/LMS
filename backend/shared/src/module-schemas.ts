@@ -405,7 +405,11 @@ export const moduleStaffSchema = z.object({
 
 export const libraryReturnSchema = z.object({
   returnedDateBs: bsDateSchema,
-  fineNpr: moneySchema.default(0)
+  /**
+   * Omit to let the server charge the overdue fine (Library → Overdue Fines
+   * rules). Send a number only to override it.
+   */
+  fineNpr: moneySchema.optional()
 });
 
 /** Admin-only: extend / correct due date on an active issue. */

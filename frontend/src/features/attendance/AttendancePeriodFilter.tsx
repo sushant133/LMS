@@ -10,6 +10,8 @@ import type {
 interface AttendancePeriodFilterProps {
   value: AttendancePeriodSelection;
   onChange: (value: AttendancePeriodSelection) => void;
+  /** Shown under the fields while the period is incomplete or invalid. */
+  error?: string | null;
 }
 
 const periodLabels: Record<AttendanceExportPeriod, string> = {
@@ -22,6 +24,7 @@ const periodLabels: Record<AttendanceExportPeriod, string> = {
 export const AttendancePeriodFilter = ({
   value,
   onChange,
+  error,
 }: AttendancePeriodFilterProps) => {
   const update = (patch: Partial<AttendancePeriodSelection>) =>
     onChange({ ...value, ...patch });
@@ -88,6 +91,12 @@ export const AttendancePeriodFilter = ({
             />
           </FormField>
         </>
+      ) : null}
+
+      {error ? (
+        <p className="text-sm text-rose-600 md:col-span-2 xl:col-span-3" role="alert">
+          {error}
+        </p>
       ) : null}
     </div>
   );

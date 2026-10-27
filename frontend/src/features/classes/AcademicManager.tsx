@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { Link, useSearchParams } from "react-router-dom";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { CollegeAcademicManager } from "./CollegeAcademicManager";
@@ -315,6 +316,7 @@ const SchoolAcademicManager = () => {
                           size="sm"
                           variant="outline"
                           onClick={() => {
+                            scrollToForm("academic-section-classes");
                             setEditingClassId(item._id);
                             setClassForm({
                               name: item.name,
@@ -470,6 +472,7 @@ const SchoolAcademicManager = () => {
                         size="sm"
                         variant="outline"
                         onClick={() => {
+                          scrollToForm("academic-section-sections");
                           setEditingSectionId(section._id);
                           setSectionForm({
                             name: section.name,
@@ -610,6 +613,7 @@ const SchoolAcademicManager = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("academic-section-subjects");
                               setEditingSubjectId(subject._id);
                               setSubjectForm({
                                 name: subject.name,

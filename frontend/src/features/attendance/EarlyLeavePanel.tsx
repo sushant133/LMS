@@ -18,7 +18,11 @@ import { getTodayBs } from "@munatech/nepali-datepicker";
 import { LogOut, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
-import { useCanEditOrDeleteRecords, useIsGrantedAdmin } from "hooks/useModuleAccess";
+import {
+  useCanEditOrDeleteRecords,
+  useIsGrantedAdmin,
+  useStudentAttendanceGrant,
+} from "hooks/useModuleAccess";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
@@ -111,8 +115,11 @@ export const EarlyLeavePanel = () => {
   const { user } = useAuth();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
+  const studentGrant = useStudentAttendanceGrant();
   const grantedAttendanceAdmin =
-    useIsGrantedAdmin("attendance") || useIsGrantedAdmin("daily-attendance");
+    useIsGrantedAdmin("attendance") ||
+    useIsGrantedAdmin("daily-attendance") ||
+    studentGrant.write;
   const canWrite =
     canManageInstitution(user?.role ?? "") ||
     grantedAttendanceAdmin ||

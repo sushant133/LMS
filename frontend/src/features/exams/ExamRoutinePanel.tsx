@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ExamRecord,
@@ -514,6 +515,7 @@ export const ExamRoutinePanel = ({
       remarks: routine.remarks ?? "",
     });
     setShowForm(true);
+    scrollToForm("exam-routine-form");
   };
 
   const printSheetId = `exam-routine-print-${exam._id}`;
@@ -916,7 +918,7 @@ export const ExamRoutinePanel = ({
 
       {/* Add / Edit single entry */}
       {canWrite && showForm ? (
-        <Card className="border-brand-200">
+        <Card id="exam-routine-form" className="border-brand-200">
           <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
             <CardTitle className="text-base">
               {editingRoutineId ? "Edit routine entry" : "Add routine entry"}

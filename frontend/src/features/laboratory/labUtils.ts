@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { printPageCss } from "lib/printPage";
 import type {
   LaboratoryEquipmentInput,
   LaboratoryEquipmentRecord,
@@ -336,6 +337,7 @@ export function buildLabListPrintHtml(options: LabListPrintOptions): string {
     tfoot td { font-weight: 600; background: #f8fafc; }
     @page { size: A4 landscape; margin: 7mm; }
     ${institutionCss}
+    ${printPageCss("A4 landscape", "7mm")}
   </style>
 </head>
 <body>

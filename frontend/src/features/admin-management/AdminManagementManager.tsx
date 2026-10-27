@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   adminAccountSchema,
@@ -234,7 +235,7 @@ export const AdminManagementManager = () => {
         description="As Super Admin, create and manage Administrators, assign which ERP modules each can open, change login ID and password, and email them credentials automatically."
       />
 
-      <Card>
+      <Card id="administrator-form">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <UserCog className="h-5 w-5 text-brand-700" />
@@ -442,6 +443,7 @@ export const AdminManagementManager = () => {
                           variant="outline"
                           disabled={admin.isDeleted}
                           onClick={() => {
+                            scrollToForm("administrator-form");
                             setAccessAdmin(null);
                             setEditing(admin);
                             setForm({

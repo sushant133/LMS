@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   PARENT_RELATIONSHIPS,
@@ -352,6 +353,7 @@ export const ParentLinkManager = () => {
       confirmPassword: "",
       isActive: parent.isActive !== false,
     });
+    scrollToForm("parent-edit-form");
   };
 
   const submitEditParent = () => {
@@ -545,7 +547,7 @@ export const ParentLinkManager = () => {
             )}
 
             {editingParentId ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <div id="parent-edit-form" className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                 <p className="text-sm font-semibold text-slate-900">
                   Edit parent account
                 </p>

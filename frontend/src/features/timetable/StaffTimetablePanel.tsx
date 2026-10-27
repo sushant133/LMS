@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DAYS_OF_WEEK,
@@ -398,6 +399,7 @@ export const StaffTimetablePanel = ({
       academicYearBs: slot.academicYearBs || academicYearBs,
     });
     setShowForm(true);
+    scrollToForm("staff-timetable-form");
   };
 
   const startCreate = (staffId?: string) => {
@@ -611,7 +613,7 @@ export const StaffTimetablePanel = ({
       </Card>
 
       {canWrite && showForm ? (
-        <Card className="border-brand-200 shadow-md">
+        <Card id="staff-timetable-form" className="border-brand-200 shadow-md">
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle>
               {editingId ? "Edit timetable slot" : "Add timetable slot"}

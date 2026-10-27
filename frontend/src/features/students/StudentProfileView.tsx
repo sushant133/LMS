@@ -103,6 +103,14 @@ const InfoGrid = ({
   </div>
 );
 
+type ProfileFeeYear = {
+  programYear: number;
+  label: string;
+  paidNpr: number;
+  advanceNpr?: number;
+  remainingNpr: number;
+};
+
 export const StudentProfileView = () => {
   const { studentId = "" } = useParams();
   const { user } = useAuth();
@@ -126,6 +134,20 @@ export const StudentProfileView = () => {
   });
 
   const profile = profileQuery.data;
+  const feeYears = (
+    Array.isArray(profile?.financial?.yearWise) ? profile?.financial?.yearWise : []
+  ) as ProfileFeeYear[];
+  const currentProgramYear = Number(profile?.financial?.currentProgramYear) || undefined;
+  /** "NPR 100,000 · paid 20,000 (advance) · due 80,000" for the overview. */
+  const yearFeeLine = (programYear: number, plannedNpr: number | undefined) => {
+    const row = feeYears.find((y) => y.programYear === programYear);
+    const plan = formatCurrencyNpr(plannedNpr ?? 0);
+    if (!row || !(Number(row.paidNpr) > 0)) return plan;
+    const advance = Number(row.advanceNpr) || 0;
+    return `${plan} · paid ${formatCurrencyNpr(row.paidNpr)}${
+      advance > 0 ? ` (incl. ${formatCurrencyNpr(advance)} advance)` : ""
+    } · due ${formatCurrencyNpr(row.remainingNpr)}`;
+  };
   const student = profile?.student;
   const permissions = profile?.permissions;
 
@@ -376,22 +398,22 @@ export const StudentProfileView = () => {
                             value: student.bloodGroup ?? "—",
                           },
                           {
-                            label: "1st Year fee",
+                            label: `1st Year fee${currentProgramYear === 1 ? " (current)" : ""}`,
                             value: student.hasScholarship
                               ? "Scholarship"
-                              : formatCurrencyNpr(student.year1FeeNpr ?? 0),
+                              : yearFeeLine(1, student.year1FeeNpr),
                           },
                           {
-                            label: "2nd Year fee",
+                            label: `2nd Year fee${currentProgramYear === 2 ? " (current)" : ""}`,
                             value: student.hasScholarship
                               ? "Scholarship"
-                              : formatCurrencyNpr(student.year2FeeNpr ?? 0),
+                              : yearFeeLine(2, student.year2FeeNpr),
                           },
                           {
-                            label: "3rd Year fee",
+                            label: `3rd Year fee${currentProgramYear === 3 ? " (current)" : ""}`,
                             value: student.hasScholarship
                               ? "Scholarship"
-                              : formatCurrencyNpr(student.year3FeeNpr ?? 0),
+                              : yearFeeLine(3, student.year3FeeNpr),
                           },
                           {
                             label: "Outstanding tuition (balance)",
@@ -636,11 +658,25 @@ export const StudentProfileView = () => {
               <InfoGrid
                 items={[
                   {
-                    label: "Outstanding due",
+                    label: "Outstanding due (all years)",
                     value: formatCurrencyNpr(
                       profile.financial.outstandingDueNpr as number,
                     ),
                   },
+                  ...(currentProgramYear &&
+                  typeof profile.financial.currentYearDueNpr === "number"
+                    ? [
+                        {
+                          label: `Due for current year (${
+                            feeYears.find((y) => y.programYear === currentProgramYear)
+                              ?.label ?? `Year ${currentProgramYear}`
+                          })`,
+                          value: formatCurrencyNpr(
+                            profile.financial.currentYearDueNpr as number,
+                          ),
+                        },
+                      ]
+                    : []),
                   {
                     label: "Total paid",
                     value: formatCurrencyNpr(
@@ -683,20 +719,36 @@ export const StudentProfileView = () => {
                         remainingNpr: number;
                         status: string;
                         scholarshipNote?: string;
+                        advanceNpr?: number;
                       }>
                     ).map((y) => (
                       <div
                         key={y.programYear}
-                        className="rounded-xl border border-slate-200 p-3 text-sm"
+                        className={
+                          y.programYear === currentProgramYear
+                            ? "rounded-xl border-2 border-brand-500 bg-brand-50/40 p-3 text-sm"
+                            : "rounded-xl border border-slate-200 p-3 text-sm"
+                        }
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold">{y.label}</span>
+                          <span className="font-semibold">
+                            {y.label}
+                            {y.programYear === currentProgramYear ? (
+                              <span className="ml-2 rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                Current year
+                              </span>
+                            ) : null}
+                          </span>
                           <Badge className="bg-slate-100 text-slate-700">
                             {String(y.status).replace(/_/g, " ")}
                           </Badge>
                         </div>
                         <p className="mt-2 text-slate-600">
-                          Paid {formatCurrencyNpr(y.paidNpr)} · Sch.{" "}
+                          Paid {formatCurrencyNpr(y.paidNpr)}
+                          {(y.advanceNpr ?? 0) > 0
+                            ? ` (incl. advance ${formatCurrencyNpr(y.advanceNpr ?? 0)})`
+                            : ""}{" "}
+                          · Sch.{" "}
                           {formatCurrencyNpr(y.scholarshipNpr)} · Due{" "}
                           {formatCurrencyNpr(y.remainingNpr)}
                         </p>
@@ -913,7 +965,7 @@ export const StudentProfileView = () => {
                     value: profile.library.pendingCount,
                   },
                   {
-                    label: "Total Fines",
+                    label: "Library fine to pay",
                     value: formatCurrencyNpr(profile.library.fineTotal),
                   },
                 ]}

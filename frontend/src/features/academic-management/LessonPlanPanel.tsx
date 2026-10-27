@@ -2310,7 +2310,7 @@ export const LessonPlanPanel = ({
                                 )}
                               </td>
                               <td className="border border-slate-300 px-2 py-2 align-top">
-                                <NumberInput
+                                <NumberInput emptyValue={1}
                                   className="h-9 w-16"
                                   min={1}
                                   value={item.estimatedClasses}

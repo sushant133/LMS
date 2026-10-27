@@ -3,6 +3,7 @@ import { computeSubjectMark, examSchema, resultSchema } from "@phit-erp/shared";
 import type { z } from "zod";
 import { Batch } from "../models/Batch.js";
 import { Exam } from "../models/Exam.js";
+import { ExamSymbolNumber } from "../models/ExamSymbolNumber.js";
 import { ExamRoutine } from "../models/ExamRoutine.js";
 import { Result } from "../models/Result.js";
 import { ResultSubmission } from "../models/ResultSubmission.js";
@@ -1159,14 +1160,15 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     }
   }
 
-  const [student, section, subjects, branding, batch, year, schoolClass] = await Promise.all([
+  const [student, section, subjects, branding, batch, year, schoolClass, symbol] = await Promise.all([
     Student.findOne(withTenantScope(req, { _id: result.studentId })).populate("user", "-password"),
     result.sectionId ? Section.findOne(withTenantScope(req, { _id: result.sectionId })) : null,
     Subject.find({ _id: { $in: marksForView.map((mark) => mark.subjectId) }, schoolId }),
     resolveSchoolBranding(schoolId),
     result.batchId ? Batch.findById(result.batchId).lean() : null,
     result.yearId ? Year.findById(result.yearId).lean() : null,
-    result.classId ? SchoolClass.findById(result.classId).lean() : null
+    result.classId ? SchoolClass.findById(result.classId).lean() : null,
+    ExamSymbolNumber.findOne({ schoolId, examId, studentId: result.studentId }).select("symbolNumber").lean()
   ]);
 
   const scopedMarks = teacherScope
@@ -1188,6 +1190,7 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     result: { ...result.toObject(), marks: scopedMarks },
     exam,
     student,
+    symbolNumber: symbol?.symbolNumber ?? "",
     section,
     batch: batch ? { _id: batch._id.toString(), name: batch.name } : undefined,
     year: year ? { _id: year._id.toString(), name: year.name } : undefined,
@@ -1293,14 +1296,15 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     }
   }
 
-  const [student, branding, batch, year, schoolClass, section, subjects] = await Promise.all([
+  const [student, branding, batch, year, schoolClass, section, subjects, symbol] = await Promise.all([
     Student.findOne(withTenantScope(req, { _id: studentId })).populate("user", "-password"),
     resolveSchoolBranding(schoolId),
     resultDoc.batchId ? Batch.findById(resultDoc.batchId).lean() : null,
     resultDoc.yearId ? Year.findById(resultDoc.yearId).lean() : null,
     resultDoc.classId ? SchoolClass.findById(resultDoc.classId).lean() : null,
     resultDoc.sectionId ? Section.findById(resultDoc.sectionId).lean() : null,
-    Subject.find({ _id: { $in: scopedMarks.map((mark) => mark.subjectId) }, schoolId }).lean()
+    Subject.find({ _id: { $in: scopedMarks.map((mark) => mark.subjectId) }, schoolId }).lean(),
+    ExamSymbolNumber.findOne({ schoolId, examId, studentId }).select("symbolNumber").lean()
   ]);
 
   if (!student) {
@@ -1342,6 +1346,7 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
         : (exam.startDateBs ?? exam.endDateBs ?? undefined),
     studentName: user?.fullName ?? "Student",
     registrationNumber: student.admissionNumber,
+    symbolNumber: symbol?.symbolNumber,
     className: schoolClass?.name ?? "",
     sectionName: section?.name ?? "",
     batchName: batch?.name,

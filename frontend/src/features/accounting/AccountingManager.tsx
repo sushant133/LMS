@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -1562,7 +1563,7 @@ export const AccountingManager = () => {
       {false && tab === "fee-records" ? (
         <div className="grid gap-6 xl:grid-cols-2">
           {isAdmin ? (
-            <Card>
+            <Card id="fee-structure-form">
               <CardHeader>
                 <CardTitle>
                   {editingStructure ? "Edit Fee Structure" : "Fee Structure"}
@@ -1722,6 +1723,7 @@ export const AccountingManager = () => {
                                 size="sm"
                                 variant="outline"
                                 onClick={() => {
+                                  scrollToForm("fee-structure-form");
                                   setEditingStructure(structure);
                                   setStructureForm({
                                     title: structure.title,
@@ -2198,7 +2200,7 @@ export const AccountingManager = () => {
 
       {false ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
+          <Card id="salary-payment-form">
             <CardHeader>
               <CardTitle>
                 {editingSalary ? "Edit Salary Payment" : "Pay Salary"}
@@ -2466,6 +2468,7 @@ export const AccountingManager = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("salary-payment-form");
                               setEditingSalary(row);
                               setSalaryForm({
                                 employeeType: row.employeeType,
@@ -2539,7 +2542,7 @@ export const AccountingManager = () => {
 
       {tab === "expenses" ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
+          <Card id="expense-form">
             <CardHeader>
               <CardTitle>
                 {editingExpense ? "Edit Expense" : "Daily Expense Register"}
@@ -2776,6 +2779,7 @@ export const AccountingManager = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("expense-form");
                               setEditingExpense(row);
                               setExpenseForm({
                                 category:
@@ -2817,7 +2821,7 @@ export const AccountingManager = () => {
 
       {tab === "purchases" ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
+          <Card id="purchase-form">
             <CardHeader>
               <CardTitle>
                 {editingPurchase ? "Edit Purchase" : "Purchase Register"}
@@ -3103,6 +3107,7 @@ export const AccountingManager = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("purchase-form");
                               setEditingPurchase(row);
                               setPurchaseForm({
                                 category:
@@ -3297,7 +3302,7 @@ export const AccountingManager = () => {
           </Card>
 
           <div className="grid gap-6 xl:grid-cols-3">
-          <Card className={cn("xl:col-span-1", !showIncomeForm && !editingIncome && "h-fit")}>
+          <Card id="income-form" className={cn("xl:col-span-1", !showIncomeForm && !editingIncome && "h-fit")}>
             <CardHeader>
               <CardTitle>
                 {editingIncome ? "Edit Income" : "Other Income Register"}
@@ -3560,6 +3565,7 @@ export const AccountingManager = () => {
                                     size="sm"
                                     variant="outline"
                                     onClick={() => {
+                                      scrollToForm("income-form");
                                       setEditingIncome(record);
                                       setShowIncomeForm(true);
                                       setIncomeForm({
@@ -3763,6 +3769,7 @@ export const AccountingManager = () => {
                             }`
                           : undefined;
                       printSimpleDocument({
+                        landscape: true,
                         title:
                           reportTypes.find((r) => r.id === selectedReport)
                             ?.label ?? "Report",
@@ -4334,7 +4341,7 @@ export const AccountingManager = () => {
 
       {false ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
+          <Card id="accountant-form">
             <CardHeader>
               <CardTitle>
                 {editingAccountant ? "Edit Accountant" : "Add Accountant"}
@@ -4463,6 +4470,7 @@ export const AccountingManager = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("accountant-form");
                               setEditingAccountant(accountant);
                               setAccountantForm({
                                 fullName: accountant.user.fullName,

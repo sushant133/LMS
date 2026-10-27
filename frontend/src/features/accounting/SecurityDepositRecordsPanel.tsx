@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { printPageCss } from "lib/printPage";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   BatchRecord,
@@ -455,6 +457,7 @@ export const SecurityDepositRecordsPanel = () => {
       (row.paymentMethod as (typeof PAYMENT_METHODS)[number]) || "CASH",
     );
     setEditNotes(row.notes ?? "");
+    scrollToForm("deposit-receipt-edit");
   };
 
   const submitEdit = () => {
@@ -513,6 +516,7 @@ export const SecurityDepositRecordsPanel = () => {
     setEditingStudentId(row.student._id);
     setEditPlanExpected(String(row.expected || 0));
     setEditPlanWaived(Boolean(row.waived));
+    scrollToForm("deposit-plan-edit");
   };
 
   const submitStudentPlanEdit = () => {
@@ -752,6 +756,7 @@ export const SecurityDepositRecordsPanel = () => {
       @page { size: A4 landscape; margin: 10mm; }
     }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "10mm")}
   </style>
 </head>
 <body>
@@ -884,6 +889,7 @@ export const SecurityDepositRecordsPanel = () => {
       @page { size: A4 landscape; margin: 10mm; }
     }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "10mm")}
   </style>
 </head>
 <body>
@@ -1084,7 +1090,7 @@ export const SecurityDepositRecordsPanel = () => {
           </CardHeader>
           <CardContent>
             {editingRow ? (
-              <div className="mb-6 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
+              <div id="deposit-receipt-edit" className="mb-6 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="font-medium text-slate-900">
@@ -1380,7 +1386,7 @@ export const SecurityDepositRecordsPanel = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             {editingStudentId && canAdminEdit ? (
-              <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4">
+              <div id="deposit-plan-edit" className="rounded-xl border border-violet-200 bg-violet-50/50 p-4">
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="font-medium text-slate-900">

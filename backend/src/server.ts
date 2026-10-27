@@ -18,6 +18,7 @@ import { ensureUnitStandInSubUnits } from "./utils/ensureUnitStandInSubUnits.js"
 import { repairLaboratoryIndexes } from "./utils/repairLaboratoryIndexes.js";
 import { startAcademicManagementNotificationScheduler } from "./utils/academicManagementNotifications.js";
 import { startNoticeNotificationScheduler } from "./utils/noticeNotifications.js";
+import { startLibraryFineScheduler } from "./utils/libraryFines.js";
 import { configuredCorsOrigins, isOriginAllowed } from "./utils/allowedOrigins.js";
 import { logger } from "./utils/logger.js";
 import { ensureUploadDirectories } from "./services/fileStorage/index.js";
@@ -223,6 +224,7 @@ const startServer = async (): Promise<void> => {
 
   startAcademicManagementNotificationScheduler();
   startNoticeNotificationScheduler();
+  startLibraryFineScheduler();
 
   httpServer = app.listen(env.PORT, env.HOST, () => {
     logger.info(

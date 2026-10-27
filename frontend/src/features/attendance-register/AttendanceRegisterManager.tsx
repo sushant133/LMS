@@ -55,6 +55,8 @@ type Meta = {
   todayBs: string;
   defaultMonthBs: string;
   canStudentRegister: boolean;
+  /** Administrator, or a "Student Attendance" WRITE grant (student tab only). */
+  canEditStudentRegister?: boolean;
   canTeacherRegister: boolean;
   canStaffRegister: boolean;
   batches: BatchRecord[];
@@ -94,7 +96,7 @@ export const AttendanceRegisterManager = ({
 }: AttendanceRegisterManagerProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const canEditRegister = useCanApproveRecords();
+  const isRegisterAdmin = useCanApproveRecords();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
 
@@ -105,6 +107,11 @@ export const AttendanceRegisterManager = ({
 
   const meta = metaQuery.data;
   const [tab, setTab] = useState<AttendanceRegisterTab>("STUDENT");
+  // Student cells: also a "Student Attendance" WRITE grant (server decides);
+  // Teacher / Staff cells stay Administrator-only.
+  const canEditRegister =
+    isRegisterAdmin ||
+    (tab === "STUDENT" && Boolean(meta?.canEditStudentRegister));
   const [monthBs, setMonthBs] = useState("");
   const [batchId, setBatchId] = useState("");
   const [yearId, setYearId] = useState("");

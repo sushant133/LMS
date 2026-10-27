@@ -3,6 +3,7 @@ import type {
   AttendanceRegisterResponse,
   AttendanceRegisterRowSummary,
 } from "@phit-erp/shared";
+import { printPageCss } from "lib/printPage";
 import { getPrintInstitutionBranding } from "lib/printBranding";
 import { csvCell } from "lib/csvCell";
 
@@ -348,6 +349,7 @@ export const buildAttendanceRegisterPrintHtml = (
       thead { display: table-header-group; }
       tr { page-break-inside: avoid; }
     }
+    ${printPageCss("A4 landscape", "6mm")}
   </style>
 </head>
 <body>
@@ -540,7 +542,7 @@ export const downloadAttendanceRegisterPdf = async (
           format: "a4",
           orientation: "landscape",
         },
-        pagebreak: { mode: ["css", "legacy"] },
+        pagebreak: { mode: ["css", "legacy"], avoid: ["tr", ".avoid-break"] },
       } as never)
       .from(host)
       .outputPdf("blob")) as Blob;

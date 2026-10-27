@@ -193,6 +193,9 @@ export const ParentPortal = () => {
                             </p>
                             <p>
                               Paid {formatCurrencyNpr(y.paidNpr)}
+                              {(y.advanceNpr ?? 0) > 0
+                                ? ` (incl. advance ${formatCurrencyNpr(y.advanceNpr ?? 0)})`
+                                : ""}
                               {y.scholarshipNpr > 0
                                 ? ` · Sch ${formatCurrencyNpr(y.scholarshipNpr)}`
                                 : ""}

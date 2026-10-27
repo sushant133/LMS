@@ -17,6 +17,7 @@ import {
   PRINT_INSTITUTION_HEADER_CSS,
 } from "lib/printBranding";
 import { formatCurrencyNpr } from "lib/utils";
+import { printPageCss } from "lib/printPage";
 
 type SheetCell = string | number | null;
 
@@ -577,6 +578,7 @@ const buildLedgerHtml = (
       .no-print { display: none !important; }
     }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "10mm")}
   </style>
 </head>
 <body>
@@ -963,6 +965,7 @@ export function printFinanceReport(report: FinanceReportResponse) {
       th{background:#f8fafc}
       .totals{margin-top:16px;font-size:13px}
       ${PRINT_INSTITUTION_HEADER_CSS}
+      ${printPageCss("A4 landscape", "10mm")}
     </style></head><body>
     ${institutionHeader}
     <h1>${escapeHtml(report.title)}</h1>

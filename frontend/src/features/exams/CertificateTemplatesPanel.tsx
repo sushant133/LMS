@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CHARACTER_CERTIFICATE_PLACEHOLDERS,
@@ -124,6 +125,7 @@ export const CertificateTemplatesPanel = () => {
       isActive: template.isActive,
     });
     setShowForm(true);
+    scrollToForm("certificate-template-form");
   };
 
   const insertPlaceholder = (token: string) =>
@@ -163,7 +165,7 @@ export const CertificateTemplatesPanel = () => {
       </div>
 
       {showForm ? (
-        <Card>
+        <Card id="certificate-template-form">
           <CardHeader>
             <CardTitle>{editingId ? "Edit template" : "New template"}</CardTitle>
           </CardHeader>

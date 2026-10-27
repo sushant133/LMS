@@ -33,6 +33,7 @@ import {
 } from "../utils/libraryCopies.js";
 import { Setting } from "../models/Setting.js";
 import { processLibraryIssueReminders, syncSchoolLibraryOverdueStatuses } from "../utils/libraryNotifications.js";
+import { fineForReturn, libraryIssueFine, loadLibraryFineRules } from "../utils/libraryFines.js";
 import { compareBsDates, getTodayBs } from "../utils/nepaliDate.js";
 import { notifyParentsOfStudent, sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
@@ -667,10 +668,15 @@ export const listIssues = asyncHandler(async (req: Request, res: Response) => {
     .sort({ createdAt: -1 })
     .lean();
 
+  const fineRules = await loadLibraryFineRules(req.tenantSchoolId!);
+  const todayForFines = getTodayBs();
   return sendSuccess(
     res,
     "Library issues fetched",
-    issues.map((issue) => formatIssue(issue as Record<string, unknown>))
+    issues.map((issue) => ({
+      ...formatIssue(issue as Record<string, unknown>),
+      fine: libraryIssueFine(issue as never, fineRules, todayForFines)
+    }))
   );
 });
 
@@ -687,6 +693,7 @@ export const listMyBooks = asyncHandler(async (req: Request, res: Response) => {
     .sort({ createdAt: -1 });
 
   const todayBs = getTodayBs();
+  const fineRules = await loadLibraryFineRules(req.tenantSchoolId!);
   const enriched = await Promise.all(
     issues.map(async (issue) => {
       const book = issue.bookId as { title?: string } | null;
@@ -698,7 +705,13 @@ export const listMyBooks = asyncHandler(async (req: Request, res: Response) => {
       );
       return {
         ...formatIssue(issue.toObject() as Record<string, unknown>),
-        status
+        status,
+        // Student's own overdue fine (live while the book is out)
+        fine: libraryIssueFine(
+          { ...(issue.toObject() as Record<string, unknown>), status } as never,
+          fineRules,
+          todayBs
+        )
       };
     })
   );
@@ -917,10 +930,31 @@ export const returnBook = asyncHandler(async (req: Request, res: Response) => {
   const bookTitle = book?.title ?? "Book";
   const codeLabel = issue.bookCode ? ` [${issue.bookCode}]` : "";
 
+  // Overdue fine fixed at return: days not yet paid for × the student's daily
+  // rate, added to anything still owed from payments made while it was out.
+  // payload.fineNpr (optional) overrides the amount owed after return.
+  const fineRules = await loadLibraryFineRules(schoolId);
+  const computedFine = fineForReturn(issue, fineRules, payload.returnedDateBs);
+  const owedNpr = payload.fineNpr ?? computedFine.owedNpr;
+  const fineTotalNpr =
+    Math.round((computedFine.paidNpr + computedFine.waivedNpr + owedNpr) * 100) / 100;
   issue.status = "RETURNED";
   issue.returnedDateBs = payload.returnedDateBs;
-  issue.fineNpr = payload.fineNpr;
+  issue.fineNpr = fineTotalNpr;
+  issue.fineCarriedNpr = owedNpr;
+  issue.fineSettledThroughBs = payload.returnedDateBs;
+  issue.fineStatus =
+    owedNpr > 0
+      ? "OUTSTANDING"
+      : fineTotalNpr <= 0
+        ? "NONE"
+        : computedFine.paidNpr > 0
+          ? "PAID"
+          : "WAIVED";
+  issue.fineRatePerDayNpr = computedFine.ratePerDayNpr;
+  issue.fineDaysCharged = computedFine.daysCharged;
   await issue.save();
+  const fineNpr = owedNpr;
 
   if (issue.copyId) {
     await LibraryBookCopy.findOneAndUpdate(
@@ -934,7 +968,16 @@ export const returnBook = asyncHandler(async (req: Request, res: Response) => {
 
   await syncBookCopyCounts(issue.bookId, schoolId);
 
-  const fineMessage = payload.fineNpr > 0 ? ` Fine: NPR ${payload.fineNpr}.` : "";
+  const fineMessage =
+    fineNpr > 0
+      ? ` Overdue fine: NPR ${fineNpr}${
+          computedFine.paidNpr + computedFine.waivedNpr > 0
+            ? ` still to pay (NPR ${computedFine.paidNpr + computedFine.waivedNpr} already settled)`
+            : computedFine.daysCharged > 0 && payload.fineNpr === undefined
+              ? ` (${computedFine.daysCharged} day${computedFine.daysCharged === 1 ? "" : "s"} × NPR ${computedFine.ratePerDayNpr})`
+              : ""
+        } — please pay it at the library.`
+      : "";
 
   if (issue.borrowerType === "STUDENT" && issue.studentId) {
     const student = await Student.findById(issue.studentId).select("user").lean();

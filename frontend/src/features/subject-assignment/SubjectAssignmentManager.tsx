@@ -476,7 +476,7 @@ export const SubjectAssignmentManager = () => {
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [editingRow, deactivatingRow]);
+  }, [editingRow, deactivatingRow, continuingRow]);
 
   const updateMutation = useMutation({
     mutationFn: async () => {

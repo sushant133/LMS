@@ -6,6 +6,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { printPageCss } from "lib/printPage";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adToBs, bsToAd, getTodayBs } from "@munatech/nepali-datepicker";
 import {
@@ -441,6 +443,7 @@ const openRosterPrintWindow = (
         }
       }
       ${PRINT_INSTITUTION_HEADER_CSS}
+      ${printPageCss("A4 landscape", "8mm")}
     </style>
     </head><body>
     <div class="print-toolbar no-print">
@@ -1894,6 +1897,7 @@ const RostersList = ({
       coordinatorStaffId: r.coordinatorStaffId ?? "",
       remarks: r.remarks ?? "",
     });
+    scrollToForm("hospital-roster-form");
   };
 
   const cancelEdit = () => {
@@ -1999,7 +2003,7 @@ const RostersList = ({
   return (
     <div className="grid gap-6 xl:grid-cols-[400px_1fr]">
       {isAdmin ? (
-        <Card>
+        <Card id="hospital-roster-form">
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle>
               {editingId ? "Edit hospital roster" : "Create hospital roster"}

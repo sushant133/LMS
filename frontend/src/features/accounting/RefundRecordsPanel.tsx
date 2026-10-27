@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { printPageCss } from "lib/printPage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   BatchRecord,
@@ -526,6 +527,7 @@ export const RefundRecordsPanel = () => {
       @page { size: A4 portrait; margin: 12mm; }
     }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 portrait", "12mm")}
   </style>
 </head>
 <body>
@@ -627,6 +629,7 @@ export const RefundRecordsPanel = () => {
       @page { size: A4 landscape; margin: 10mm; }
     }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "10mm")}
   </style>
 </head>
 <body>

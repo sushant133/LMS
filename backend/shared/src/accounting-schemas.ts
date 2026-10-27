@@ -48,6 +48,19 @@ export const enhancedFeeCollectionSchema = z
     semesterBs: z.string().optional(),
     /** HA / multi-year: 1 = 1st year, 2 = 2nd year, 3 = 3rd year */
     programYear: z.coerce.number().int().min(1).max(3).optional(),
+    /**
+     * Advance on this receipt for later program years (2nd / 3rd year), paid
+     * together with this year's fee. Included in amountPaidNpr.
+     */
+    advanceAllocations: z
+      .array(
+        z.object({
+          programYear: z.coerce.number().int().min(2).max(3),
+          amountNpr: moneySchema
+        })
+      )
+      .max(2)
+      .optional(),
     currentChargesNpr: moneySchema.default(0),
     /** Tuition / fee amount paid (excludes security deposit). */
     amountPaidNpr: moneySchema,

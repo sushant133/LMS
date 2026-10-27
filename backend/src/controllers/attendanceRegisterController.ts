@@ -34,12 +34,23 @@ import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { Year } from "../models/Year.js";
+import { School } from "../models/School.js";
 import { Setting } from "../models/Setting.js";
+import { SubjectAssignment } from "../models/SubjectAssignment.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
-import { syncDailyAttendanceToSubject } from "../utils/dailyAttendanceUtils.js";
+import {
+  loadStudentAttendanceGrant,
+  studentAttendanceGrantFromMap,
+  type StudentAttendanceGrant
+} from "../utils/studentAttendanceAccess.js";
+import {
+  assertStudentAttendanceDayOpen,
+  getFallbackSlotForGroup,
+  syncDailyAttendanceToSubject
+} from "../utils/dailyAttendanceUtils.js";
 import { resolveMonthHolidayDates } from "../utils/academicCalendarService.js";
 import {
   ensureValidBsDate,
@@ -215,6 +226,8 @@ const legendFromStatuses = (statuses: string[]) => {
 
 type AccessCtx = {
   adminLike: boolean;
+  /** "Student Attendance" grant: every class on the student tab, not just a teacher's own. */
+  studentGrant: StudentAttendanceGrant;
   moduleAccess: ModuleAccessMap;
   canStudentRegister: boolean;
   canTeacherRegister: boolean;
@@ -231,8 +244,11 @@ const resolveAccess = async (req: Request): Promise<AccessCtx> => {
     ? await getUserModuleAccessMap(req.user.userId)
     : ({} as ModuleAccessMap);
 
+  const studentGrant = studentAttendanceGrantFromMap(moduleAccess);
+
   const canStudentRegister =
     adminLike ||
+    studentGrant.read ||
     canAccessModule(moduleAccess, "daily-attendance") ||
     canAccessModule(moduleAccess, "attendance") ||
     canAccessModule(moduleAccess, "field-duty") ||
@@ -254,6 +270,7 @@ const resolveAccess = async (req: Request): Promise<AccessCtx> => {
 
   return {
     adminLike,
+    studentGrant,
     moduleAccess,
     canStudentRegister,
     canTeacherRegister,
@@ -315,16 +332,28 @@ const computeStats = (
 const q = (req: Request, key: string): string =>
   String(req.query[key] ?? "").trim();
 
-const assertRegisterAdmin = async (req: Request): Promise<void> => {
+const isRegisterAdmin = async (req: Request): Promise<boolean> => {
   const role = normalizeUserRole(req.user?.role ?? "");
-  if (canApproveRecords(role)) return;
+  if (canApproveRecords(role)) return true;
   const secondary = req.user?.userId ? await getUserSecondaryRoles(req.user.userId) : [];
-  if (secondary.some((r) => canApproveRecords(normalizeUserRole(r)))) return;
-  throw new ApiError(403, "Only the Administrator can edit the attendance register");
+  return secondary.some((r) => canApproveRecords(normalizeUserRole(r)));
+};
+
+/**
+ * Register cell edits: the Administrator, or — for the student tab only — a
+ * holder of the "Student Attendance" WRITE grant. Teacher / staff cells stay
+ * Administrator-only.
+ */
+const canEditRegisterTab = async (req: Request, tab: string): Promise<boolean> => {
+  if (await isRegisterAdmin(req)) return true;
+  if (String(tab).toUpperCase() !== "STUDENT") return false;
+  return (await loadStudentAttendanceGrant(req)).write;
 };
 
 const FIELD_ENTRY_STATUSES = ["PRESENT", "ABSENT", "LATE", "LEAVE", "EMERGENCY_DUTY"] as const;
 const DAILY_STATUS_SET = new Set<string>(DAILY_ATTENDANCE_STATUSES);
+
+type DailySheetDoc = InstanceType<typeof DailyAttendance>;
 const EMPLOYEE_STATUS_SET = new Set<string>(EMPLOYEE_ATTENDANCE_STATUSES);
 const FIELD_STATUS_SET = new Set<string>(FIELD_ENTRY_STATUSES);
 
@@ -382,7 +411,7 @@ export const getStudentAttendanceRegister = asyncHandler(
 
     // Teachers: only assigned groups
     const role = normalizeUserRole(req.user?.role ?? "");
-    if (role === "TEACHER" && !access.adminLike) {
+    if (role === "TEACHER" && !access.adminLike && !access.studentGrant.read) {
       const scope = await getTeacherScope(req);
       if (scope) {
         if (college) {
@@ -1019,6 +1048,8 @@ export const getAttendanceRegisterMeta = asyncHandler(
       todayBs,
       defaultMonthBs: monthBs,
       canStudentRegister: access.canStudentRegister,
+      /** Student cells may be corrected by the Administrator or a Student Attendance WRITE grant. */
+      canEditStudentRegister: await canEditRegisterTab(req, "STUDENT"),
       canTeacherRegister: access.canTeacherRegister,
       canStaffRegister: access.canStaffRegister,
       batches,
@@ -1056,9 +1087,11 @@ export const getAttendanceRegisterMeta = asyncHandler(
  */
 export const updateAttendanceRegisterCell = asyncHandler(
   async (req: Request, res: Response) => {
-    await assertRegisterAdmin(req);
-    const schoolId = tenantObjectId(req);
     const tab = String(req.body?.tab ?? "STUDENT").toUpperCase() as AttendanceRegisterTab;
+    if (!(await canEditRegisterTab(req, tab))) {
+      throw new ApiError(403, "Only the Administrator can edit the attendance register");
+    }
+    const schoolId = tenantObjectId(req);
     const personId = String(req.body?.personId ?? "").trim();
     const dateBs = ensureValidBsDate(String(req.body?.dateBs ?? "").trim());
     const status = String(req.body?.status ?? "").trim().toUpperCase();
@@ -1072,26 +1105,11 @@ export const updateAttendanceRegisterCell = asyncHandler(
       const student = await Student.findOne({ _id: personId, schoolId }).lean();
       if (!student) throw new ApiError(404, "Student not found");
 
-      const dailySheet = await DailyAttendance.findOne({
-        schoolId,
-        dateBs,
-        "entries.studentId": personId
-      });
-      if (dailySheet) {
-        if (!DAILY_STATUS_SET.has(status)) {
-          throw new ApiError(400, `Invalid student attendance status: ${status}`);
-        }
-        for (const e of dailySheet.entries ?? []) {
-          if (entryStudentId(e.studentId) === personId) {
-            e.status = status as typeof e.status;
-            e.remarks = remarks;
-          }
-        }
-        dailySheet.lastEditedBy = actorId as never;
-        dailySheet.markModified("entries");
-        await dailySheet.save();
-        const institutionType = await getInstitutionType(req);
-        await syncDailyAttendanceToSubject(
+      const institutionType = await getInstitutionType(req);
+      const college = isCollege(institutionType);
+      // Register marks are the Student Daily Attendance sheet: keep subject-wise in step too
+      const syncToSubject = (dailySheet: DailySheetDoc) =>
+        syncDailyAttendanceToSubject(
           {
             _id: dailySheet._id.toString(),
             schoolId: schoolId.toString(),
@@ -1109,11 +1127,37 @@ export const updateAttendanceRegisterCell = asyncHandler(
             createdBy: String(dailySheet.createdBy),
             syncedAttendanceId: dailySheet.syncedAttendanceId?.toString()
           },
-          isCollege(institutionType),
+          college,
           req.user!.userId,
           req.user!.role,
-          null
+          null,
+          { mergeEntries: true }
         );
+
+      // Classroom attendance is closed on holidays (field-duty marks below are not)
+      const assertClassDayOpen = () =>
+        assertStudentAttendanceDayOpen(schoolId.toString(), dateBs);
+
+      const dailySheet = await DailyAttendance.findOne({
+        schoolId,
+        dateBs,
+        "entries.studentId": personId
+      });
+      if (dailySheet) {
+        await assertClassDayOpen();
+        if (!DAILY_STATUS_SET.has(status)) {
+          throw new ApiError(400, `Invalid student attendance status: ${status}`);
+        }
+        for (const e of dailySheet.entries ?? []) {
+          if (entryStudentId(e.studentId) === personId) {
+            e.status = status as typeof e.status;
+            e.remarks = remarks;
+          }
+        }
+        dailySheet.lastEditedBy = actorId as never;
+        dailySheet.markModified("entries");
+        await dailySheet.save();
+        await syncToSubject(dailySheet);
         await recordAudit(req, {
           action: "attendance_register.cell.update",
           entity: "DAILY_ATTENDANCE",
@@ -1182,6 +1226,7 @@ export const updateAttendanceRegisterCell = asyncHandler(
       }
       const groupSheet = await DailyAttendance.findOne(groupFilter);
       if (groupSheet) {
+        await assertClassDayOpen();
         if (!DAILY_STATUS_SET.has(status)) {
           throw new ApiError(400, `Invalid student attendance status: ${status}`);
         }
@@ -1191,6 +1236,7 @@ export const updateAttendanceRegisterCell = asyncHandler(
         ] as never;
         groupSheet.lastEditedBy = actorId as never;
         await groupSheet.save();
+        await syncToSubject(groupSheet);
         await recordAudit(req, {
           action: "attendance_register.cell.update",
           entity: "DAILY_ATTENDANCE",
@@ -1207,10 +1253,91 @@ export const updateAttendanceRegisterCell = asyncHandler(
         });
       }
 
-      throw new ApiError(
-        400,
-        "No attendance has been taken for this date. Mark it from Daily Attendance or Field Management first, then you can edit it here."
+      // No sheet yet for this group and day: start the Student Daily Attendance
+      // sheet from the register, with the day's first-period teacher and subject.
+      await assertClassDayOpen();
+      if (!DAILY_STATUS_SET.has(status)) {
+        throw new ApiError(400, `Invalid student attendance status: ${status}`);
+      }
+      const scope = college
+        ? { batchId: student.batchId?.toString(), yearId: student.yearId?.toString() }
+        : { classId: student.classId?.toString(), sectionId: student.sectionId?.toString() };
+      if (college ? !scope.batchId || !scope.yearId : !scope.classId || !scope.sectionId) {
+        throw new ApiError(
+          400,
+          college
+            ? "This student has no batch and year, so a daily attendance sheet cannot be created"
+            : "This student has no class and section, so a daily attendance sheet cannot be created"
+        );
+      }
+      const school = await School.findById(schoolId).select("academicYearBs").lean();
+      const academicYearBs = school?.academicYearBs ?? "";
+      const dayOfWeek = getDayOfWeekFromBs(dateBs);
+      const groupMatch = college
+        ? { batchId: scope.batchId, yearId: scope.yearId }
+        : { classId: scope.classId, sectionId: scope.sectionId };
+      const slot = await getFallbackSlotForGroup(
+        schoolId.toString(),
+        academicYearBs,
+        scope,
+        college,
+        dayOfWeek
       );
+      let teacherId = slot?.teacherId?.toString();
+      let subjectId = slot?.subjectId?.toString();
+      if (!teacherId || !subjectId) {
+        const assignment = await SubjectAssignment.findOne({
+          schoolId,
+          ...groupMatch,
+          status: "ACTIVE"
+        })
+          .select("teacherId subjectId")
+          .lean();
+        teacherId = assignment?.teacherId?.toString();
+        subjectId = assignment?.subjectId?.toString();
+      }
+      if (!teacherId || !subjectId) {
+        throw new ApiError(
+          400,
+          "No timetable or subject assignment found for this student's group, so the daily sheet has no teacher. Add a timetable slot or subject assignment first."
+        );
+      }
+
+      const created = await DailyAttendance.create({
+        schoolId,
+        ...groupMatch,
+        academicYearBs,
+        dateBs,
+        dayOfWeek,
+        teacherId,
+        subjectId,
+        timetableSlotId: slot?._id,
+        periodNumber: slot?.periodNumber ?? 1,
+        startTime: slot?.startTime,
+        endTime: slot?.endTime,
+        entries: [{ studentId: personId, status, remarks }],
+        notes: "Marked from Attendance Register",
+        status: "LOCKED",
+        createdBy: actorId,
+        submittedBy: actorId,
+        submittedAt: new Date(),
+        lastEditedBy: actorId
+      });
+      await syncToSubject(created);
+      await recordAudit(req, {
+        action: "attendance_register.cell.update",
+        entity: "DAILY_ATTENDANCE",
+        entityId: created._id.toString(),
+        after: { personId, dateBs, status, created: true }
+      });
+      return sendSuccess(res, "Register updated", {
+        tab,
+        personId,
+        dateBs,
+        status,
+        code: toAttendanceRegisterCode(status),
+        source: "DAILY_ATTENDANCE"
+      });
     }
 
     if (tab !== "TEACHER" && tab !== "STAFF") {

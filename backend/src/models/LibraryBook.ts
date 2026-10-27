@@ -81,7 +81,55 @@ const libraryIssueSchema = new Schema(
     issuedDateBs: { type: String, required: true },
     dueDateBs: { type: String, required: true },
     returnedDateBs: { type: String },
+    /** Fine charged when the book was returned (overdue days × daily rate). */
     fineNpr: { type: Number, default: 0 },
+    /**
+     * NONE — no fine · OUTSTANDING — owed · PAID — collected · WAIVED — cleared
+     * without payment. Set on return; cleared by the Administrator.
+     */
+    fineStatus: {
+      type: String,
+      enum: ["NONE", "OUTSTANDING", "PAID", "WAIVED"],
+      default: "NONE"
+    },
+    /** Daily rate and days used for fineNpr (kept for the record). */
+    fineRatePerDayNpr: { type: Number, default: 0 },
+    fineDaysCharged: { type: Number, default: 0 },
+    /** Total collected so far (several payments add up). */
+    finePaidNpr: { type: Number, default: 0 },
+    /** Total waived so far. */
+    fineWaivedNpr: { type: Number, default: 0 },
+    /**
+     * Fine days up to and including this BS date are settled (paid, waived
+     * or carried as owed). Lets a fine be paid while the book is still out —
+     * it keeps growing from the next day until the book is returned.
+     */
+    fineSettledThroughBs: { type: String, default: "" },
+    /** Owed from the settled days and not paid yet (e.g. a part payment). */
+    fineCarriedNpr: { type: Number },
+    /** Every payment / waiver / correction on this loan's fine. */
+    fineSettlements: {
+      type: [
+        new Schema(
+          {
+            action: { type: String, enum: ["PAID", "WAIVED", "ADJUSTED"], required: true },
+            amountNpr: { type: Number, required: true, min: 0 },
+            /** Fine days covered up to (inclusive). */
+            throughBs: { type: String, default: "" },
+            /** Book was still out when this was recorded. */
+            whileOut: { type: Boolean, default: false },
+            byName: { type: String, default: "" },
+            note: { type: String, default: "" },
+            at: { type: Date, default: Date.now }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
+    },
+    fineClearedAt: { type: Date },
+    fineClearedByName: { type: String, default: "" },
+    fineClearNote: { type: String, default: "" },
     status: { type: String, enum: ["ISSUED", "RETURNED", "OVERDUE"], default: "ISSUED" }
   },
   { timestamps: true }

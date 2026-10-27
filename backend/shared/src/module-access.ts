@@ -20,6 +20,8 @@ export const ERP_MODULE_KEYS = [
   "parents",
   "attendance",
   "daily-attendance",
+  /** Whole-college student attendance desk (Administration), not a teacher's own classes */
+  "student-attendance",
   "teacher-attendance",
   "staff-attendance",
   "field-duty",
@@ -183,6 +185,21 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     apiPrefixes: ["/daily-attendance", "/attendance-register", "/student-early-leave"],
     routePrefixes: ["/daily-attendance", "/attendance", "/attendance-register"],
     availableActions: ["view", "create", "edit", "approve", "export"]
+  },
+  {
+    key: "student-attendance",
+    label: "Student Attendance",
+    /**
+     * Administration desk for every class: daily attendance (mark, edit,
+     * unlock), history, reports, early leave, and the student register.
+     * Teachers' own classroom marking stays under My Work without this grant.
+     * Enforced in moduleAccessGuard / authorize and the attendance controllers.
+     */
+    description:
+      "Student daily attendance for all classes (mark, edit, unlock), history, reports, early leave, and the student register",
+    apiPrefixes: [],
+    routePrefixes: [],
+    availableActions: ["view", "create", "edit", "approve", "export", "print"]
   },
   {
     key: "teacher-attendance",
@@ -832,10 +849,10 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
   },
   {
     id: "attendance",
-    title: "HR attendance & field",
+    title: "Attendance & field",
     description:
-      "Teacher/staff attendance sheets and Field Management. Classroom attendance stays in the teacher’s My Work menu.",
-    keys: ["teacher-attendance", "staff-attendance", "field-duty"]
+      "Student, teacher and staff attendance for the whole college, and Field Management. A teacher’s own classroom attendance stays in their My Work menu.",
+    keys: ["student-attendance", "teacher-attendance", "staff-attendance", "field-duty"]
   },
   {
     id: "campus",
@@ -955,6 +972,7 @@ export const canUseAcademicManagementAdminHub = (input: {
 export const ATTENDANCE_MANAGEMENT_MODULE_KEYS: readonly ErpModuleKey[] = [
   "attendance",
   "daily-attendance",
+  "student-attendance",
   "teacher-attendance",
   "staff-attendance"
 ] as const;
@@ -978,11 +996,12 @@ export const canAccessAttendanceManagement = (
   ATTENDANCE_MANAGEMENT_MODULE_KEYS.some((key) => canAccessModule(map, key));
 
 /**
- * HR Teacher / Staff Attendance — the Administration "Attendance Management"
+ * Student / Teacher / Staff Attendance — the Administration "Attendance Management"
  * hub. Teaching `attendance` / `daily-attendance` (My Attendance) must not
  * unlock this menu for teachers; those stay under My Work.
  */
 export const ATTENDANCE_ADMIN_HUB_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "student-attendance",
   "teacher-attendance",
   "staff-attendance"
 ] as const;

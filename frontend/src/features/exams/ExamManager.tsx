@@ -1,4 +1,5 @@
 import { parseBsDate } from "@munatech/nepali-datepicker";
+import { scrollToForm } from "lib/scrollToForm";
 import {
   Suspense,
   useMemo,
@@ -1205,6 +1206,9 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
       batchIds: exam.batchIds ?? [],
       yearIds: exam.yearIds ?? [],
     });
+    // The form only renders in the Manage section
+    setAdminSection("manage");
+    scrollToForm("exam-form");
   };
 
   const isLoading = isStudentOrParent
@@ -1291,7 +1295,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
               variant={adminSection === "print-results" ? "default" : "outline"}
               onClick={() => setAdminSection("print-results")}
             >
-              Print Results
+              Results
             </Button>
             {/* Admit cards for the students appearing in an exam. */}
             <Button
@@ -1509,7 +1513,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
           {adminSection === "manage" ? (
             <>
               {canManage ? (
-                <Card>
+                <Card id="exam-form">
                   <CardHeader>
                     <CardTitle>
                       {editingExamId ? "Edit Exam" : "Create Exam"}

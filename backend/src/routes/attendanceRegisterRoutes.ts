@@ -12,10 +12,12 @@ import {
   updateAttendanceRegisterCell
 } from "../controllers/attendanceRegisterController.js";
 import { authorize, protect } from "../middleware/auth.js";
+import { attachStudentAttendanceGrant } from "../utils/studentAttendanceAccess.js";
 
 const router = Router();
 
-router.use(protect);
+// Load the "Student Attendance" grant once so controllers can honour it
+router.use(protect, attachStudentAttendanceGrant);
 
 router.get("/meta", getAttendanceRegisterMeta);
 router.get("/students", getStudentAttendanceRegister);

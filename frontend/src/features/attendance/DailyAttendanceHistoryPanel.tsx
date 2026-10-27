@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   type DailyAttendanceLogRecord,
@@ -273,7 +274,10 @@ export const DailyAttendanceHistoryPanel = ({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => setSelectedId(record._id)}
+                          onClick={() => {
+                            setSelectedId(record._id);
+                            scrollToForm("attendance-record-details");
+                          }}
                         >
                           View
                         </Button>
@@ -287,7 +291,7 @@ export const DailyAttendanceHistoryPanel = ({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="attendance-record-details">
         <CardHeader>
           <CardTitle>Record Details</CardTitle>
         </CardHeader>

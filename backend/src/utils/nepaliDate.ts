@@ -39,6 +39,14 @@ export const getNepalTodayAdDate = (): Date => {
  */
 export const getTodayBs = (): string => formatBsDate(new NepaliDate(getNepalTodayAdDate()));
 
+/** BS + AD calendar date of a moment, as seen in Nepal (server timezone independent). */
+export const nepalDatesOf = (moment: Date): { dateBs: string; dateAd: string } => {
+  const nepal = new Date(moment.getTime() + NEPAL_TIMEZONE_OFFSET_MINUTES * 60_000);
+  const local = new Date(nepal.getUTCFullYear(), nepal.getUTCMonth(), nepal.getUTCDate(), 12, 0, 0);
+  const dateAd = `${nepal.getUTCFullYear()}-${String(nepal.getUTCMonth() + 1).padStart(2, "0")}-${String(nepal.getUTCDate()).padStart(2, "0")}`;
+  return { dateBs: formatBsDate(new NepaliDate(local)), dateAd };
+};
+
 /** Offset from Nepal "today" (or a provided AD base) by N days, returned as BS. */
 export const getOffsetBsDate = (offsetDays: number, fromAd: Date = getNepalTodayAdDate()): string => {
   const date = new Date(fromAd);

@@ -7,6 +7,8 @@ import { Subject } from "../models/Subject.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { validateAttendanceScope } from "../utils/academicValidation.js";
+import { actsAsClassTeacher } from "../utils/studentAttendanceAccess.js";
+import { assertStudentAttendanceDayOpen } from "../utils/dailyAttendanceUtils.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import {
@@ -39,8 +41,10 @@ export const listAttendance = asyncHandler(async (req: Request, res: Response) =
     query.dateBs = req.query.dateBs;
   }
 
-  const teacherScope = await getTeacherScope(req);
-  if (role === "TEACHER") {
+  // A teacher sees their own classes; one holding the "Student Attendance"
+  // grant sees every class, like the Administrator.
+  const teacherScope = actsAsClassTeacher(req) ? await getTeacherScope(req) : null;
+  if (actsAsClassTeacher(req)) {
     if (!teacherScope) {
       throw new ApiError(403, "Teacher profile not found");
     }
@@ -144,6 +148,8 @@ export const upsertAttendance = asyncHandler(async (req: Request, res: Response)
 
   const payload = attendanceSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
+  // No subject-wise attendance on an Academic Calendar holiday
+  await assertStudentAttendanceDayOpen(tenantObjectId(req).toString(), payload.dateBs);
   const institutionType = await getInstitutionType(req);
   validateAttendanceScope(institutionType, payload);
 

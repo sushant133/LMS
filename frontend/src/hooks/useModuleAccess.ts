@@ -5,7 +5,9 @@ import {
   canAccessModule,
   canApproveRecords,
   canEditOrDeleteRecords,
+  canWriteModule,
   DEPARTMENT_ADMIN_ONLY_MESSAGE,
+  hasConfiguredModuleAccess,
   hasModuleAction,
   isGrantedAdminEditModule,
   canUseAcademicManagementAdminHub,
@@ -197,6 +199,25 @@ export const useIsGrantedAdmin = (moduleKey: ErpModuleKey): boolean => {
     return workspace === "admin";
   }
   return true;
+};
+
+/**
+ * "Student Attendance" grant — the whole-college student attendance desk
+ * (any class's daily attendance, history, reports, early leave, student
+ * register). Mirrors the backend: only an explicitly saved grant counts, never
+ * the legacy unconfigured "full access" matrix. Administrators have this desk
+ * by role, so callers OR it with their role checks.
+ */
+export const useStudentAttendanceGrant = (): { read: boolean; write: boolean } => {
+  const { user } = useAuth();
+  const map = (user?.moduleAccess ?? {}) as ModuleAccessMap;
+  if (!user || isPortalRole(user.role) || !hasConfiguredModuleAccess(map)) {
+    return { read: false, write: false };
+  }
+  return {
+    read: canAccessModule(map, "student-attendance"),
+    write: canWriteModule(map, "student-attendance"),
+  };
 };
 
 /**

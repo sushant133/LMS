@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { printPageCss } from "lib/printPage";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   SalaryPaymentStatus,
@@ -908,7 +910,8 @@ export const SalaryPaymentRecordsPanel = ({
       remarks: row.remarks ?? "",
       attendanceManualOverride: Boolean(row.attendanceManualOverride),
     });
-    // Do not scroll the page — stays on the table row the user was editing
+    // The row is edited in the add / edit section above the sheet: bring it into view
+    scrollToForm("salary-sheet-entry-form");
   };
 
   const removeRow = (row: EditableRow) => {
@@ -1512,7 +1515,7 @@ export const SalaryPaymentRecordsPanel = ({
             format: "a4",
             orientation: "landscape",
           },
-          pagebreak: { mode: ["css", "legacy"] },
+          pagebreak: { mode: ["css", "legacy"], avoid: ["tr", ".avoid-break"] },
         } as never)
         .from(target)
         .outputPdf("blob")) as Blob;
@@ -1565,6 +1568,7 @@ export const SalaryPaymentRecordsPanel = ({
     @media print {
       body { padding: 0; }
     }
+    ${printPageCss("A4 landscape", "8mm 6mm")}
   </style>
 </head>
 <body>
@@ -2558,7 +2562,7 @@ export const SalaryPaymentRecordsPanel = ({
 
       {/* ─── 2. Add employee (accountant prepares; admin may also edit amounts) ─── */}
       {canUseAddPanel ? (
-      <Card className="overflow-hidden border-slate-200 shadow-sm">
+      <Card id="salary-sheet-entry-form" className="overflow-hidden border-slate-200 shadow-sm">
         <button
           type="button"
           className="flex w-full items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 px-4 py-3 text-left transition hover:bg-slate-50 sm:px-5"

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { printPageCss } from "lib/printPage";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type BatchRecord,
@@ -955,6 +957,7 @@ export const FieldPostingSectionPanel = ({
         tr { page-break-inside: avoid; }
         @page { size: A4 landscape; margin: 8mm; }
         ${PRINT_INSTITUTION_HEADER_CSS}
+        ${printPageCss("A4 landscape", "8mm")}
       </style>
       </head><body>
       ${institutionHeader}
@@ -1401,7 +1404,7 @@ export const FieldPostingSectionPanel = ({
       {tab === "postings" ? (
         <div className={`grid gap-4 ${isAdmin ? "lg:grid-cols-2" : ""}`}>
           {isAdmin ? (
-          <Card>
+          <Card id="field-posting-form">
             <CardHeader>
               <CardTitle className="text-base">
                 {editingScheduleId ? "Edit posting" : "Create field posting"}
@@ -2043,6 +2046,7 @@ export const FieldPostingSectionPanel = ({
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("field-posting-form");
                               setEditingScheduleId(s._id);
                               setForm({
                                 academicYearBs: s.academicYearBs,

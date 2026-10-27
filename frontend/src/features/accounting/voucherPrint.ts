@@ -10,6 +10,7 @@ import {
   getPrintInstitutionBranding,
   PRINT_INSTITUTION_HEADER_CSS,
 } from "lib/printBranding";
+import { printPageCss } from "lib/printPage";
 
 const escapeHtml = (value: string): string =>
   value
@@ -84,6 +85,8 @@ export const printSimpleDocument = (opts: {
   title: string;
   bodyHtml: string;
   subtitle?: string;
+  /** Wide reports (many columns) print across the long edge. */
+  landscape?: boolean;
 }): void => {
   const branding = getPrintInstitutionBranding();
   const college = branding.name || "Institution";
@@ -127,12 +130,12 @@ export const printSimpleDocument = (opts: {
     .signatures { display: flex; justify-content: space-between; margin-top: 48px; }
     .signatures div { text-align: center; min-width: 140px; border-top: 1px solid #94a3b8; padding-top: 6px; font-size: 12px; }
     .footer { margin-top: 24px; font-size: 11px; color: #64748b; text-align: center; }
-    @page { size: A4 portrait; margin: 10mm; }
-    @media print {
-      body { padding: 0; }
-      .no-print { display: none !important; }
-    }
+    /* bodyHtml may be copied from the screen: never print its controls or the
+       parts marked screen-only (the app's Tailwind classes are not loaded here) */
+    .no-print, .print\\:hidden, button, select, input, textarea { display: none !important; }
+    th, td { overflow-wrap: break-word; }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss(opts.landscape ? "A4 landscape" : "A4 portrait", "10mm")}
   </style>
 </head>
 <body>

@@ -120,6 +120,113 @@ export type PlannedYearFees = {
 };
 
 /**
+ * Advance paid on a receipt for later program years (e.g. a 1st-year receipt
+ * that also pays part of the 2nd year). Part of amountPaidNpr: the receipt's
+ * own year keeps the rest, each later year is credited its allocation.
+ */
+export const receiptAdvanceAllocations = (
+  row: Record<string, unknown>
+): Array<{ programYear: 1 | 2 | 3; amountNpr: number }> => {
+  const raw = (row as { advanceAllocations?: unknown }).advanceAllocations;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((a) => ({
+      programYear: Number((a as { programYear?: unknown }).programYear),
+      amountNpr: Math.max(0, Number((a as { amountNpr?: unknown }).amountNpr) || 0)
+    }))
+    .filter(
+      (a): a is { programYear: 1 | 2 | 3; amountNpr: number } =>
+        (a.programYear === 1 || a.programYear === 2 || a.programYear === 3) &&
+        a.amountNpr > 0
+    );
+};
+
+/** Fee paid on a receipt for its own program year (advance for later years removed). */
+export const receiptOwnYearPaidNpr = (row: Record<string, unknown>): number => {
+  const advance = receiptAdvanceAllocations(row).reduce((s, a) => s + a.amountNpr, 0);
+  return Math.max(0, Number(row.amountPaidNpr ?? 0) - advance);
+};
+
+/**
+ * A new payment filed under a year that it over-pays (e.g. 1st year already
+ * cleared, then more is paid on another day) carries the extra into the next
+ * program year as advance, instead of it disappearing from the year-wise
+ * record. Only when that year has a known fee to measure against, and only
+ * this receipt's own money moves — never amounts from earlier receipts.
+ * Returns the receipt's final advance list (explicit advances kept).
+ */
+export const carryExcessToNextYear = (params: {
+  existingCollections: Array<Record<string, unknown>>;
+  awards?: Array<Record<string, unknown>>;
+  plannedFees: PlannedYearFees;
+  newRow: Record<string, unknown>;
+}): Array<{ programYear: 2 | 3; amountNpr: number }> => {
+  const explicit = receiptAdvanceAllocations(params.newRow) as Array<{
+    programYear: 2 | 3;
+    amountNpr: number;
+  }>;
+  const year = Number(params.newRow.programYear);
+  if (year !== 1 && year !== 2) return explicit;
+
+  const summary = buildProgramYearFeeSummary(
+    [...params.existingCollections, params.newRow],
+    params.awards ?? [],
+    params.plannedFees
+  );
+  const row = summary.find((y) => y.programYear === year);
+  if (!row || row.chargedNpr <= 0) return explicit;
+
+  const overpaid = row.paidNpr + row.scholarshipNpr + row.discountNpr - row.chargedNpr;
+  const excess = Math.round(Math.min(overpaid, receiptOwnYearPaidNpr(params.newRow)) * 100) / 100;
+  if (!(excess > 0)) return explicit;
+
+  const nextYear = (year + 1) as 2 | 3;
+  const merged = explicit.filter((a) => a.programYear !== nextYear);
+  const already = explicit.find((a) => a.programYear === nextYear)?.amountNpr ?? 0;
+  merged.push({ programYear: nextYear, amountNpr: Math.round((already + excess) * 100) / 100 });
+  return merged.sort((a, b) => a.programYear - b.programYear);
+};
+
+/**
+ * Check advance allocations for a receipt of `programYear` paying `amountPaidNpr`.
+ * Throws a readable message; returns the cleaned list to store.
+ */
+export const validateAdvanceAllocations = (
+  programYear: number | null | undefined,
+  amountPaidNpr: number,
+  allocations: Array<{ programYear: number; amountNpr: number }> | undefined
+): Array<{ programYear: 2 | 3; amountNpr: number }> => {
+  const cleaned = (allocations ?? [])
+    .map((a) => ({
+      programYear: Number(a.programYear),
+      amountNpr: Math.round((Number(a.amountNpr) || 0) * 100) / 100
+    }))
+    .filter((a) => a.amountNpr > 0);
+  if (cleaned.length === 0) return [];
+  const year = Number(programYear);
+  if (year !== 1 && year !== 2) {
+    throw new Error(
+      "Advance for a later year can only be recorded on a 1st or 2nd year fee payment"
+    );
+  }
+  const seen = new Set<number>();
+  for (const a of cleaned) {
+    if (a.programYear <= year || a.programYear > 3) {
+      throw new Error("Advance can only go to a later program year (2nd or 3rd year)");
+    }
+    if (seen.has(a.programYear)) {
+      throw new Error("Enter each later year's advance only once");
+    }
+    seen.add(a.programYear);
+  }
+  const total = cleaned.reduce((s, a) => s + a.amountNpr, 0);
+  if (total > (Number(amountPaidNpr) || 0) + 0.001) {
+    throw new Error("Advance for later years cannot be more than the fee amount paid");
+  }
+  return cleaned as Array<{ programYear: 2 | 3; amountNpr: number }>;
+};
+
+/**
  * HA / multi-year fee ledger: paid, scholarship, remaining per program year.
  *
  * Charge basis (avoids double-counting opening plan + payment "fee charged"):
@@ -166,7 +273,18 @@ export const buildProgramYearFeeSummary = (
     }
 
     const chargedNpr = baseChargeNpr + lateFeeNpr;
-    const paidNpr = yearRows.reduce((s, c) => s + Number(c.amountPaidNpr ?? 0), 0);
+    // This year's own receipts (minus any advance they carried for later years)
+    // plus advance received for this year on earlier years' receipts.
+    const advanceNpr = collections.reduce(
+      (s, c) =>
+        s +
+        receiptAdvanceAllocations(c)
+          .filter((a) => a.programYear === programYear)
+          .reduce((t, a) => t + a.amountNpr, 0),
+      0
+    );
+    const paidNpr =
+      yearRows.reduce((s, c) => s + receiptOwnYearPaidNpr(c), 0) + advanceNpr;
     let scholarshipNpr = yearRows.reduce((s, c) => s + Number(c.scholarshipNpr ?? 0), 0);
     const discountNpr = yearRows.reduce((s, c) => s + Number(c.discountNpr ?? 0), 0);
 
@@ -194,7 +312,7 @@ export const buildProgramYearFeeSummary = (
     const remainingNpr = Math.max(0, chargedNpr - paidNpr - scholarshipNpr - discountNpr);
 
     let status: "PAID" | "PARTIAL" | "DUE" | "SCHOLARSHIP" | "NO_RECORD" = "NO_RECORD";
-    const hasLedger = yearRows.length > 0 || plannedNpr > 0;
+    const hasLedger = yearRows.length > 0 || plannedNpr > 0 || advanceNpr > 0;
     if (!hasLedger && award) {
       status = "SCHOLARSHIP";
     } else if (!hasLedger) {
@@ -217,6 +335,8 @@ export const buildProgramYearFeeSummary = (
       label: PROGRAM_YEAR_LABELS[programYear] ?? `Year ${programYear}`,
       chargedNpr,
       paidNpr,
+      /** Part of paidNpr received in advance on an earlier year's receipt. */
+      advanceNpr,
       scholarshipNpr,
       discountNpr,
       remainingNpr,

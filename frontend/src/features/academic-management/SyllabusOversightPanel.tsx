@@ -465,7 +465,67 @@ export const SyllabusOversightPanel = ({
           description="Create official subject syllabi first, then oversee completion here."
         />
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,22rem)_1fr]">
+        <>
+        {/* Paper: one table of every subject. The interactive list and the
+            mark-complete form below stay on screen only. */}
+        <table className="hidden w-full border-collapse text-xs print:table">
+          <thead>
+            <tr>
+              {[
+                "S.N.",
+                "Subject",
+                "Year / Class / Faculty",
+                "Teacher(s)",
+                "Sub-units",
+                "Completed",
+                "By teacher",
+                "By administration",
+                "Remaining",
+              ].map((heading) => (
+                <th
+                  key={heading}
+                  className="border border-slate-500 bg-slate-100 px-1.5 py-1 text-left font-semibold"
+                >
+                  {heading}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row._id}>
+                <td className="border border-slate-400 px-1.5 py-1">{index + 1}</td>
+                <td className="border border-slate-400 px-1.5 py-1">
+                  {row.subjectName}
+                  {row.subjectCode ? ` (${row.subjectCode})` : ""}
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1">
+                  {[row.yearLabel, row.className, row.faculty].filter(Boolean).join(" · ") ||
+                    "Curriculum"}
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1">
+                  {row.assignedTeachers.map((t) => t.teacherName).join(", ") || "—"}
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1 text-right">
+                  {row.completedLeaves} / {row.totalLeaves}
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1 text-right font-semibold">
+                  {row.completedPercent}%
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1 text-right">
+                  {row.teacherPercent}%
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1 text-right">
+                  {row.administrationPercent}%
+                </td>
+                <td className="border border-slate-400 px-1.5 py-1 text-right">
+                  {row.remainingPercent}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="no-print grid gap-6 xl:grid-cols-[minmax(0,22rem)_1fr]">
           {/* Phones show one pane at a time: picking a subject swaps the list
               for its detail, so there is nothing to scroll past. From md up the
               original two-pane layout is untouched. */}
@@ -911,6 +971,7 @@ export const SyllabusOversightPanel = ({
             )}
           </div>
         </div>
+        </>
       )}
       <AcademicPrintFooter />
     </div>

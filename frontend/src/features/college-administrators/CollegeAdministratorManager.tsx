@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   collegeAdministratorSchema,
@@ -236,7 +237,7 @@ export const CollegeAdministratorManager = () => {
         description="Create and manage College Administrator accounts. Use Module Access on a row to choose which ERP sections each administrator can open."
       />
 
-      <Card>
+      <Card id="college-administrator-form">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <UserCog className="h-5 w-5 text-brand-700" />
@@ -529,6 +530,7 @@ export const CollegeAdministratorManager = () => {
                           variant="outline"
                           disabled={admin.isDeleted}
                           onClick={() => {
+                            scrollToForm("college-administrator-form");
                             setAccessAdmin(null);
                             setEditing(admin);
                             setForm({

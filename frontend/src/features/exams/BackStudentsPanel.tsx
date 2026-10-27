@@ -1,10 +1,10 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   STUDENT_ACADEMIC_STATUS_LABELS,
   type StudentRecord,
 } from "@phit-erp/shared";
-import { Check, Pencil, Printer, Search, X } from "lucide-react";
+import { Pencil, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { EmptyState } from "components/shared/EmptyState";
@@ -63,10 +63,32 @@ const resolveStudentUser = (student: StudentRecord) => {
   return null;
 };
 
+type BackPaper = { subjectName: string; subjectCode?: string; programYear: number };
+
+const YEAR_LABEL: Record<number, string> = { 1: "1st Year", 2: "2nd Year", 3: "3rd Year" };
+
+const resolveBackPapers = (student: StudentRecord): BackPaper[] =>
+  (student.backPapers ?? []).filter((p) => asText(p?.subjectName));
+
+/** Number of backs: the papers listed, else the count entered without subjects. */
 const resolveBackCount = (student: StudentRecord): number => {
+  const papers = resolveBackPapers(student).length;
+  if (papers > 0) return Math.min(50, papers);
   const n = Number(student.backCount);
   if (Number.isFinite(n) && n >= 1) return Math.min(50, Math.floor(n));
   return 1;
+};
+
+/** "Anatomy (1st Year)" — papers grouped in the order recorded. */
+const backPaperLabel = (paper: BackPaper): string =>
+  `${asText(paper.subjectName)}${paper.subjectCode ? ` [${asText(paper.subjectCode)}]` : ""} (${
+    YEAR_LABEL[Number(paper.programYear)] ?? `Year ${paper.programYear}`
+  })`;
+
+/** Student's current program year (1–3) from their Year level, for new rows. */
+const currentProgramYearOf = (student: StudentRecord): number => {
+  const level = Number((student.yearId as { level?: number } | null | undefined)?.level);
+  return level === 1 || level === 2 || level === 3 ? level : 1;
 };
 
 /**
@@ -84,9 +106,13 @@ export const BackStudentsPanel = ({
   const [yearFilter, setYearFilter] = useState("");
   const [search, setSearch] = useState("");
   const [printing, setPrinting] = useState(false);
-  /** studentId currently being edited for back count */
+  /** studentId whose back papers are being edited */
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** Back papers in the editor (subject + year failed in) */
+  const [editPapers, setEditPapers] = useState<BackPaper[]>([]);
+  /** Number of backs when no subjects are listed (older records) */
   const [editValue, setEditValue] = useState(1);
+  const [editYearDefault, setEditYearDefault] = useState(1);
 
   const printBranding = useMemo(() => getPrintInstitutionBranding(), []);
   const institutionName = getCollegeDisplayName(availableSchools, user);
@@ -101,11 +127,47 @@ export const BackStudentsPanel = ({
     queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
   });
 
+  // Subjects of each program year (Master Subject List → year level 1–3):
+  // choose the back year first, then pick from that year's subjects.
+  const masterSubjectsQuery = useQuery({
+    queryKey: ["academics", "master-subjects", "back-papers"],
+    queryFn: () =>
+      unwrap<
+        Array<{ name?: string; code?: string; yearLevel?: number; isActive?: boolean }>
+      >(api.get("/academics/master-subjects")),
+    staleTime: 5 * 60_000,
+  });
+  const subjectsByYear = useMemo(() => {
+    const map = new Map<number, Array<{ name: string; code: string }>>();
+    for (const subject of masterSubjectsQuery.data ?? []) {
+      const year = Number(subject?.yearLevel);
+      const name = asText(subject?.name);
+      if (!name || subject?.isActive === false || ![1, 2, 3].includes(year)) continue;
+      const list = map.get(year) ?? [];
+      if (!list.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+        list.push({ name, code: asText(subject?.code) });
+      }
+      map.set(year, list);
+    }
+    for (const list of map.values()) list.sort((a, b) => a.name.localeCompare(b.name));
+    return map;
+  }, [masterSubjectsQuery.data]);
+  /** Lines (by index) typing a subject that is not in that year's list */
+  const [customSubjectRows, setCustomSubjectRows] = useState<Set<number>>(new Set());
+
   const updateBackCount = useMutation({
-    mutationFn: ({ id, backCount }: { id: string; backCount: number }) =>
-      unwrap(api.patch(`/students/${id}/back-count`, { backCount })),
+    mutationFn: ({
+      id,
+      backCount,
+      backPapers,
+    }: {
+      id: string;
+      backCount?: number;
+      backPapers?: BackPaper[];
+    }) =>
+      unwrap(api.patch(`/students/${id}/back-count`, { backCount, backPapers })),
     onSuccess: async () => {
-      toast.success("Number of backs updated");
+      toast.success("Back subjects updated");
       setEditingId(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["students"] }),
@@ -208,7 +270,12 @@ export const BackStudentsPanel = ({
         const registration = asText(student.registrationNumber).toLowerCase();
         const roll = asText(student.rollNumber);
 
+        const backSubjects = resolveBackPapers(student)
+          .map((p) => asText(p.subjectName).toLowerCase())
+          .join(" ");
+
         return (
+          backSubjects.includes(needle) ||
           name.includes(needle) ||
           email.includes(needle) ||
           phone.includes(needle) ||
@@ -244,21 +311,73 @@ export const BackStudentsPanel = ({
   }, [batchFilter, yearFilter, search, batchNameById, yearNameById]);
 
   const startEditBacks = (student: StudentRecord) => {
+    const papers = resolveBackPapers(student);
+    const yearDefault = currentProgramYearOf(student);
     setEditingId(asText(student._id));
     setEditValue(resolveBackCount(student));
+    setEditYearDefault(yearDefault);
+    // Start with one empty line so a subject can be chosen straight away
+    const initial =
+      papers.length > 0
+        ? papers.map((p) => ({ ...p }))
+        : [{ subjectName: "", subjectCode: "", programYear: yearDefault }];
+    setEditPapers(initial);
+    // Recorded subjects not in their year's list stay editable as typed names
+    setCustomSubjectRows(
+      new Set(
+        initial
+          .map((p, i) =>
+            p.subjectName &&
+            !(subjectsByYear.get(Number(p.programYear)) ?? []).some(
+              (s) => s.name.toLowerCase() === p.subjectName.toLowerCase(),
+            )
+              ? i
+              : -1,
+          )
+          .filter((i) => i >= 0),
+      ),
+    );
   };
+
+  const OTHER_SUBJECT = "__other__";
+
+  const updatePaper = (index: number, patch: Partial<BackPaper>) =>
+    setEditPapers((list) =>
+      list.map((paper, i) => (i === index ? { ...paper, ...patch } : paper)),
+    );
 
   const cancelEditBacks = () => {
     setEditingId(null);
   };
 
   const saveEditBacks = (studentId: string) => {
-    const n = Math.floor(Number(editValue));
-    if (!Number.isFinite(n) || n < 1 || n > 50) {
-      toast.error("Number of backs must be between 1 and 50");
+    const papers = editPapers
+      .map((p) => ({
+        subjectName: p.subjectName.trim(),
+        subjectCode: (p.subjectCode ?? "").trim(),
+        programYear: Number(p.programYear),
+      }))
+      .filter((p) => p.subjectName);
+    const seen = new Set<string>();
+    for (const p of papers) {
+      const key = `${p.subjectName.toLowerCase()}|${p.programYear}`;
+      if (seen.has(key)) {
+        toast.error(`${p.subjectName} (${YEAR_LABEL[p.programYear]}) is listed twice`);
+        return;
+      }
+      seen.add(key);
+    }
+    if (papers.length > 0) {
+      // Subjects listed → they are the backs; their count is the number of backs
+      updateBackCount.mutate({ id: studentId, backPapers: papers });
       return;
     }
-    updateBackCount.mutate({ id: studentId, backCount: n });
+    const n = Math.floor(Number(editValue));
+    if (!Number.isFinite(n) || n < 1 || n > 50) {
+      toast.error("Add at least one back subject, or enter the number of backs (1–50)");
+      return;
+    }
+    updateBackCount.mutate({ id: studentId, backCount: n, backPapers: [] });
   };
 
   const handlePrintList = async () => {
@@ -291,9 +410,9 @@ export const BackStudentsPanel = ({
         <div className="min-w-0 flex-1">
           <CardTitle>Back Students</CardTitle>
           <p className="mt-1 text-sm text-slate-500">
-            Students marked with academic status Back. Set number of backs when
-            creating/editing a student, or update it here when they clear papers
-            (e.g. 2 → 1).
+            Students marked with academic status Back. Record each back subject
+            and the year it was failed in; the number of backs follows the
+            subjects listed. Remove a subject when the student clears it.
           </p>
         </div>
         <Button
@@ -341,7 +460,7 @@ export const BackStudentsPanel = ({
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Name, number, email…"
+              placeholder="Name, number, email, subject…"
               className="pl-9"
             />
           </div>
@@ -367,6 +486,7 @@ export const BackStudentsPanel = ({
                   <Th>Student Name</Th>
                   <Th>Academic Status</Th>
                   <Th className="whitespace-nowrap">No. of backs</Th>
+                  <Th>Back subjects (year)</Th>
                   <Th>Number</Th>
                   <Th>Email</Th>
                   <Th>Batch / Year</Th>
@@ -389,10 +509,12 @@ export const BackStudentsPanel = ({
                   const yearLabel = resolveYearName(student) || "—";
                   const studentId = asText(student._id);
                   const backs = resolveBackCount(student);
+                  const papers = resolveBackPapers(student);
                   const isEditing = editingId === studentId;
 
                   return (
-                    <tr key={studentId || `back-student-${index}`}>
+                    <Fragment key={studentId || `back-student-${index}`}>
+                    <tr>
                       <Td className="font-medium text-slate-900">
                         {studentId ? (
                           <StudentNameLink
@@ -420,68 +542,49 @@ export const BackStudentsPanel = ({
                         </span>
                       </Td>
                       <Td>
-                        {isEditing ? (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <NumberInput
-                              min={1}
-                              max={50}
-                              step={1}
-                              className="h-9 w-20"
-                              value={editValue}
-                              onValueChange={(value) =>
-                                setEditValue(
-                                  Math.max(
-                                    1,
-                                    Math.min(50, Math.floor(value ?? 1)),
-                                  ),
-                                )
-                              }
-                              disabled={updateBackCount.isPending}
-                              aria-label="Number of backs"
-                            />
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="h-9 px-2"
-                              disabled={
-                                updateBackCount.isPending || !studentId
-                              }
-                              title="Save"
-                              onClick={() => saveEditBacks(studentId)}
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex min-w-[1.75rem] items-center justify-center rounded-lg bg-amber-50 px-2 py-1 text-sm font-bold tabular-nums text-amber-950 ring-1 ring-amber-200">
+                            {backs}
+                          </span>
+                          {studentId && !isEditing ? (
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
-                              className="h-9 px-2"
-                              disabled={updateBackCount.isPending}
-                              title="Cancel"
-                              onClick={cancelEditBacks}
+                              className="h-8 px-2"
+                              title="Edit back subjects"
+                              onClick={() => startEditBacks(student)}
                             >
-                              <X className="h-4 w-4" />
+                              <Pencil className="mr-1 h-3.5 w-3.5" />
+                              Edit
                             </Button>
-                          </div>
+                          ) : null}
+                        </div>
+                      </Td>
+                      <Td className="min-w-[14rem] text-sm text-slate-700">
+                        {papers.length > 0 ? (
+                          <ul className="space-y-0.5">
+                            {papers.map((paper, paperIndex) => (
+                              <li key={`${paper.subjectName}-${paper.programYear}-${paperIndex}`}>
+                                <span className="font-medium text-slate-900">
+                                  {asText(paper.subjectName)}
+                                </span>
+                                {paper.subjectCode ? (
+                                  <span className="text-xs text-slate-500">
+                                    {" "}
+                                    [{asText(paper.subjectCode)}]
+                                  </span>
+                                ) : null}{" "}
+                                <span className="text-xs text-slate-500">
+                                  ({YEAR_LABEL[Number(paper.programYear)] ?? `Year ${paper.programYear}`})
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
                         ) : (
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex min-w-[1.75rem] items-center justify-center rounded-lg bg-amber-50 px-2 py-1 text-sm font-bold tabular-nums text-amber-950 ring-1 ring-amber-200">
-                              {backs}
-                            </span>
-                            {studentId ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 px-2"
-                                title="Edit number of backs"
-                                onClick={() => startEditBacks(student)}
-                              >
-                                <Pencil className="mr-1 h-3.5 w-3.5" />
-                                Edit
-                              </Button>
-                            ) : null}
-                          </div>
+                          <span className="text-xs text-slate-400">
+                            Not recorded — use Edit to add subjects
+                          </span>
                         )}
                       </Td>
                       <Td className="tabular-nums text-slate-700">
@@ -494,6 +597,255 @@ export const BackStudentsPanel = ({
                         {yearLabel}
                       </Td>
                     </tr>
+                    {isEditing ? (
+                      <tr>
+                        <Td colSpan={7} className="bg-amber-50/40">
+                          <div className="space-y-3 py-1">
+                            <p className="text-sm font-medium text-slate-900">
+                              Back subjects — {asText(userRow?.fullName) || "student"}
+                            </p>
+                            {editPapers.map((paper, paperIndex) => {
+                              const yearSubjects =
+                                subjectsByYear.get(Number(paper.programYear)) ?? [];
+                              const isCustom = customSubjectRows.has(paperIndex);
+                              const setCustom = (on: boolean) =>
+                                setCustomSubjectRows((rows) => {
+                                  const next = new Set(rows);
+                                  if (on) next.add(paperIndex);
+                                  else next.delete(paperIndex);
+                                  return next;
+                                });
+                              return (
+                                <div
+                                  key={paperIndex}
+                                  className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_auto]"
+                                >
+                                  {/* 1. Year the back is from */}
+                                  <Select
+                                    value={String(paper.programYear)}
+                                    aria-label="Back year"
+                                    disabled={updateBackCount.isPending}
+                                    onChange={(event) => {
+                                      // A new year has its own subjects: clear the choice
+                                      updatePaper(paperIndex, {
+                                        programYear: Number(event.target.value),
+                                        subjectName: "",
+                                        subjectCode: "",
+                                      });
+                                      setCustom(false);
+                                    }}
+                                  >
+                                    {[1, 2, 3].map((year) => (
+                                      <option key={year} value={year}>
+                                        Back in {YEAR_LABEL[year]}
+                                      </option>
+                                    ))}
+                                  </Select>
+
+                                  {/* 2. Subject from that year's list (or type another) */}
+                                  {isCustom ? (
+                                    <div className="flex min-w-0 gap-2">
+                                      <Input
+                                        value={paper.subjectName}
+                                        placeholder="Subject name"
+                                        aria-label="Back subject name"
+                                        className="min-w-0 flex-1"
+                                        disabled={updateBackCount.isPending}
+                                        onChange={(event) =>
+                                          updatePaper(paperIndex, {
+                                            subjectName: event.target.value,
+                                          })
+                                        }
+                                      />
+                                      <Input
+                                        value={paper.subjectCode ?? ""}
+                                        placeholder="Code"
+                                        aria-label="Subject code"
+                                        className="w-24"
+                                        disabled={updateBackCount.isPending}
+                                        onChange={(event) =>
+                                          updatePaper(paperIndex, {
+                                            subjectCode: event.target.value,
+                                          })
+                                        }
+                                      />
+                                      {yearSubjects.length > 0 ? (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-10 shrink-0"
+                                          title={`Choose from ${YEAR_LABEL[Number(paper.programYear)]} subjects`}
+                                          disabled={updateBackCount.isPending}
+                                          onClick={() => {
+                                            setCustom(false);
+                                            updatePaper(paperIndex, {
+                                              subjectName: "",
+                                              subjectCode: "",
+                                            });
+                                          }}
+                                        >
+                                          List
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <Select
+                                      value={paper.subjectName}
+                                      aria-label="Back subject"
+                                      disabled={
+                                        updateBackCount.isPending ||
+                                        masterSubjectsQuery.isLoading
+                                      }
+                                      onChange={(event) => {
+                                        const value = event.target.value;
+                                        if (value === OTHER_SUBJECT) {
+                                          setCustom(true);
+                                          updatePaper(paperIndex, {
+                                            subjectName: "",
+                                            subjectCode: "",
+                                          });
+                                          return;
+                                        }
+                                        const chosen = yearSubjects.find(
+                                          (s) => s.name === value,
+                                        );
+                                        updatePaper(paperIndex, {
+                                          subjectName: value,
+                                          subjectCode: chosen?.code ?? "",
+                                        });
+                                      }}
+                                    >
+                                      <option value="">
+                                        {masterSubjectsQuery.isLoading
+                                          ? "Loading subjects…"
+                                          : yearSubjects.length > 0
+                                            ? `Select ${YEAR_LABEL[Number(paper.programYear)]} subject`
+                                            : `No ${YEAR_LABEL[Number(paper.programYear)]} subjects in Master Subject List`}
+                                      </option>
+                                      {yearSubjects
+                                        // Not one already chosen on another line for this year
+                                        .filter(
+                                          (subject) =>
+                                            subject.name === paper.subjectName ||
+                                            !editPapers.some(
+                                              (other, otherIndex) =>
+                                                otherIndex !== paperIndex &&
+                                                Number(other.programYear) ===
+                                                  Number(paper.programYear) &&
+                                                other.subjectName.toLowerCase() ===
+                                                  subject.name.toLowerCase(),
+                                            ),
+                                        )
+                                        .map((subject) => (
+                                        <option key={subject.name} value={subject.name}>
+                                          {subject.name}
+                                          {subject.code ? ` (${subject.code})` : ""}
+                                        </option>
+                                      ))}
+                                      <option value={OTHER_SUBJECT}>Other subject (type name)…</option>
+                                    </Select>
+                                  )}
+
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-10"
+                                    title="Remove subject (cleared)"
+                                    disabled={updateBackCount.isPending}
+                                    onClick={() => {
+                                      setEditPapers((list) =>
+                                        list.filter((_, i) => i !== paperIndex),
+                                      );
+                                      // Shift the "typed name" marks of later lines up by one
+                                      setCustomSubjectRows(
+                                        (rows) =>
+                                          new Set(
+                                            Array.from(rows)
+                                              .filter((i) => i !== paperIndex)
+                                              .map((i) => (i > paperIndex ? i - 1 : i)),
+                                          ),
+                                      );
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              );
+                            })}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={updateBackCount.isPending}
+                                onClick={() =>
+                                  setEditPapers((list) => [
+                                    ...list,
+                                    {
+                                      subjectName: "",
+                                      subjectCode: "",
+                                      programYear: editYearDefault,
+                                    },
+                                  ])
+                                }
+                              >
+                                <Plus className="mr-1 h-4 w-4" />
+                                Add subject
+                              </Button>
+                              {editPapers.some((p) => p.subjectName.trim()) ? (
+                                <span className="text-sm text-slate-600">
+                                  No. of backs:{" "}
+                                  <span className="font-semibold text-slate-900">
+                                    {editPapers.filter((p) => p.subjectName.trim()).length}
+                                  </span>
+                                </span>
+                              ) : (
+                                <label className="flex items-center gap-2 text-sm text-slate-600">
+                                  Or just the number of backs:
+                                  <NumberInput
+                                    emptyValue={1}
+                                    min={1}
+                                    max={50}
+                                    step={1}
+                                    className="h-9 w-20"
+                                    value={editValue}
+                                    onValueChange={(value) =>
+                                      setEditValue(
+                                        Math.max(1, Math.min(50, Math.floor(value ?? 1))),
+                                      )
+                                    }
+                                    disabled={updateBackCount.isPending}
+                                    aria-label="Number of backs"
+                                  />
+                                </label>
+                              )}
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={updateBackCount.isPending}
+                                onClick={cancelEditBacks}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={updateBackCount.isPending || !studentId}
+                                onClick={() => saveEditBacks(studentId)}
+                              >
+                                {updateBackCount.isPending ? "Saving…" : "Save"}
+                              </Button>
+                            </div>
+                          </div>
+                        </Td>
+                      </tr>
+                    ) : null}
+                    </Fragment>
                   );
                 })}
               </TableBody>
@@ -605,7 +957,8 @@ export const BackStudentsPanel = ({
                 S.N.
               </th>
               <th style={printTh}>Name</th>
-              <th style={printTh}>No. of backs</th>
+              <th style={{ ...printTh, textAlign: "center", width: 48 }}>No. of backs</th>
+              <th style={printTh}>Back subjects (year)</th>
               <th style={printTh}>Admission / Reg.</th>
               <th style={printTh}>Phone</th>
               <th style={printTh}>Batch</th>
@@ -643,6 +996,13 @@ export const BackStudentsPanel = ({
                     }}
                   >
                     {resolveBackCount(student)}
+                  </td>
+                  <td style={printTd}>
+                    {resolveBackPapers(student).length > 0
+                      ? resolveBackPapers(student).map((paper, paperIndex) => (
+                          <div key={paperIndex}>{backPaperLabel(paper)}</div>
+                        ))
+                      : "—"}
                   </td>
                   <td style={printTd}>
                     {asText(student.admissionNumber) || "—"}

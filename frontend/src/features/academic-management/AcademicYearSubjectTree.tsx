@@ -9,6 +9,7 @@ import type {
   HierarchyYearNode,
 } from "./academicHierarchyUtils";
 import {
+  FacultyDeleteForm,
   FacultyRenameForm,
   facultyValueOf,
   SubjectMoveForm,
@@ -33,7 +34,7 @@ interface AcademicYearSubjectTreeProps {
   className?: string;
   /** Teacher-facing syllabus / official plans: never show a teacher name. */
   hideTeacherNames?: boolean;
-  /** Show the ⋮ menus (rename faculty, move subject). Administrator only. */
+  /** Show the ⋮ menus (rename / delete faculty, move / delete subject). Administrator only. */
   allowStructureEdits?: boolean;
 }
 
@@ -53,6 +54,8 @@ export const AcademicYearSubjectTree = ({
   const isFullAdmin = useIsFullAdministrator();
   const [renamingFaculty, setRenamingFaculty] = useState<string | null>(null);
   const [movingSubject, setMovingSubject] = useState<string | null>(null);
+  // Faculty key, or the subject composite key, whose delete confirmation is open
+  const [deleting, setDeleting] = useState<string | null>(null);
   const facultyNodes: HierarchyFacultyNode[] = useMemo(() => {
     if (faculties && faculties.length > 0) return faculties;
     if (hierarchy && hierarchy.length > 0) {
@@ -189,10 +192,28 @@ export const AcademicYearSubjectTree = ({
                               : "Rename",
                           onSelect: () => setRenamingFaculty(faculty.key),
                         },
+                        // General holds every record without a faculty: never deleted whole
+                        ...(faculty.key === "faculty:general"
+                          ? []
+                          : [
+                              {
+                                label: "Delete",
+                                danger: true,
+                                onSelect: () => setDeleting(faculty.key),
+                              },
+                            ]),
                       ]}
                     />
                   ) : null}
                 </div>
+              ) : null}
+              {canEditStructure && deleting === faculty.key ? (
+                <FacultyDeleteForm
+                  className="mx-4 mb-3"
+                  facultyValue={facultyValueOf(faculty.key, faculty.label)}
+                  facultyLabel={faculty.label}
+                  onClose={() => setDeleting(null)}
+                />
               ) : null}
 
               {facultyOpen ? (
@@ -263,6 +284,12 @@ export const AcademicYearSubjectTree = ({
                                             label: "Move to another faculty / program",
                                             onSelect: () =>
                                               setMovingSubject(subjectComposite),
+                                          },
+                                          {
+                                            label: "Delete",
+                                            danger: true,
+                                            onSelect: () =>
+                                              setDeleting(subjectComposite),
                                           },
                                         ]}
                                       />
@@ -343,6 +370,22 @@ export const AcademicYearSubjectTree = ({
                                       )}
                                       faculties={moveTargets}
                                       onClose={() => setMovingSubject(null)}
+                                    />
+                                  ) : null}
+                                  {deleting === subjectComposite ? (
+                                    <FacultyDeleteForm
+                                      className={cn(
+                                        "mb-2 mr-4",
+                                        showFacultyLevel ? "ml-14" : "ml-10",
+                                      )}
+                                      facultyValue={facultyValueOf(
+                                        faculty.key,
+                                        faculty.label,
+                                      )}
+                                      facultyLabel={faculty.label}
+                                      subjectName={subject.subjectName}
+                                      subjectIds={subject.subjectIds}
+                                      onClose={() => setDeleting(null)}
                                     />
                                   ) : null}
                                 </li>

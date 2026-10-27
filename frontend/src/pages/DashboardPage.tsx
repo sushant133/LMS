@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { printPageCss } from "lib/printPage";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -379,6 +380,7 @@ const printDemographicsCharts = (opts: {
         body { padding: 0; }
         .no-print { display: none !important; }
       }
+      ${printPageCss(single ? "A4 portrait" : "A4 landscape", "8mm")}
     </style>
   </head><body>
     <div class="no-print" style="margin-bottom:10px;display:flex;justify-content:flex-end;gap:8px">

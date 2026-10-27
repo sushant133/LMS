@@ -9,8 +9,9 @@ import {
   type StudentRecord,
   type YearRecord,
 } from "@phit-erp/shared";
-import { Printer } from "lucide-react";
+import { Barcode, Printer } from "lucide-react";
 import { toast } from "sonner";
+import { downloadStudentBarcodeListPdf } from "./studentBarcodePdf";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
 import { StickyTableScroll } from "components/ui/StickyTableScroll";
@@ -109,6 +110,7 @@ export const StudentListManager = () => {
       availableSchools[0]?.address ?? user?.school?.address,
     );
   const [printing, setPrinting] = useState(false);
+  const [downloadingBarcodes, setDownloadingBarcodes] = useState(false);
   const role = useNormalizedRole();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
@@ -477,6 +479,53 @@ export const StudentListManager = () => {
     navigate("/students/create", { state: { student } });
   };
 
+  /** Batch / class (or year / section) name — the field may hold an id or a populated record. */
+  const groupName = (value: unknown, map: Map<string, string>): string => {
+    if (!value) return "";
+    if (typeof value === "object") {
+      const record = value as { _id?: string; name?: string };
+      return record.name ?? map.get(String(record._id ?? "")) ?? "";
+    }
+    return map.get(String(value)) ?? "";
+  };
+
+  const handleDownloadBarcodes = async () => {
+    if (filteredStudents.length === 0) {
+      toast.error("No students to download");
+      return;
+    }
+    setDownloadingBarcodes(true);
+    try {
+      await downloadStudentBarcodeListPdf(
+        filteredStudents.map((student) => ({
+          name: student.user?.fullName ?? "Unknown student",
+          rollNumber:
+            student.rollNumber != null ? String(student.rollNumber).trim() : "",
+          primary: groupName(isCollege ? student.batchId : student.classId, primaryMap),
+          secondary: groupName(isCollege ? student.yearId : student.sectionId, secondaryMap),
+          admissionNumber: String(student.admissionNumber ?? "").trim(),
+        })),
+        {
+          institutionName: institutionName || printBranding.name || "Institution",
+          institutionAddress: institutionAddress || undefined,
+          primaryLabel: labels.primary,
+          secondaryLabel: labels.secondary,
+          scopeLine: printScopeLines.join("  ·  ") || undefined,
+          filename: `student-barcodes-${new Date().toISOString().slice(0, 10)}`,
+        },
+      );
+      toast.success(
+        `Barcode list downloaded — ${filteredStudents.length} student${
+          filteredStudents.length === 1 ? "" : "s"
+        }`,
+      );
+    } catch (e) {
+      toast.error(parseErrorMessage(e));
+    } finally {
+      setDownloadingBarcodes(false);
+    }
+  };
+
   const handlePrintList = async () => {
     if (filteredStudents.length === 0) {
       toast.error("No students to print");
@@ -622,6 +671,16 @@ export const StudentListManager = () => {
           >
             <Printer className="mr-2 h-4 w-4" />
             {printing ? "Preparing…" : "Print list"}
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            title="PDF of the listed students: name, batch, year, admission no. and its barcode"
+            disabled={filteredStudents.length === 0 || downloadingBarcodes}
+            onClick={() => void handleDownloadBarcodes()}
+          >
+            <Barcode className="mr-2 h-4 w-4" />
+            {downloadingBarcodes ? "Preparing…" : "Download barcodes"}
           </Button>
           <Button
             variant="outline"

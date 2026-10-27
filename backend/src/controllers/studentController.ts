@@ -666,10 +666,16 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     hasScholarship,
     remarks: payload.remarks,
     academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",
+    // Leaving Back clears the back papers; while Back, listed papers define the count
+    ...((payload.academicStatus ?? student.academicStatus ?? "ACTIVE") !== "PENDING_NOT_PASSED"
+      ? { backPapers: [] }
+      : {}),
     backCount: (() => {
       const status =
         payload.academicStatus ?? student.academicStatus ?? "ACTIVE";
       if (status !== "PENDING_NOT_PASSED") return 0;
+      const papers = (student.backPapers ?? []).length;
+      if (papers > 0) return Math.min(50, papers);
       const n = Math.floor(Number(payload.backCount));
       if (Number.isFinite(n) && n >= 1) return Math.min(50, n);
       // Keep existing count if payload omitted a valid number while still Back
@@ -811,16 +817,36 @@ export const updateStudentBackCount = asyncHandler(async (req: Request, res: Res
     );
   }
 
-  const before = student.backCount ?? 0;
-  student.backCount = payload.backCount;
+  const before = {
+    backCount: student.backCount ?? 0,
+    backPapers: (student.backPapers ?? []).map((p) => ({
+      subjectName: p.subjectName,
+      subjectCode: p.subjectCode ?? "",
+      programYear: p.programYear
+    }))
+  };
+  if (payload.backPapers !== undefined) {
+    // Papers listed → they define the number of backs
+    student.backPapers = payload.backPapers.map((p) => ({
+      subjectName: p.subjectName.trim(),
+      subjectCode: (p.subjectCode ?? "").trim(),
+      programYear: p.programYear
+    })) as unknown as typeof student.backPapers;
+  }
+  const paperCount = (student.backPapers ?? []).length;
+  student.backCount = paperCount > 0 ? paperCount : (payload.backCount ?? student.backCount ?? 1);
   await student.save();
 
   await recordAudit(req, {
     action: "student.back_count_update",
     entity: "Student",
     entityId: student._id.toString(),
-    before: { backCount: before, academicStatus: student.academicStatus },
-    after: { backCount: student.backCount, academicStatus: student.academicStatus }
+    before: { ...before, academicStatus: student.academicStatus },
+    after: {
+      backCount: student.backCount,
+      backPapers: student.backPapers,
+      academicStatus: student.academicStatus
+    }
   });
 
   const populated = await Student.findById(student._id)

@@ -42,6 +42,23 @@ const feeCollectionSchema = new Schema(
      * Used for year-wise paid vs remaining ledger.
      */
     programYear: { type: Number, enum: [1, 2, 3], index: true },
+    /**
+     * Advance paid on this receipt for later program years (e.g. a 1st-year
+     * receipt that also pays part of the 2nd year). Included in amountPaidNpr;
+     * the year-wise ledger credits each amount to its own year.
+     */
+    advanceAllocations: {
+      type: [
+        new Schema(
+          {
+            programYear: { type: Number, enum: [2, 3], required: true },
+            amountNpr: { type: Number, required: true, min: 0 }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
+    },
     previousDueNpr: { type: Number, default: 0 },
     currentChargesNpr: { type: Number, default: 0 },
     /** Tuition / fee amount paid (excludes security deposit). */

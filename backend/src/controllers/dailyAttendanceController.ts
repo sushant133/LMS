@@ -1,14 +1,12 @@
 import type { Request, Response } from "express";
 import {
-  canManageInstitution,
   dailyAttendanceSubmitSchema,
   dailyAttendanceUnlockSchema,
   dailyAttendanceUpdateSchema,
-  hasInstitutionAccess,
-  isInstitutionAdmin,
   isSystemAdministrator
 } from "@phit-erp/shared";
 import mongoose, { type ClientSession } from "mongoose";
+import { Attendance } from "../models/Attendance.js";
 import { DailyAttendance } from "../models/DailyAttendance.js";
 import { School } from "../models/School.js";
 import { Student } from "../models/Student.js";
@@ -39,6 +37,7 @@ import {
   getFirstPeriodSlotForGroup,
   getHolidayForDate,
   getStudentCountByGroup,
+  assertStudentAttendanceDayOpen,
   groupKeyFromScope,
   loadGroupLabels,
   recordDailyAttendanceLog,
@@ -57,9 +56,16 @@ import {
   buildTeacherWiseSummary,
   buildWeeklyTrend,
   countEntryStatuses,
-  loadAcademicLabels
+  loadAcademicLabels,
+  withSubjectWiseFallback
 } from "../utils/dailyAttendanceReports.js";
-import { assertInstitutionRead } from "../utils/institutionAccess.js";
+import {
+  actsAsClassTeacher,
+  assertCanReadAllStudentAttendance,
+  canReadAllStudentAttendance,
+  canWriteAllStudentAttendance,
+  isStudentAttendanceAdmin
+} from "../utils/studentAttendanceAccess.js";
 
 const requireObjectId = (value: string | string[] | undefined, label = "id"): void => {
   if (typeof value !== "string" || !mongoose.Types.ObjectId.isValid(value)) {
@@ -68,11 +74,11 @@ const requireObjectId = (value: string | string[] | undefined, label = "id"): vo
 };
 
 const assertDailyAttendanceReadAccess = async (req: Request): Promise<void> => {
-  if (hasInstitutionAccess(req.user?.role ?? "")) {
+  if (canReadAllStudentAttendance(req)) {
     return;
   }
 
-  const teacherScope = await getTeacherScope(req);
+  const teacherScope = await classTeacherScope(req);
   if (teacherScope) {
     return;
   }
@@ -92,8 +98,31 @@ const buildAcademicFilter = (query: Request["query"], college: boolean): Record<
   return filter;
 };
 
+/**
+ * Daily sheets plus days marked only subject-wise (e.g. from Student Subject-wise),
+ * newest first. `limit` caps the number of group-days.
+ */
+const loadDailyReportRecords = async (filter: Record<string, unknown>, limit?: number) => {
+  const dailyQuery = DailyAttendance.find(filter).sort({ dateBs: -1 });
+  const subjectQuery = Attendance.find(filter).sort({ dateBs: -1 });
+  if (limit) {
+    dailyQuery.limit(limit);
+    // Several subject sheets per group-day; fetch enough to fill the window
+    subjectQuery.limit(limit * 10);
+  }
+  const [daily, subjectWise] = await Promise.all([dailyQuery.lean(), subjectQuery.lean()]);
+  const merged = withSubjectWiseFallback(daily as never, subjectWise as never).sort((a, b) =>
+    b.dateBs.localeCompare(a.dateBs)
+  );
+  return limit ? merged.slice(0, limit) : merged;
+};
+
+/** Teacher scope for a class teacher; null (college-wide) for a grant holder. */
+const classTeacherScope = async (req: Request) =>
+  req.studentAttendanceGrant?.read ? null : getTeacherScope(req);
+
 const resolveAdminOverride = (req: Request, explicit?: boolean): boolean =>
-  Boolean(explicit) || isInstitutionAdmin(req.user?.role ?? "");
+  Boolean(explicit) || isStudentAttendanceAdmin(req);
 
 const assertTeacherSlotAccess = async (
   req: Request,
@@ -107,17 +136,19 @@ const assertTeacherSlotAccess = async (
   },
   options: { adminOverride?: boolean; forWrite?: boolean; dateBs: string; schoolId: string; college: boolean }
 ) => {
-  const role = req.user?.role ?? "";
   if (options.adminOverride) {
     if (options.forWrite) {
-      if (canManageInstitution(role)) {
+      if (canWriteAllStudentAttendance(req)) {
         return;
       }
-    } else if (hasInstitutionAccess(role)) {
+    } else if (canReadAllStudentAttendance(req)) {
       return;
     }
   }
 
+  // Ownership check: any teacher may still mark their own period (even one
+  // holding only a read-only Student Attendance grant), so use the real role
+  // and the real teacher scope here.
   if (req.user?.role !== "TEACHER") {
     throw new ApiError(403, "Only assigned teachers can mark daily attendance");
   }
@@ -168,20 +199,20 @@ export const listDailyAttendanceAssignments = asyncHandler(async (req: Request, 
   const dayOfWeek = getDayOfWeekFromDate(dateBs);
   const config = await getDailyAttendanceConfig(schoolId.toString());
   const holiday = await getHolidayForDate(schoolId.toString(), dateBs);
-  const teacherScope = await getTeacherScope(req);
+  const teacherScope = await classTeacherScope(req);
   const teacherId =
-    req.user?.role === "TEACHER" && teacherScope
+    actsAsClassTeacher(req) && teacherScope
       ? teacherScope.teacherId
       : typeof req.query.teacherId === "string"
         ? req.query.teacherId
         : undefined;
 
-  if (req.user?.role === "TEACHER" && !teacherId) {
+  if (actsAsClassTeacher(req) && !teacherId) {
     throw new ApiError(403, "Teacher profile not found");
   }
 
-  const isAdminUser = hasInstitutionAccess(req.user?.role ?? "");
-  const canWriteAsAdmin = canManageInstitution(req.user?.role ?? "");
+  const isAdminUser = canReadAllStudentAttendance(req);
+  const canWriteAsAdmin = canWriteAllStudentAttendance(req);
   const adminOverride = resolveAdminOverride(req, req.query.adminOverride === "true");
 
   const existingRecords = await DailyAttendance.find({
@@ -480,7 +511,7 @@ export const listDailyAttendance = asyncHandler(async (req: Request, res: Respon
   }
   if (typeof req.query.teacherId === "string") query.teacherId = req.query.teacherId;
 
-  const teacherScope = await getTeacherScope(req);
+  const teacherScope = await classTeacherScope(req);
   if (teacherScope) {
     query.teacherId = teacherScope.teacherId;
     if (college) {
@@ -542,7 +573,7 @@ export const getDailyAttendanceContext = asyncHandler(async (req: Request, res: 
     academicYearBs = slot.academicYearBs;
   } else {
     // Admin manual register: academic group without a first-period slot for the day.
-    if (!adminOverride || !canManageInstitution(req.user?.role ?? "")) {
+    if (!adminOverride || !canWriteAllStudentAttendance(req)) {
       throw new ApiError(400, "Timetable slot is required");
     }
 
@@ -700,7 +731,7 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
       college
     });
   } else {
-    if (!adminOverride || !canManageInstitution(req.user?.role ?? "")) {
+    if (!adminOverride || !canWriteAllStudentAttendance(req)) {
       throw new ApiError(403, "Only administrators can mark attendance without a timetable slot");
     }
     if (!payload.assignedTeacherId) {
@@ -759,7 +790,7 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
     dateBs: payload.dateBs,
     config,
     firstPeriodEndTime: firstPeriodSlot?.endTime ?? slot?.endTime,
-    adminOverride: canManageInstitution(req.user?.role ?? "") && adminOverride,
+    adminOverride: canWriteAllStudentAttendance(req) && adminOverride,
     holidayTitle: holiday?.title
   });
 
@@ -908,13 +939,15 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
 });
 
 export const updateDailyAttendance = asyncHandler(async (req: Request, res: Response) => {
-  if (!isInstitutionAdmin(req.user?.role ?? "")) {
+  if (!isStudentAttendanceAdmin(req)) {
     throw new ApiError(403, "Only administrators can edit daily attendance");
   }
 
   requireObjectId(req.params.id);
   const payload = dailyAttendanceUpdateSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
+  // No editing student attendance on an Academic Calendar holiday
+  await assertStudentAttendanceDayOpen(tenantObjectId(req).toString(), payload.dateBs);
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
   validateAttendanceScope(institutionType, payload);
@@ -1044,7 +1077,7 @@ export const updateDailyAttendance = asyncHandler(async (req: Request, res: Resp
 });
 
 export const unlockDailyAttendance = asyncHandler(async (req: Request, res: Response) => {
-  if (!isInstitutionAdmin(req.user?.role ?? "")) {
+  if (!isStudentAttendanceAdmin(req)) {
     throw new ApiError(403, "Only administrators can unlock daily attendance");
   }
 
@@ -1135,7 +1168,7 @@ export const deleteDailyAttendance = asyncHandler(async (req: Request, res: Resp
 });
 
 export const getDailyAttendanceDashboard = asyncHandler(async (req: Request, res: Response) => {
-  assertInstitutionRead(req);
+  assertCanReadAllStudentAttendance(req);
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
@@ -1143,19 +1176,28 @@ export const getDailyAttendanceDashboard = asyncHandler(async (req: Request, res
   const filter: Record<string, unknown> = { schoolId };
   Object.assign(filter, buildAcademicFilter(req.query, college));
 
-  const [todayRecords, recentRecords] = await Promise.all([
-    DailyAttendance.find({ ...filter, dateBs }).lean(),
-    DailyAttendance.find(filter).sort({ dateBs: -1 }).limit(365).lean()
-  ]);
-
+  const recentRecords = await loadDailyReportRecords(filter, 365);
   const reportRecords = recentRecords as never;
-  const today = aggregateRecords(todayRecords as never);
+
+  // Nothing marked today yet: summarise the most recent day that has attendance
+  const hasToday = recentRecords.some((record) => record.dateBs === dateBs);
+  const summaryDateBs = hasToday
+    ? dateBs
+    : recentRecords.reduce<string | null>(
+        (latest, record) => (!latest || record.dateBs > latest ? record.dateBs : latest),
+        null
+      ) ?? dateBs;
+  const today = aggregateRecords(
+    recentRecords.filter((record) => record.dateBs === summaryDateBs) as never
+  );
   const [classWise, teacherWise] = await Promise.all([
     buildClassWiseSummary(reportRecords, college),
     buildTeacherWiseSummary(reportRecords, college)
   ]);
 
   const dashboard = {
+    summaryDateBs,
+    isToday: summaryDateBs === dateBs,
     totalStudents: today.total,
     presentToday: today.present,
     absentToday: today.absent,
@@ -1185,7 +1227,7 @@ export const getDailyAttendanceById = asyncHandler(async (req: Request, res: Res
     throw new ApiError(404, "Daily attendance record not found");
   }
 
-  const teacherScope = await getTeacherScope(req);
+  const teacherScope = await classTeacherScope(req);
   if (teacherScope && teacherScope.teacherId !== record.teacherId.toString()) {
     throw new ApiError(403, "You do not have access to this attendance record");
   }
@@ -1223,7 +1265,7 @@ export const getDailyAttendanceById = asyncHandler(async (req: Request, res: Res
 });
 
 export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: Response) => {
-  assertInstitutionRead(req);
+  assertCanReadAllStudentAttendance(req);
 
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
@@ -1254,7 +1296,7 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
     filter.teacherId = req.query.teacherId;
   }
 
-  const records = await DailyAttendance.find(filter).sort({ dateBs: -1 }).lean();
+  const records = await loadDailyReportRecords(filter);
   const reportRecords = records as never;
 
   if (reportType === "student" || reportType === "defaulter") {
@@ -1302,7 +1344,7 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
 });
 
 export const listDailyAttendanceLogs = asyncHandler(async (req: Request, res: Response) => {
-  assertInstitutionRead(req);
+  assertCanReadAllStudentAttendance(req);
   requireObjectId(req.params.id);
 
   const schoolId = tenantObjectId(req);

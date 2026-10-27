@@ -998,10 +998,32 @@ export type CreateSchoolInput = z.infer<typeof createSchoolSchema>;
 export type UpdateSchoolInput = z.infer<typeof updateSchoolSchema>;
 export type StudentInput = z.infer<typeof studentSchema>;
 
-/** Quick update of back paper count for Examination → Back Students. */
-export const studentBackCountSchema = z.object({
-  backCount: z.coerce.number().int().min(1).max(50)
+/** One back paper: the subject and the program year it was failed in. */
+export const studentBackPaperSchema = z.object({
+  subjectName: z.string().trim().min(1, "Enter the subject name").max(160),
+  subjectCode: z.string().trim().max(40).optional().or(z.literal("")),
+  programYear: z.coerce.number().int().min(1, "Choose 1st, 2nd or 3rd year").max(3, "Choose 1st, 2nd or 3rd year")
 });
+export type StudentBackPaperInput = z.infer<typeof studentBackPaperSchema>;
+
+/**
+ * Examination → Back Students update. With back papers listed, the number of
+ * backs is the number of papers; without them, backCount is entered directly.
+ */
+export const studentBackCountSchema = z
+  .object({
+    backCount: z.coerce.number().int().min(1).max(50).optional(),
+    backPapers: z.array(studentBackPaperSchema).max(50).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (!value.backPapers?.length && value.backCount === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the number of backs or add the back subjects",
+        path: ["backCount"]
+      });
+    }
+  });
 export type StudentBackCountInput = z.infer<typeof studentBackCountSchema>;
 export type TeacherInput = z.infer<typeof teacherSchema>;
 export type CollegeStaffInput = z.infer<typeof collegeStaffSchema>;

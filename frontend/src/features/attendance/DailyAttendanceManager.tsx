@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Bar,
@@ -35,11 +36,13 @@ import { useIsCollege } from "hooks/useInstitutionType";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
 import { getPrintInstitutionBranding } from "lib/printBranding";
+import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { useIsSystemAdministrator } from "hooks/useNormalizedRole";
 import {
   buildAttendanceQueryParams,
+  checkAttendancePeriod,
   createDefaultAttendancePeriod,
   getAttendancePeriodLabel,
   type AttendancePeriodSelection,
@@ -52,6 +55,18 @@ import {
 } from "./attendanceUtils";
 import { AttendancePeriodFilter } from "./AttendancePeriodFilter";
 import { DailyAttendanceHistoryPanel } from "./DailyAttendanceHistoryPanel";
+
+/** Only this part of the Reports tab goes to the printer. */
+const DAILY_REPORT_PRINT_ID = "daily-attendance-report-print";
+
+const DAILY_REPORT_TYPE_LABELS: Record<DailyAttendanceReportType, string> = {
+  summary: "Summary Report",
+  class: "Class-wise Report",
+  student: "Student-wise Report",
+  defaulter: "Low Attendance Defaulters",
+  leave: "Leave Report",
+  late: "Late Arrival Report",
+};
 
 const statuses: DailyAttendanceStatus[] = [
   "PRESENT",
@@ -135,7 +150,7 @@ export const DailyAttendanceManager = ({
   const [isExporting, setIsExporting] = useState(false);
   const [assignedTeacherId, setAssignedTeacherId] = useState("");
 
-  // Only write admins bypass time/holiday windows; viewers must see real availability
+  // Only write admins bypass time windows (never holidays); viewers must see real availability
   const adminParams = canWriteAdmin ? { adminOverride: true } : {};
 
   const teachersQuery = useQuery({
@@ -203,10 +218,19 @@ export const DailyAttendanceManager = ({
     ),
   });
 
-  const attendancePeriodParams = useMemo(
-    () => buildAttendanceQueryParams(periodSelection),
+  // A half-typed period ("2083-", "20") must not crash the page: show a hint
+  // and keep using the last complete period until the input is valid again.
+  const periodCheck = useMemo(
+    () => checkAttendancePeriod(periodSelection),
     [periodSelection],
   );
+  const lastValidPeriodParams = useRef<Record<string, string>>(
+    buildAttendanceQueryParams(createDefaultAttendancePeriod()),
+  );
+  if (periodCheck.params) lastValidPeriodParams.current = periodCheck.params;
+  const attendancePeriodParams =
+    periodCheck.params ?? lastValidPeriodParams.current;
+  const periodInvalid = Boolean(periodCheck.error);
 
   const historyQuery = useQuery({
     queryKey: ["daily-attendance-history", attendancePeriodParams],
@@ -392,6 +416,8 @@ export const DailyAttendanceManager = ({
   );
   const canMark =
     studentCount > 0 &&
+    // Academic Calendar holiday: no student attendance, administrators included
+    !contextQuery.data?.availability.isHoliday &&
     (canWriteAdmin
       ? !isLocked
       : isTeacher &&
@@ -538,6 +564,17 @@ export const DailyAttendanceManager = ({
           <LoadingState />
         ) : (
           <>
+            {dashboardQuery.data &&
+            dashboardQuery.data.isToday === false &&
+            dashboardQuery.data.totalStudents > 0 ? (
+              <p className="text-sm text-slate-500">
+                No attendance marked today yet. Showing the latest marked day,{" "}
+                <span className="font-medium text-slate-700">
+                  {dashboardQuery.data.summaryDateBs}
+                </span>
+                .
+              </p>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
               {[
                 {
@@ -545,11 +582,11 @@ export const DailyAttendanceManager = ({
                   value: dashboardQuery.data?.totalStudents ?? 0,
                 },
                 {
-                  label: "Present Today",
+                  label: dashboardQuery.data?.isToday === false ? "Present" : "Present Today",
                   value: dashboardQuery.data?.presentToday ?? 0,
                 },
                 {
-                  label: "Absent Today",
+                  label: dashboardQuery.data?.isToday === false ? "Absent" : "Absent Today",
                   value: dashboardQuery.data?.absentToday ?? 0,
                 },
                 { label: "Late", value: dashboardQuery.data?.lateToday ?? 0 },
@@ -582,7 +619,7 @@ export const DailyAttendanceManager = ({
                   {(dashboardQuery.data?.dailyTrend.length ?? 0) === 0 ? (
                     <EmptyState
                       title="No trend data yet"
-                      description="Submit daily attendance to populate charts."
+                      description="Mark daily, subject-wise or register attendance to populate charts."
                     />
                   ) : (
                     <ChartBox height={288}>
@@ -737,7 +774,10 @@ export const DailyAttendanceManager = ({
                       <button
                         key={key}
                         type="button"
-                        onClick={() => setSelectedAssignment(assignment)}
+                        onClick={() => {
+                          setSelectedAssignment(assignment);
+                          scrollToForm("daily-attendance-sheet");
+                        }}
                         className={`rounded-xl border p-4 text-left transition hover:border-brand-300 ${
                           selected
                             ? "border-brand-500 bg-brand-50"
@@ -817,7 +857,7 @@ export const DailyAttendanceManager = ({
           </Card>
 
           {selectedAssignment ? (
-            <Card>
+            <Card id="daily-attendance-sheet">
               <CardHeader>
                 <CardTitle>Daily Attendance Register</CardTitle>
               </CardHeader>
@@ -1164,11 +1204,12 @@ export const DailyAttendanceManager = ({
               <AttendancePeriodFilter
                 value={periodSelection}
                 onChange={setPeriodSelection}
+                error={periodCheck.error}
               />
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
-                  disabled={isExporting}
+                  disabled={isExporting || periodInvalid}
                   onClick={() => {
                     const records = historyQuery.data ?? [];
                     if (!records.length) {
@@ -1189,7 +1230,7 @@ export const DailyAttendanceManager = ({
                 {hasInstitutionRead ? (
                   <Button
                     variant="outline"
-                    disabled={isExporting}
+                    disabled={isExporting || periodInvalid}
                     onClick={() => void exportAttendanceWorkbook()}
                   >
                     {isExporting
@@ -1242,6 +1283,7 @@ export const DailyAttendanceManager = ({
             <AttendancePeriodFilter
               value={periodSelection}
               onChange={setPeriodSelection}
+              error={periodCheck.error}
             />
 
             {reportsQuery.isLoading ? (
@@ -1251,6 +1293,7 @@ export const DailyAttendanceManager = ({
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
+                    disabled={periodInvalid}
                     onClick={() => {
                       if (!historyQuery.data?.length) {
                         toast.error("No records available to export.");
@@ -1267,7 +1310,7 @@ export const DailyAttendanceManager = ({
                   </Button>
                   <Button
                     variant="outline"
-                    disabled={isExporting}
+                    disabled={isExporting || periodInvalid}
                     onClick={() => void exportAttendanceWorkbook()}
                   >
                     {isExporting
@@ -1276,6 +1319,7 @@ export const DailyAttendanceManager = ({
                   </Button>
                   <Button
                     variant="outline"
+                    disabled={periodInvalid}
                     onClick={() => {
                       const rows = reportsQuery.data?.rows;
                       if (!rows?.length) {
@@ -1313,11 +1357,24 @@ export const DailyAttendanceManager = ({
                   >
                     Export Report Excel
                   </Button>
-                  <Button variant="outline" onClick={() => window.print()}>
+                  <Button
+                    variant="outline"
+                    disabled={periodInvalid}
+                    onClick={() => {
+                      // Print only the report below — not the whole screen
+                      // (tabs, filters and buttons used to print with it)
+                      void printElementById(
+                        DAILY_REPORT_PRINT_ID,
+                        "daily-attendance-report",
+                        "a4-portrait",
+                      ).catch((error) => toast.error(parseErrorMessage(error)));
+                    }}
+                  >
                     Print
                   </Button>
                 </div>
 
+                <div id={DAILY_REPORT_PRINT_ID} className="space-y-4">
                 {(() => {
                   const branding = getPrintInstitutionBranding();
                   return (
@@ -1331,7 +1388,11 @@ export const DailyAttendanceManager = ({
                         </p>
                       ) : null}
                       <p className="mt-1 text-sm font-semibold text-slate-800">
-                        Daily Attendance Report
+                        Daily Attendance Report —{" "}
+                        {DAILY_REPORT_TYPE_LABELS[reportType] ?? "Report"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-600">
+                        Period: {getAttendancePeriodLabel(periodSelection)}
                       </p>
                     </div>
                   );
@@ -1339,7 +1400,34 @@ export const DailyAttendanceManager = ({
 
                 {reportType === "summary" && reportsQuery.data ? (
                   <div className="space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {/* Paper: a plain summary row instead of the screen cards */}
+                    <table className="hidden w-full border-collapse text-sm print:table">
+                      <tbody>
+                        <tr>
+                          <td className="border border-slate-400 px-2 py-1 font-semibold">Records</td>
+                          <td className="border border-slate-400 px-2 py-1">
+                            {(reportsQuery.data as { records?: number }).records ?? 0}
+                          </td>
+                          <td className="border border-slate-400 px-2 py-1 font-semibold">Attendance %</td>
+                          <td className="border border-slate-400 px-2 py-1">
+                            {(reportsQuery.data as { attendancePercentage?: number })
+                              .attendancePercentage ?? 0}
+                            %
+                          </td>
+                          <td className="border border-slate-400 px-2 py-1 font-semibold">Present</td>
+                          <td className="border border-slate-400 px-2 py-1">
+                            {(reportsQuery.data as { totals?: { present?: number } })
+                              .totals?.present ?? 0}
+                          </td>
+                          <td className="border border-slate-400 px-2 py-1 font-semibold">Absent</td>
+                          <td className="border border-slate-400 px-2 py-1">
+                            {(reportsQuery.data as { totals?: { absent?: number } })
+                              .totals?.absent ?? 0}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div className="no-print grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       <Card>
                         <CardContent className="pt-4">
                           <p className="text-xs text-slate-500">Records</p>
@@ -1510,6 +1598,7 @@ export const DailyAttendanceManager = ({
                     description="Adjust filters or record attendance to generate reports."
                   />
                 )}
+                </div>
               </>
             )}
           </CardContent>

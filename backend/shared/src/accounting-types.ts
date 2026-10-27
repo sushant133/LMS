@@ -100,6 +100,8 @@ export interface EnhancedFeeCollectionRecord {
   semesterBs?: string;
   /** 1st / 2nd / 3rd program year (HA) */
   programYear?: number;
+  /** Advance on this receipt for later years; included in amountPaidNpr. */
+  advanceAllocations?: Array<{ programYear: number; amountNpr: number }>;
   previousDueNpr: number;
   currentChargesNpr: number;
   amountPaidNpr: number;
@@ -140,6 +142,8 @@ export interface ProgramYearFeeSummary {
   label: string;
   chargedNpr: number;
   paidNpr: number;
+  /** Part of paidNpr received in advance on an earlier year's receipt. */
+  advanceNpr?: number;
   scholarshipNpr: number;
   discountNpr: number;
   remainingNpr: number;

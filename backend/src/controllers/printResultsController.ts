@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import type { Types } from "mongoose";
 import { Batch } from "../models/Batch.js";
 import { Exam } from "../models/Exam.js";
+import { ExamSymbolNumber } from "../models/ExamSymbolNumber.js";
 import { Result } from "../models/Result.js";
 import { ResultSubmission } from "../models/ResultSubmission.js";
 import { SchoolClass } from "../models/SchoolClass.js";
@@ -254,13 +255,20 @@ const buildPrintResultsGrid = async (req: Request) => {
     subjects.map((subject) => [subject.subjectId, subject.fullMarks])
   );
 
-  const [batch, year, schoolClass, section, branding] = await Promise.all([
+  const [batch, year, schoolClass, section, branding, symbols] = await Promise.all([
     batchId ? Batch.findById(batchId).lean() : null,
     yearId ? Year.findById(yearId).lean() : null,
     classId ? SchoolClass.findById(classId).lean() : null,
     sectionId ? Section.findById(sectionId).lean() : null,
-    resolveSchoolBranding(schoolId)
+    resolveSchoolBranding(schoolId),
+    // Symbol numbers are issued per exam
+    ExamSymbolNumber.find({ schoolId, examId, studentId: { $in: studentIds } })
+      .select("studentId symbolNumber")
+      .lean()
   ]);
+  const symbolByStudent = new Map(
+    symbols.map((row) => [row.studentId.toString(), row.symbolNumber])
+  );
 
   const sortedResults = [...results].sort((left, right) => {
     const leftRoll = studentMap.get(left.studentId.toString())?.rollNumber ?? 0;
@@ -336,7 +344,7 @@ const buildPrintResultsGrid = async (req: Request) => {
         studentName: user?.fullName ?? "Student",
         rollNumber: student.rollNumber,
         registrationNumber: regNo,
-        symbolNumber: "",
+        symbolNumber: symbolByStudent.get(result.studentId.toString()) ?? "",
         batchName: batch?.name,
         yearName: year?.name,
         className: schoolClass?.name,

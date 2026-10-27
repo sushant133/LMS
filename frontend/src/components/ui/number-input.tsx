@@ -21,6 +21,35 @@ export type NumberInputProps = Omit<
    * Prefer this over reading `valueAsNumber` when you want optional empty state.
    */
   onValueChange?: (value: number | undefined) => void;
+  /**
+   * The parent's "nothing entered" value (default 0). It renders as a blank box,
+   * and a cleared box stays blank even if the parent stores this value back.
+   * Typing the number itself still shows it.
+   */
+  emptyValue?: number;
+};
+
+const toNumberOrNull = (value: number | string | null | undefined): number | null => {
+  const formatted = formatNumberInputValue(value);
+  return formatted === "" || Number.isNaN(formatted) ? null : formatted;
+};
+
+/** Box text for a value coming from the parent: blank for empty / emptyValue. */
+const textFor = (value: number | string | null | undefined, emptyValue: number): string => {
+  const numeric = toNumberOrNull(value);
+  return numeric === null || numeric === emptyValue ? "" : String(numeric);
+};
+
+/** Whether the box text already represents the parent's value. */
+const textMatches = (
+  text: string,
+  value: number | string | null | undefined,
+  emptyValue: number,
+): boolean => {
+  const numeric = toNumberOrNull(value);
+  if (text.trim() === "") return numeric === null || numeric === emptyValue;
+  const typed = Number(text);
+  return numeric !== null && !Number.isNaN(typed) && typed === numeric;
 };
 
 /**
@@ -40,12 +69,20 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       onValueChange,
       onWheel,
       onKeyDown,
+      emptyValue = 0,
       ...props
     },
     ref,
   ) => {
     const innerRef = React.useRef<HTMLInputElement | null>(null);
-    const displayValue = formatNumberInputValue(value);
+    // Own the box text so a default 0 (or emptyValue) shows blank and clearing
+    // stays blank, even when the parent stores 0 back on change.
+    const [text, setText] = React.useState(() => textFor(value, emptyValue));
+    React.useEffect(() => {
+      setText((current) =>
+        textMatches(current, value, emptyValue) ? current : textFor(value, emptyValue),
+      );
+    }, [value, emptyValue]);
 
     const setRefs = React.useCallback(
       (node: HTMLInputElement | null) => {
@@ -71,6 +108,7 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     }, []);
 
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+      setText(event.target.value);
       onValueChange?.(parseNumberInput(event));
       onChange?.(event);
     };
@@ -96,7 +134,7 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         type="number"
         inputMode="decimal"
         {...props}
-        value={displayValue}
+        value={text}
         onChange={handleChange}
         onWheel={handleWheel}
         onKeyDown={handleKeyDown}

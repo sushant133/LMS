@@ -73,7 +73,8 @@ export const resolveAttendancePeriodRange = (selection: AttendancePeriodSelectio
       const [yearText, monthText] = monthBs.split("-");
       const year = Number(yearText);
       const month = Number(monthText);
-      if (!year || !month || month < 1 || month > 12) {
+      // Four-digit BS year: "208-07" while typing is not a real month yet
+      if (!/^\d{4}$/.test(yearText ?? "") || !month || month < 1 || month > 12) {
         throw new Error("Enter a valid month in YYYY-MM format.");
       }
       return {
@@ -83,7 +84,11 @@ export const resolveAttendancePeriodRange = (selection: AttendancePeriodSelectio
       };
     }
     case "yearly": {
-      const year = Number(selection.yearBs) || getTodayBs().year;
+      const yearText = selection.yearBs.trim();
+      if (yearText && !/^\d{4}$/.test(yearText)) {
+        throw new Error("Enter a valid year in YYYY format.");
+      }
+      const year = Number(yearText) || getTodayBs().year;
       return {
         fromDateBs: formatBs({ year, month: 1, day: 1 }),
         toDateBs: formatBs({ year, month: 12, day: getDaysInBsMonth(year, 12) })
@@ -108,6 +113,23 @@ export const resolveAttendancePeriodRange = (selection: AttendancePeriodSelectio
   }
 };
 
+/**
+ * Non-throwing check for render code: while the user is still typing ("2083-",
+ * "20") the selection is incomplete, which must show a hint — not crash the page.
+ */
+export const checkAttendancePeriod = (
+  selection: AttendancePeriodSelection
+): { params: Record<string, string> | null; error: string | null } => {
+  try {
+    return { params: buildAttendanceQueryParams(selection), error: null };
+  } catch (error) {
+    return {
+      params: null,
+      error: error instanceof Error ? error.message : "Enter a valid period."
+    };
+  }
+};
+
 export const buildAttendanceQueryParams = (selection: AttendancePeriodSelection): Record<string, string> => {
   const range = resolveAttendancePeriodRange(selection);
   return {
@@ -116,8 +138,16 @@ export const buildAttendanceQueryParams = (selection: AttendancePeriodSelection)
   };
 };
 
+/** Never throws (used in render and file names); falls back to the raw input. */
 export const getAttendancePeriodLabel = (selection: AttendancePeriodSelection): string => {
-  const range = resolveAttendancePeriodRange(selection);
+  let range: AttendanceDateRange;
+  try {
+    range = resolveAttendancePeriodRange(selection);
+  } catch {
+    return selection.period === "monthly"
+      ? selection.monthBs.trim() || "attendance"
+      : "attendance";
+  }
   switch (selection.period) {
     case "weekly":
       return `week_${range.fromDateBs}_to_${range.toDateBs}`;

@@ -6,6 +6,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { printPageCss } from "lib/printPage";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   BatchRecord,
@@ -191,7 +193,11 @@ const emptyPaymentForm = () => ({
   paidDateBs: "",
   paidDateAd: "",
   currentChargesNpr: "",
+  /** Fee paid for the selected program year */
   amountPaidNpr: "",
+  /** Paid now in advance for a later program year (same receipt) */
+  advanceYear2Npr: "",
+  advanceYear3Npr: "",
   /** Security / caution deposit collected with this payment (0 = none) */
   securityDepositPaidNpr: "0",
   discountNpr: "0",
@@ -204,6 +210,111 @@ const emptyPaymentForm = () => ({
   scholarshipType: "NONE" as "NONE" | "TOPPER_YEAR_WAIVER" | "MERIT" | "OTHER",
   scholarshipAwardId: "",
 });
+
+/** Later program years that can take an advance on a receipt for `programYear`. */
+const advanceYearsFor = (programYear: string | number): Array<2 | 3> => {
+  const year = Number(programYear);
+  if (year === 1) return [2, 3];
+  if (year === 2) return [3];
+  return [];
+};
+
+const ORDINAL_YEAR: Record<number, string> = { 1: "1st", 2: "2nd", 3: "3rd" };
+
+/**
+ * Advance paid now for a later program year, on the same receipt as this
+ * year's fee — e.g. 1st year paid in full plus part of the 2nd year. The
+ * receipt total is this year's amount plus the advances; the year-wise ledger
+ * credits each advance to its own year.
+ */
+const AdvanceForLaterYears = ({
+  programYear,
+  years,
+  values,
+  thisYearPaid,
+  yearWise,
+  onChange,
+  onMoveExtra,
+}: {
+  programYear: number;
+  years: Array<2 | 3>;
+  values: Record<2 | 3, string>;
+  thisYearPaid: number;
+  yearWise?: Array<{ programYear: number; remainingNpr: number }>;
+  onChange: (year: 2 | 3, value: string) => void;
+  onMoveExtra: (year: 2 | 3, thisYearAmount: number, extra: number) => void;
+}) => {
+  const dueOf = (year: number) => {
+    const row = yearWise?.find((y) => Number(y.programYear) === year);
+    return row ? Math.max(0, Number(row.remainingNpr) || 0) : null;
+  };
+  const thisYearDue = dueOf(programYear);
+  const extra =
+    thisYearDue != null && thisYearPaid > thisYearDue ? thisYearPaid - thisYearDue : 0;
+  const advanceTotal = years.reduce((sum, y) => sum + (Number(values[y]) || 0), 0);
+  const nextYear = years[0] ?? 2;
+
+  return (
+    <div className="sm:col-span-2 space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3">
+      <div>
+        <p className="text-sm font-medium text-slate-900">
+          Advance for later years (optional)
+        </p>
+        <p className="text-xs text-slate-600">
+          Extra paid now for a later year on this same receipt. It is added to the
+          receipt total and counted as paid in that year&apos;s fee record.
+        </p>
+      </div>
+      {extra > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span>
+            {formatCurrencyNpr(extra)} is more than this year&apos;s due of{" "}
+            {formatCurrencyNpr(thisYearDue ?? 0)}.
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onMoveExtra(nextYear, thisYearDue ?? 0, extra)}
+          >
+            Move {formatCurrencyNpr(extra)} to {ORDINAL_YEAR[nextYear]} year advance
+          </Button>
+        </div>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {years.map((year) => {
+          const due = dueOf(year);
+          return (
+            <FormField key={year} label={`Advance for ${ORDINAL_YEAR[year]} year (NPR)`}>
+              <NumberInput
+                min={0}
+                value={values[year]}
+                onChange={(e) => onChange(year, e.target.value)}
+              />
+              {due != null ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  {ORDINAL_YEAR[year]} year due now: {formatCurrencyNpr(due)}
+                </p>
+              ) : null}
+            </FormField>
+          );
+        })}
+      </div>
+      {advanceTotal > 0 ? (
+        <p className="text-sm text-slate-800">
+          Receipt total fee received:{" "}
+          <span className="font-semibold">
+            {formatCurrencyNpr(thisYearPaid + advanceTotal)}
+          </span>{" "}
+          <span className="text-xs text-slate-500">
+            ({ORDINAL_YEAR[programYear]} year {formatCurrencyNpr(thisYearPaid)} + advance{" "}
+            {formatCurrencyNpr(advanceTotal)})
+          </span>
+        </p>
+      ) : null}
+    </div>
+  );
+};
 
 const paymentMethodNeedsHandover = (
   method: (typeof PAYMENT_METHODS)[number],
@@ -586,9 +697,17 @@ export const StudentFeeRecordsPanel = () => {
     setEditingReceipt(row);
     setSelectedStudentId(studentId);
     const depositPaid = Number(row.securityDepositPaidNpr ?? 0) || 0;
+    const advanceFor = (year: number) =>
+      (row.advanceAllocations ?? [])
+        .filter((a) => Number(a.programYear) === year)
+        .reduce((sum, a) => sum + (Number(a.amountNpr) || 0), 0);
+    const advance2 = advanceFor(2);
+    const advance3 = advanceFor(3);
     setPaymentForm({
       studentId,
       programYear: String(row.programYear ?? 1),
+      advanceYear2Npr: advance2 > 0 ? String(advance2) : "",
+      advanceYear3Npr: advance3 > 0 ? String(advance3) : "",
       feeStructureId: row.feeStructureId
         ? String(row.feeStructureId)
         : "",
@@ -596,7 +715,10 @@ export const StudentFeeRecordsPanel = () => {
       paidDateBs,
       paidDateAd,
       currentChargesNpr: String(row.currentChargesNpr ?? 0),
-      amountPaidNpr: String(row.amountPaidNpr ?? 0),
+      // The receipt total includes the advance; the form shows this year's part
+      amountPaidNpr: String(
+        Math.max(0, (Number(row.amountPaidNpr) || 0) - advance2 - advance3),
+      ),
       securityDepositPaidNpr: String(depositPaid),
       discountNpr: String(row.discountNpr ?? 0),
       scholarshipNpr: String(row.scholarshipNpr ?? 0),
@@ -946,7 +1068,20 @@ export const StudentFeeRecordsPanel = () => {
       toast.error("Enter a valid amount paid (0 allowed for full scholarship)");
       return null;
     }
-    if (amountPaid <= 0 && !(Number(paymentForm.scholarshipNpr) > 0)) {
+    const advanceAllocations = advanceYearsFor(paymentForm.programYear)
+      .map((year) => ({
+        programYear: year,
+        amountNpr:
+          Number(
+            year === 2 ? paymentForm.advanceYear2Npr : paymentForm.advanceYear3Npr,
+          ) || 0,
+      }))
+      .filter((a) => a.amountNpr > 0);
+    const advanceTotal = advanceAllocations.reduce((sum, a) => sum + a.amountNpr, 0);
+    if (
+      amountPaid + advanceTotal <= 0 &&
+      !(Number(paymentForm.scholarshipNpr) > 0)
+    ) {
       toast.error("Enter fee amount paid (or apply scholarship)");
       return null;
     }
@@ -977,7 +1112,9 @@ export const StudentFeeRecordsPanel = () => {
       paidDateAd: paidDateAd || undefined,
       programYear: Number(paymentForm.programYear),
       currentChargesNpr: Number.isFinite(charges) ? charges : 0,
-      amountPaidNpr: amountPaid,
+      // Total fee received on this receipt, advance for later years included
+      amountPaidNpr: amountPaid + advanceTotal,
+      advanceAllocations,
       securityDepositPaidNpr: depositPaid,
       discountNpr: Number(paymentForm.discountNpr) || 0,
       scholarshipNpr: Number(paymentForm.scholarshipNpr) || 0,
@@ -1354,6 +1491,7 @@ export const StudentFeeRecordsPanel = () => {
       body { margin: 0; }
     }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "7mm 5mm")}
   </style>
 </head>
 <body>
@@ -1467,6 +1605,37 @@ export const StudentFeeRecordsPanel = () => {
     toast.success("Excel exported");
   };
 
+  /**
+   * New payment: start on the first program year that still has fees due, so
+   * a payment made after the 1st year is cleared (e.g. another day, towards
+   * the 2nd year) is filed under the 2nd year — not the paid-up 1st year.
+   * Runs once per picked student; never while editing a receipt.
+   * (Hooks: must stay above the loading / error returns below.)
+   */
+  const yearDefaultedForStudent = useRef("");
+  const historyForDefault = historyQuery.data;
+  useEffect(() => {
+    if (editingReceipt || !selectedStudentId || !historyForDefault?.yearWise) return;
+    if (yearDefaultedForStudent.current === selectedStudentId) return;
+    yearDefaultedForStudent.current = selectedStudentId;
+    const firstDue = historyForDefault.yearWise.find(
+      (y) => Number(y.chargedNpr) > 0 && Number(y.remainingNpr) > 0,
+    );
+    if (!firstDue) return;
+    setPaymentForm((f) =>
+      f.studentId !== selectedStudentId
+        ? f
+        : {
+            ...f,
+            programYear: String(firstDue.programYear),
+            advanceYear2Npr:
+              advanceYearsFor(firstDue.programYear).includes(2) ? f.advanceYear2Npr : "",
+            advanceYear3Npr:
+              advanceYearsFor(firstDue.programYear).includes(3) ? f.advanceYear3Npr : "",
+          },
+    );
+  }, [editingReceipt, selectedStudentId, historyForDefault]);
+
   if (accountsQuery.isLoading || receiptsQuery.isLoading) {
     return <LoadingState />;
   }
@@ -1491,6 +1660,7 @@ export const StudentFeeRecordsPanel = () => {
       : null;
 
   const selectedHistory = historyQuery.data;
+
   const activeScholarshipForYear = selectedHistory?.scholarshipAwards?.find(
     (a) =>
       a.coversProgramYear === Number(paymentForm.programYear) &&
@@ -1683,6 +1853,11 @@ export const StudentFeeRecordsPanel = () => {
                                     <div className="text-xs text-slate-600">
                                       Paid {formatCurrencyNpr(row.paidNpr)}
                                     </div>
+                                    {(row.advanceNpr ?? 0) > 0 ? (
+                                      <div className="text-xs text-sky-700">
+                                        incl. advance {formatCurrencyNpr(row.advanceNpr ?? 0)}
+                                      </div>
+                                    ) : null}
                                     {row.scholarshipNpr > 0 ? (
                                       <div className="text-xs text-violet-700">
                                         Sch. {formatCurrencyNpr(row.scholarshipNpr)}
@@ -1733,6 +1908,7 @@ export const StudentFeeRecordsPanel = () => {
                                   setPickerYearId(asId(acc.student.yearId));
                                 }
                                 setTab("record");
+                                scrollToForm("fee-record-form");
                               }}
                             >
                               Record fee
@@ -1752,7 +1928,7 @@ export const StudentFeeRecordsPanel = () => {
       {/* ─── Record payment ─── */}
       {tab === "record" ? (
         <div className="grid gap-4 lg:grid-cols-5">
-          <Card className="lg:col-span-3">
+          <Card id="fee-record-form" className="lg:col-span-3">
             <CardHeader>
               <CardTitle className="text-base">
                 {editingReceipt
@@ -1951,6 +2127,12 @@ export const StudentFeeRecordsPanel = () => {
                       setPaymentForm((f) => ({
                         ...f,
                         programYear: year,
+                        advanceYear2Npr: advanceYearsFor(year).includes(2)
+                          ? f.advanceYear2Npr
+                          : "",
+                        advanceYear3Npr: advanceYearsFor(year).includes(3)
+                          ? f.advanceYear3Npr
+                          : "",
                         // Charge field 0 when plan already exists (avoids double-booking)
                         currentChargesNpr:
                           remaining != null
@@ -2055,7 +2237,96 @@ export const StudentFeeRecordsPanel = () => {
                       })()}
                     </p>
                   ) : null}
+                  {(() => {
+                    // Selected year already paid in full: this money belongs to a
+                    // later year — offer to file it there (the server would
+                    // otherwise carry it to the next year as advance).
+                    if (editingReceipt || !selectedHistory?.yearWise) return null;
+                    const current = selectedHistory.yearWise.find(
+                      (r) => String(r.programYear) === paymentForm.programYear,
+                    );
+                    if (!current || !(Number(current.chargedNpr) > 0)) return null;
+                    if (Number(current.remainingNpr) > 0) return null;
+                    const nextDue = selectedHistory.yearWise.find(
+                      (r) =>
+                        r.programYear > current.programYear &&
+                        Number(r.remainingNpr) > 0,
+                    );
+                    return (
+                      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <p>
+                          {current.label} is already paid in full.
+                          {nextDue
+                            ? ` Money paid now should go to ${nextDue.label}.`
+                            : " Any amount entered will be extra."}
+                        </p>
+                        {nextDue ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="mt-2"
+                            onClick={() =>
+                              setPaymentForm((f) => ({
+                                ...f,
+                                programYear: String(nextDue.programYear),
+                                advanceYear2Npr: advanceYearsFor(
+                                  nextDue.programYear,
+                                ).includes(2)
+                                  ? f.advanceYear2Npr
+                                  : "",
+                                advanceYear3Npr: advanceYearsFor(
+                                  nextDue.programYear,
+                                ).includes(3)
+                                  ? f.advanceYear3Npr
+                                  : "",
+                              }))
+                            }
+                          >
+                            Record this payment for {nextDue.label}
+                          </Button>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </FormField>
+                {advanceYearsFor(paymentForm.programYear).length > 0 ? (
+                  <AdvanceForLaterYears
+                    programYear={Number(paymentForm.programYear)}
+                    years={advanceYearsFor(paymentForm.programYear)}
+                    values={{
+                      2: paymentForm.advanceYear2Npr,
+                      3: paymentForm.advanceYear3Npr,
+                    }}
+                    thisYearPaid={Number(paymentForm.amountPaidNpr) || 0}
+                    yearWise={selectedHistory?.yearWise}
+                    onChange={(year, value) =>
+                      setPaymentForm((f) => ({
+                        ...f,
+                        ...(year === 2
+                          ? { advanceYear2Npr: value }
+                          : { advanceYear3Npr: value }),
+                      }))
+                    }
+                    onMoveExtra={(year, thisYearAmount, extra) =>
+                      setPaymentForm((f) => ({
+                        ...f,
+                        amountPaidNpr: String(thisYearAmount),
+                        ...(year === 2
+                          ? {
+                              advanceYear2Npr: String(
+                                (Number(f.advanceYear2Npr) || 0) + extra,
+                              ),
+                            }
+                          : {
+                              advanceYear3Npr: String(
+                                (Number(f.advanceYear3Npr) || 0) + extra,
+                              ),
+                            }),
+                      }))
+                    }
+                  />
+                ) : null}
                 <FormField label="Discount (NPR)">
                   <NumberInput
                     min={0}
@@ -2411,6 +2682,12 @@ export const StudentFeeRecordsPanel = () => {
                           <span>Due: {formatCurrencyNpr(y.remainingNpr)}</span>
                           <span>Sch: {formatCurrencyNpr(y.scholarshipNpr)}</span>
                           <span>Charged: {formatCurrencyNpr(y.chargedNpr)}</span>
+                          {(y.advanceNpr ?? 0) > 0 ? (
+                            <span className="col-span-2 text-sky-700">
+                              Includes {formatCurrencyNpr(y.advanceNpr ?? 0)} paid in advance
+                              on an earlier year&apos;s receipt
+                            </span>
+                          ) : null}
                         </div>
                         {y.scholarshipNote ? (
                           <p className="mt-1 text-xs text-violet-700">
@@ -3079,6 +3356,17 @@ export const StudentFeeRecordsPanel = () => {
                               ? PROGRAM_YEARS.find((y) => y.value === row.programYear)
                                   ?.label ?? `Y${row.programYear}`
                               : "—"}
+                            {(row.advanceAllocations ?? [])
+                              .filter((a) => Number(a.amountNpr) > 0)
+                              .map((a) => (
+                                <span
+                                  key={a.programYear}
+                                  className="block text-xs text-sky-700"
+                                >
+                                  + adv. {ORDINAL_YEAR[Number(a.programYear)]} yr{" "}
+                                  {formatCurrencyNpr(Number(a.amountNpr))}
+                                </span>
+                              ))}
                           </Td>
                           <Td className="max-w-[10rem] truncate text-sm">
                             {feeCategory(row)}

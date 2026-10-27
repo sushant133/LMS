@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   FINANCE_EXPENSE_TYPES,
@@ -469,6 +470,7 @@ export const FinanceManager = () => {
       attachments: tx.attachments ?? [],
     });
     setTab("entry");
+    scrollToForm("finance-transaction-form");
   };
 
   const onPickFiles = async (fileList: FileList | null) => {
@@ -497,10 +499,9 @@ export const FinanceManager = () => {
 
   const dash = dashboardQuery.data;
   const transactions = transactionsQuery.data ?? [];
-  const transactionTotals = useMemo(
-    () => summarizeTransactionTotals(transactions),
-    [transactions],
-  );
+  // Plain value, not useMemo: this runs after the access-restricted return
+  // above, and a hook there would change the hook order if access changed.
+  const transactionTotals = summarizeTransactionTotals(transactions);
   const report = reportQuery.data;
 
   return (
@@ -1400,7 +1401,7 @@ export const FinanceManager = () => {
 
       {/* ─── Entry form ──────────────────────────────────────────── */}
       {tab === "entry" && (
-        <Card>
+        <Card id="finance-transaction-form">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-brand-600" />
@@ -1853,7 +1854,7 @@ export const FinanceManager = () => {
 
       {tab === "categories" && isAdmin && (
         <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-          <Card>
+          <Card id="finance-category-form">
             <CardHeader>
               <CardTitle className="text-base">
                 {editingCategoryId ? "Edit category" : "Create category"}
@@ -1993,6 +1994,7 @@ export const FinanceManager = () => {
                               size="sm"
                               variant="secondary"
                               onClick={() => {
+                                scrollToForm("finance-category-form");
                                 setEditingCategoryId(cat._id);
                                 setCategoryForm({
                                   name: cat.name,

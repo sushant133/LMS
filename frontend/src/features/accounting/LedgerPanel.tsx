@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ChartOfAccountRecord,
@@ -309,7 +310,7 @@ export const LedgerPanel = ({
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card id="ledger-card">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -480,7 +481,10 @@ export const LedgerPanel = ({
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setAccountCode(s.code)}
+                            onClick={() => {
+                              setAccountCode(s.code);
+                              scrollToForm("ledger-card");
+                            }}
                           >
                             Open
                           </Button>

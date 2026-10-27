@@ -135,6 +135,10 @@ const ROW_COPY: Partial<Record<ErpModuleKey, { label: string; hint: string }>> =
     label: "Examination Management — CTEVT",
     hint: "CTEVT registration and exam fees",
   },
+  "student-attendance": {
+    label: "Student Attendance",
+    hint: "Mark and manage student daily attendance for every class, early leave, and the student register",
+  },
   "teacher-attendance": {
     label: "Teacher Attendance",
     hint: "HR sheet for teaching staff (not classroom attendance)",
@@ -171,6 +175,7 @@ const LEADERSHIP_PRESET_KEYS: ErpModuleKey[] = [
   "staff",
   "academic-structure",
   "examinations-college",
+  "student-attendance",
   "teacher-attendance",
   "staff-attendance",
   "reports",

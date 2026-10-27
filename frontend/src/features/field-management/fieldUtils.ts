@@ -1,4 +1,5 @@
 import type { FieldDutyStudentStatus, FieldPostingSection } from "@phit-erp/shared";
+import { printPageCss } from "lib/printPage";
 import {
   FIELD_POSTING_TYPE_LABELS,
   postingTypeToSection,
@@ -236,6 +237,7 @@ export const openFieldDailyRegisterPrint = (
       .sig-line { border-top: 1px solid #64748b; margin: 22px 12px 4px; }
       @page { size: A4 portrait; margin: 10mm; }
       ${institutionHeaderCss}
+      ${printPageCss("A4 portrait", "10mm")}
     </style>
   </head><body>
     ${institutionHeaderHtml}

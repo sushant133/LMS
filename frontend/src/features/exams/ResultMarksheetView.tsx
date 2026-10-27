@@ -145,10 +145,18 @@ export const ResultMarksheetView = ({
               <dt>Student Name</dt>
               <dd>{studentName}</dd>
             </div>
-            <div className="om-info-row">
-              <dt>Registration No.</dt>
-              <dd>{data.student.admissionNumber}</dd>
-            </div>
+            {/* Symbol No. for this exam; registration no. only when none was issued */}
+            {data.symbolNumber ? (
+              <div className="om-info-row">
+                <dt>Symbol No.</dt>
+                <dd>{data.symbolNumber}</dd>
+              </div>
+            ) : (
+              <div className="om-info-row">
+                <dt>Registration No.</dt>
+                <dd>{data.student.admissionNumber}</dd>
+              </div>
+            )}
             <div className="om-info-row">
               <dt>Roll No.</dt>
               <dd>{data.student.rollNumber}</dd>

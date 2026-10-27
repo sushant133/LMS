@@ -14,6 +14,8 @@ declare global {
     interface Request {
       user?: UserPayload;
       tenantSchoolId?: string;
+      /** "Student Attendance" Module Access grant, loaded once per request. */
+      studentAttendanceGrant?: { read: boolean; write: boolean };
     }
   }
 }

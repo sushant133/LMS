@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import { Link } from "react-router-dom";
@@ -725,6 +726,7 @@ export const LaboratoryManager = () => {
       remarks: lab.remarks ?? "",
       isActive: lab.isActive,
     });
+    scrollToForm("laboratory-form");
   };
 
   const beginEditEquipment = (item: LaboratoryEquipmentRecord) => {
@@ -751,6 +753,7 @@ export const LaboratoryManager = () => {
       description: item.description ?? "",
       remarks: item.remarks ?? "",
     });
+    scrollToForm("equipment-form");
   };
 
   const fillRequestFromEquipment = (item: LaboratoryEquipmentRecord) => {
@@ -1106,7 +1109,7 @@ export const LaboratoryManager = () => {
       {tab === "labs" && (
         <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
           {canManageLabsMeta ? (
-            <Card className="min-w-0">
+            <Card id="laboratory-form" className="min-w-0">
               <CardHeader>
                 <CardTitle>{editingLabId ? "Edit laboratory" : "Create laboratory"}</CardTitle>
               </CardHeader>
@@ -1605,7 +1608,7 @@ export const LaboratoryManager = () => {
           >
             {/* Add / Edit equipment — staff & admin only */}
             {canManageLabsMeta ? (
-            <Card className="h-fit xl:sticky xl:top-4">
+            <Card id="equipment-form" className="h-fit xl:sticky xl:top-4">
               <CardHeader className="border-b border-slate-100 pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <PackagePlus className="h-5 w-5 text-brand-600" />
@@ -2109,7 +2112,7 @@ export const LaboratoryManager = () => {
                             </Select>
                           </FormField>
                           <FormField label="Quantity *">
-                            <NumberInput
+                            <NumberInput emptyValue={1}
                               min={1}
                               value={
                                 Number.isFinite(stockAction.quantity)

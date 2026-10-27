@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   INSTITUTION_TYPES,
@@ -111,7 +112,7 @@ export const SchoolManager = () => {
         description="Create, edit, and manage tenant colleges. Each college gets isolated data and an initial college admin account."
       />
 
-      <Card>
+      <Card id="college-form">
         <CardHeader>
           <CardTitle>
             {editingSchoolId ? "Edit College" : "Create College"}
@@ -378,6 +379,7 @@ export const SchoolManager = () => {
                           deleteMutation.isPending || updateMutation.isPending
                         }
                         onClick={() => {
+                          scrollToForm("college-form");
                           setEditingSchoolId(college._id);
                           setForm({
                             ...schoolToForm(college),

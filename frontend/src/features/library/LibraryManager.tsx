@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { LibraryFinesPanel } from "./LibraryFinesPanel";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   LIBRARY_YEAR_LEVELS,
@@ -30,6 +32,7 @@ import {
   RotateCcw,
   Shield,
   Users,
+  Coins,
 } from "lucide-react";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
@@ -39,7 +42,7 @@ import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useCanEditOrDeleteRecords, useIsGrantedAdmin } from "hooks/useModuleAccess";
+import { useCanEditOrDeleteRecords, useIsGrantedAdmin, useIsFullAdministrator } from "hooks/useModuleAccess";
 import { LibraryIssuedBooksPanel } from "features/library/LibraryIssuedBooksPanel";
 import {
   BorrowStatusBanner,
@@ -100,6 +103,7 @@ type Tab =
   | "issued"
   | "returns"
   | "issue-limits"
+  | "fines"
   | "staff";
 
 type CopyDraft = {
@@ -189,6 +193,8 @@ const tabs: Array<{
   label: string;
   icon: typeof LayoutDashboard;
   adminOnly?: boolean;
+  /** Full Administrator only — not library staff, even with Library granted. */
+  fullAdminOnly?: boolean;
   /** Visible to library staff (read-only) and admins (full). */
   staffVisible?: boolean;
 }> = [
@@ -204,6 +210,7 @@ const tabs: Array<{
     icon: Shield,
     staffVisible: true,
   },
+  { id: "fines", label: "Overdue Fines", icon: Coins, fullAdminOnly: true },
   { id: "staff", label: "Staff", icon: Users, adminOnly: true },
 ];
 
@@ -211,6 +218,8 @@ export const LibraryManager = () => {
   const { user } = useAuth();
   const isCollege = useIsCollege();
   const isAdmin = useIsGrantedAdmin("library");
+  /** Overdue Fines: the institution Administrator only */
+  const isFullAdmin = useIsFullAdministrator();
   const canEditDelete =
     useCanEditOrDeleteRecords() || user?.role === "LIBRARY_STAFF";
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -708,6 +717,7 @@ export const LibraryManager = () => {
   });
 
   const visibleTabs = tabs.filter((item) => {
+    if (item.fullAdminOnly && !isFullAdmin) return false;
     if (item.adminOnly && !isAdmin) return false;
     // Issue Limits: admin (edit) + library staff (view)
     if (item.id === "issue-limits") return true;
@@ -1136,7 +1146,7 @@ export const LibraryManager = () => {
             )}
           >
             {canManageInventory ? (
-              <Card>
+              <Card id="library-book-form">
                 <CardHeader>
                   <CardTitle>
                     {editingBookId
@@ -1217,7 +1227,7 @@ export const LibraryManager = () => {
                   {!editingBookId ? (
                     <>
                       <FormField label="Number of physical copies">
-                        <NumberInput
+                        <NumberInput emptyValue={1}
                           min={1}
                           max={200}
                           value={bookForm.totalCopies}
@@ -1574,6 +1584,7 @@ export const LibraryManager = () => {
                                 size="sm"
                                 variant="secondary"
                                 onClick={() => {
+                                  scrollToForm("library-book-form");
                                   setEditingBookId(book._id);
                                   setBookForm({
                                     title: book.title,
@@ -2618,6 +2629,7 @@ export const LibraryManager = () => {
       )}
 
       {tab === "print-books" && <LibraryPrintBooksPanel />}
+      {tab === "fines" && isFullAdmin && <LibraryFinesPanel />}
     </div>
   );
 };

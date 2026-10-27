@@ -88,6 +88,25 @@ export const getHolidayForDate = async (
   return { title: holiday.title, dateBs: holiday.dateBs };
 };
 
+/**
+ * Student attendance is never taken on an Academic Calendar holiday (the days
+ * the register shows as "H": calendar holidays / vacations, Saturdays, legacy
+ * settings holidays — unless a Working Day event overrides). Teacher / staff
+ * attendance is not affected: working on a holiday counts as extra duty there.
+ */
+export const assertStudentAttendanceDayOpen = async (
+  schoolId: string,
+  dateBs: string
+): Promise<void> => {
+  const holiday = await getHolidayForDate(schoolId, dateBs);
+  if (holiday) {
+    throw new ApiError(
+      400,
+      `${dateBs} is a holiday (${holiday.title}) in the Academic Calendar — student attendance cannot be taken on a holiday.`
+    );
+  }
+};
+
 interface AvailabilityParams {
   dateBs: string;
   config: DailyAttendanceConfig;
@@ -101,16 +120,17 @@ export const evaluateAttendanceAvailability = (params: AvailabilityParams): {
   message?: string;
   isHoliday: boolean;
 } => {
-  if (params.adminOverride) {
-    return { canMark: true, isHoliday: false };
-  }
-
+  // Academic Calendar holiday: closed for everyone, administrators included
   if (params.holidayTitle) {
     return {
       canMark: false,
       isHoliday: true,
-      message: `Attendance is unavailable today: ${params.holidayTitle}`
+      message: `Holiday — ${params.holidayTitle}. Student attendance is not taken on holidays.`
     };
+  }
+
+  if (params.adminOverride) {
+    return { canMark: true, isHoliday: false };
   }
 
   const todayBs = getTodayBs();
@@ -395,7 +415,16 @@ export const syncDailyAttendanceToSubject = async (
   college: boolean,
   actorUserId: string,
   actorRole: string,
-  session: ClientSession | null
+  session: ClientSession | null,
+  options: {
+    /**
+     * Update only the students on this daily sheet inside an existing subject
+     * sheet, keeping everyone else's marks and its original teacher/creator.
+     * Used by single-cell edits (Attendance Register) so partial sheets never
+     * overwrite attendance a teacher already took.
+     */
+    mergeEntries?: boolean;
+  } = {}
 ) => {
   const lookupFilter: Record<string, unknown> = {
     schoolId: dailyAttendance.schoolId,
@@ -415,15 +444,29 @@ export const syncDailyAttendanceToSubject = async (
     ? await Attendance.findById(dailyAttendance.syncedAttendanceId).session(session)
     : await Attendance.findOne(lookupFilter).session(session);
 
-  const payload = {
+  const dailyEntries = dailyAttendance.entries.map((entry) => ({
+    studentId: entry.studentId,
+    status: entry.status
+  }));
+
+  let payload: Record<string, unknown> = {
     ...lookupFilter,
     teacherId: dailyAttendance.teacherId,
-    entries: dailyAttendance.entries.map((entry) => ({
-      studentId: entry.studentId,
-      status: entry.status
-    })),
+    entries: dailyEntries,
     createdBy: dailyAttendance.createdBy
   };
+
+  if (options.mergeEntries && existing) {
+    const statusByStudent = new Map(dailyEntries.map((entry) => [entry.studentId, entry.status]));
+    const merged = (existing.entries ?? []).map((entry) => {
+      const studentId = entry.studentId.toString();
+      const status = statusByStudent.get(studentId);
+      statusByStudent.delete(studentId);
+      return { studentId, status: status ?? entry.status };
+    });
+    for (const [studentId, status] of statusByStudent) merged.push({ studentId, status });
+    payload = { entries: merged };
+  }
 
   const attendance = existing
     ? await Attendance.findByIdAndUpdate(existing._id, payload, { new: true, ...getSessionOption(session) })

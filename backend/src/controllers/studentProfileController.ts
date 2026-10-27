@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import { libraryIssueFine, loadLibraryFineRules } from "../utils/libraryFines.js";
+import { getTodayBs } from "../utils/nepaliDate.js";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
@@ -434,7 +436,17 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
         : "None";
 
   const pendingIssues = libraryIssues.filter((issue) => issue.status === "ISSUED" || issue.status === "OVERDUE");
-  const fineTotal = libraryIssues.reduce((sum, issue) => sum + (issue.fineNpr ?? 0), 0);
+  // Overdue fines: live while a book is out, fixed (and maybe cleared) once returned
+  const fineRules = await loadLibraryFineRules(schoolId);
+  const fineTodayBs = getTodayBs();
+  const issueFines = new Map(
+    libraryIssues.map((issue) => [
+      String(issue._id),
+      libraryIssueFine(issue as never, fineRules, fineTodayBs)
+    ])
+  );
+  /** Fine still owed (books out + returned and not paid / waived). */
+  const fineTotal = [...issueFines.values()].reduce((sum, fine) => sum + fine.outstandingNpr, 0);
 
   let transport: Record<string, unknown> | null = null;
   if (permissions.canViewTransport && transportAssignment) {
@@ -522,6 +534,23 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
           totalRefundsNpr: 0,
           scholarshipStatus,
           yearWise,
+          // The year the student is in now (from their Year level), so the
+          // profile follows promotion: 1st → 2nd year moves "current" with it.
+          // Its due already nets any advance paid on an earlier receipt.
+          ...(() => {
+            const level = college
+              ? Number((secondaryDoc as { level?: number } | null)?.level)
+              : NaN;
+            const currentProgramYear =
+              level === 1 || level === 2 || level === 3 ? level : undefined;
+            const currentRow = currentProgramYear
+              ? yearWise.find((y) => y.programYear === currentProgramYear)
+              : undefined;
+            return {
+              currentProgramYear,
+              currentYearDueNpr: currentRow ? currentRow.remainingNpr : undefined
+            };
+          })(),
           scholarshipAwards: activeAwards,
           // Year-wise plan at admission is not a payment — omit OPEN- plan rows
           collections: filterOutOpeningTuitionCharges(feeCollections)
@@ -540,7 +569,8 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
               dueDateBs: issue.dueDateBs,
               returnedDateBs: issue.returnedDateBs,
               status: issue.status,
-              fineNpr: issue.fineNpr ?? 0
+              fineNpr: issueFines.get(String(issue._id))?.amountNpr ?? 0,
+              fine: issueFines.get(String(issue._id))
             };
           }),
           pendingCount: pendingIssues.length,

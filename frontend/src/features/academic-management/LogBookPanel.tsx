@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { scrollToForm } from "lib/scrollToForm";
 import {
   type AcademicLessonPlanRecord,
   type AcademicLogBookEntryInput,
@@ -1006,6 +1007,7 @@ export const LogBookPanel = ({
       },
     ]);
     setShowForm(true);
+    scrollToForm("log-book-form");
   };
 
   const handleSave = () => {
@@ -1258,9 +1260,10 @@ export const LogBookPanel = ({
         size="sm"
         variant="outline"
         title="Open comments for this row"
-        onClick={() =>
-          setSelectedEntryId(entry._id)
-        }
+        onClick={() => {
+          setSelectedEntryId(entry._id);
+          scrollToForm("log-book-comments");
+        }}
       >
         Comments
       </Button>
@@ -1428,7 +1431,7 @@ export const LogBookPanel = ({
       </div>
 
       {showForm && canMutate ? (
-        <Card className="no-print">
+        <Card id="log-book-form" className="no-print">
           <CardHeader>
             <CardTitle>
               {editingId ? "Edit Log Book Entry" : "Create Log Book"}
@@ -2116,7 +2119,7 @@ export const LogBookPanel = ({
               ))}
 
               {selectedEntryId ? (
-                <div className="no-print">
+                <div id="log-book-comments" className="no-print">
                   <AcademicCommentsPanel
                     entityType="LOG_BOOK_ENTRY"
                     entityId={selectedEntryId}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   chartOfAccountSchema,
@@ -140,6 +141,7 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
       description: account.description ?? "",
       isActive: account.isActive !== false,
     });
+    scrollToForm("ledger-form");
   };
 
   const toggleActive = (account: ChartOfAccountRecord) => {
@@ -177,7 +179,7 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
   return (
     <div className="space-y-6">
       {isAdmin ? (
-        <Card>
+        <Card id="ledger-form">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>{editingId ? "Edit Ledger" : "Add Ledger"}</CardTitle>
             <Button

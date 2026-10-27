@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -307,6 +308,7 @@ export const CollegeAcademicManager = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
+                              scrollToForm("academic-section-batches");
                               setEditingBatchId(item._id);
                               setBatchForm({
                                 name: item.name,

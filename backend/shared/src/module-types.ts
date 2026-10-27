@@ -311,6 +311,28 @@ export interface LibraryBookRecord {
   updatedAt?: string;
 }
 
+/** Overdue fine on one library loan (Library → Overdue Fines rules). */
+export interface LibraryIssueFineView {
+  amountNpr: number;
+  ratePerDayNpr: number;
+  daysCharged: number;
+  daysOverdue: number;
+  /** Still growing (book not returned yet). */
+  accruing: boolean;
+  status: "NONE" | "ACCRUING" | "OUTSTANDING" | "PAID" | "WAIVED";
+  /** Rate is not the one for all students. */
+  customRate: boolean;
+  /** Which rule set the daily rate: the student's own, their batch + year, their batch, or all students. */
+  rateSource?: "STUDENT" | "BATCH_YEAR" | "BATCH" | "ALL";
+  /** Still owed now (0 once paid or waived). */
+  outstandingNpr: number;
+  /** Collected so far — can include payments made while the book was still out. */
+  paidNpr?: number;
+  waivedNpr?: number;
+  /** Fine days settled up to (inclusive); empty = none yet. */
+  settledThroughBs?: string;
+}
+
 export interface LibraryIssueRecord {
   _id: string;
   schoolId: string;
@@ -342,6 +364,8 @@ export interface LibraryIssueRecord {
   dueDateBs: string;
   returnedDateBs?: string;
   fineNpr: number;
+  /** Overdue fine (students): live while the book is out, fixed once returned. */
+  fine?: LibraryIssueFineView;
   status: LibraryIssueStatus;
   createdAt?: string;
   updatedAt?: string;
@@ -453,6 +477,8 @@ export interface ParentPortalChildSummary {
     label: string;
     chargedNpr: number;
     paidNpr: number;
+    /** Part of paidNpr received in advance on an earlier year's receipt. */
+    advanceNpr?: number;
     scholarshipNpr: number;
     discountNpr: number;
     remainingNpr: number;

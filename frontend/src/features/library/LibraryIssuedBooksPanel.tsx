@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { printPageCss } from "lib/printPage";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { LibraryBorrowerType, LibraryIssueRecord } from "@phit-erp/shared";
 import {
@@ -356,6 +357,7 @@ export const LibraryIssuedBooksPanel = ({
     tfoot td { font-weight: 600; background: #f8fafc; }
     @page { size: A4 landscape; margin: 8mm; }
     ${PRINT_INSTITUTION_HEADER_CSS}
+    ${printPageCss("A4 landscape", "8mm")}
   </style>
 </head>
 <body>

@@ -21,6 +21,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { useStudentAttendanceGrant } from "hooks/useModuleAccess";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
@@ -74,7 +75,11 @@ export const AttendanceManager = ({
 }: AttendanceManagerProps) => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
-  const isAdminViewer = hasInstitutionAccess(user?.role ?? "");
+  const studentGrant = useStudentAttendanceGrant();
+  // "Student Attendance" grant: view every class's subject-wise sheets, like
+  // the Administrator. Marking stays with the teacher who takes the period.
+  const isAdminViewer =
+    hasInstitutionAccess(user?.role ?? "") || (studentGrant.read && !isTeacher);
   const canMark = isTeacher;
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");

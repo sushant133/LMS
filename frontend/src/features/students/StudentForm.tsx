@@ -703,7 +703,7 @@ export const StudentForm = ({
         </FormField>
         {(form.academicStatus ?? "ACTIVE") === "PENDING_NOT_PASSED" ? (
           <FormField label="Number of backs *">
-            <NumberInput
+            <NumberInput emptyValue={1}
               min={1}
               max={50}
               step={1}

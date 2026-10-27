@@ -68,6 +68,26 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   clone.style.pointerEvents = "auto";
   clone.removeAttribute("aria-hidden");
 
+  // PDF / image capture renders screen styles, so Tailwind `print:` variants
+  // would not apply there: drop screen-only parts and reveal print-only ones by
+  // hand, so the PDF matches the printout. Harmless for the print path.
+  clone.querySelectorAll<HTMLElement>("[class*='print:']").forEach((node) => {
+    const classes = getClassString(node).split(/\s+/).filter(Boolean);
+    if (classes.includes("print:hidden")) {
+      node.remove();
+      return;
+    }
+    const printDisplay = classes.find((c) =>
+      /^print:(block|inline-block|inline|flex|inline-flex|grid|table|table-row|table-cell|table-header-group|table-row-group|contents)$/.test(
+        c,
+      ),
+    );
+    if (printDisplay && classes.includes("hidden")) {
+      setClassString(node, classes.filter((c) => c !== "hidden").join(" "));
+      node.style.setProperty("display", printDisplay.slice("print:".length), "important");
+    }
+  });
+
   // Sticky/fixed headers break html2canvas + print (ghost/faint top rows).
   // Flatten positioning so thead paints solid and once (no media-query needed).
   clone.querySelectorAll("*").forEach((node) => {
@@ -709,10 +729,15 @@ const fitTimetableSheetToPage = (
   });
 };
 
+/** White space around multi-page sheets, on every page (was the @page margin). */
+const LIST_PAGE_PADDING = "8mm 6mm";
+
 /** Multi-page list print CSS (students, staff, library). Kept outside the HTML
  *  template so comments cannot break the surrounding string. */
 const LIST_PRINT_CSS = [
-  "body { display: block !important; width: auto !important; height: auto !important; min-height: 0 !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; }",
+  // White margin lives on <body> (the page margin is 0 so the browser prints no
+  // date / URL strip); `clone` repeats it on every printed page.
+  `body { display: block !important; width: auto !important; height: auto !important; min-height: 0 !important; overflow: visible !important; padding: ${LIST_PAGE_PADDING} !important; margin: 0 !important; box-sizing: border-box !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; }`,
   "body > * { display: block !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; overflow: visible !important; }",
   "table { width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; page-break-inside: auto !important; break-inside: auto !important; }",
   "thead { display: table-header-group !important; }",
@@ -875,19 +900,27 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       @page {
         size: ${isLandscape ? "297mm 210mm" : "210mm 297mm"};
-        margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
+        margin: 0;
       }
       @media print {
         ${
           isTimetable
             ? `
-        html, body {
-          /* Printable area, i.e. page size minus the @page margin. Using the
-             full page size here overflows it and spawns a blank second page. */
+        html {
+          /* Whole sheet, a hair short so rounding can never spawn page 2. */
+          width: ${page.pageWidthMm}mm !important;
+          height: ${page.pageHeightMm - 0.5}mm !important;
+          overflow: hidden !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body {
+          /* Printable area, i.e. page size minus the margin. The margin sits on
+             body (page margin is 0, so no browser date / URL strip prints). */
           width: ${printBox.usableWidthMm}mm !important;
           height: ${printBox.usableHeightMm}mm !important;
           overflow: hidden !important;
-          margin: 0 !important;
+          margin: ${TIMETABLE_PAGE_MARGIN_MM}mm !important;
           padding: 0 !important;
         }
         body {
@@ -905,10 +938,15 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
           min-height: 0 !important;
           overflow: visible !important;
           margin: 0 !important;
+        }
+        html {
           padding: 0 !important;
         }
         body {
           display: block !important;
+          padding: ${LIST_PAGE_PADDING} !important;
+          -webkit-box-decoration-break: clone;
+          box-decoration-break: clone;
         }
         `
         }
@@ -1008,14 +1046,27 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         font-weight: 700 !important;
         text-align: center !important;
       }
+      .iar-marks thead th.iar-name-head {
+        border-bottom-style: none !important;
+        text-align: center !important;
+      }
+      .iar-marks thead th.iar-name-label {
+        border-top-style: none !important;
+        border-bottom-style: none !important;
+        text-align: right !important;
+        padding-right: 4px !important;
+      }
+      .iar-marks thead th.iar-name-label-last {
+        border-bottom-style: solid !important;
+      }
       .iar-col-sn { width: 3.2% !important; }
       .iar-col-regd { width: 7.5% !important; }
-      .iar-col-symbol { width: 3.5% !important; }
+      .iar-col-symbol { width: 7% !important; }
       .iar-col-name { width: 14% !important; }
-      .iar-col-label { width: 5% !important; }
       .iar-col-total { width: 5.5% !important; }
       .iar-col-pct { width: 3.5% !important; }
       .iar-col-grade { width: 3.5% !important; }
+      .iar-col-status { width: 4% !important; }
       .iar-col-remarks { width: 5% !important; }
       .iar-sn { text-align: center !important; font-weight: 600; }
       .iar-regd {
@@ -1025,7 +1076,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         word-break: break-all;
         line-height: 1.15;
       }
-      .iar-symbol { text-align: center !important; font-size: 8.5px !important; }
+      .iar-symbol { text-align: center !important; font-size: 8.5px !important; white-space: nowrap; }
       .iar-name {
         text-align: left !important;
         font-weight: 700 !important;
@@ -1042,7 +1093,6 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         line-height: 1.15;
         vertical-align: middle !important;
       }
-      .iar-corner-empty { background: #fff !important; }
       .iar-subject-name {
         text-align: center !important;
         font-weight: 700 !important;
@@ -1051,11 +1101,6 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         word-break: break-word;
         hyphens: auto;
         vertical-align: middle !important;
-      }
-      .iar-tp {
-        text-align: center !important;
-        font-weight: 700 !important;
-        font-size: 8.5px !important;
       }
       .iar-num {
         text-align: center !important;
@@ -1072,6 +1117,12 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         white-space: nowrap;
       }
       .iar-grade { font-weight: 700 !important; }
+      .iar-status {
+        text-align: center !important;
+        font-size: 8.5px !important;
+        font-weight: 700 !important;
+      }
+      .iar-status-fail { color: #b91c1c !important; }
       .iar-remarks {
         text-align: left !important;
         font-size: 8px !important;
@@ -1112,14 +1163,16 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
     </style>
     <!-- Last in <head> so this wins over marksheet.css @page { size: A4 portrait }. -->
     <style id="print-page-orientation">
+      /* Page margin 0: the browser then has no room for its own header /
+         footer (date, title, URL, page n/m). White space is body padding. */
       @page {
         size: ${isLandscape ? "297mm 210mm" : "210mm 297mm"};
-        margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
+        margin: 0;
       }
       @media print {
         @page {
           size: ${isLandscape ? "297mm 210mm" : "210mm 297mm"};
-          margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
+          margin: 0;
         }
       }
     </style>
@@ -1329,6 +1382,88 @@ const rasterizeCloneToCanvas = async (
   }
 };
 
+type PdfSpan = { top: number; bottom: number };
+type PdfTable = PdfSpan & { header: PdfSpan | null };
+type PdfBreakLayout = {
+  width: number;
+  height: number;
+  /** Boxes a page cut must not pass through: table rows, lines of text, images. */
+  atoms: PdfSpan[];
+  tables: PdfTable[];
+};
+type PdfPage = { start: number; end: number; header: PdfSpan | null };
+
+/** Atomic boxes and table headings of the capture, in CSS px from its top. */
+const measurePdfBreakLayout = (root: HTMLElement): PdfBreakLayout => {
+  const origin = root.getBoundingClientRect();
+  const span = (el: Element): PdfSpan => {
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top - origin.top, bottom: rect.bottom - origin.top };
+  };
+  const atoms: PdfSpan[] = [];
+  root
+    .querySelectorAll("tr, img, svg, canvas, li, h1, h2, h3, h4, h5, h6, p")
+    .forEach((el) => atoms.push(span(el)));
+  // Any other element holding text directly is one or more text lines
+  root.querySelectorAll("div, span, td, th, dd, dt, label, strong, small").forEach((el) => {
+    const hasText = Array.from(el.childNodes).some(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+    );
+    if (hasText) atoms.push(span(el));
+  });
+  const tables: PdfTable[] = Array.from(root.querySelectorAll("table")).map((table) => {
+    const head = table.tHead;
+    return { ...span(table), header: head && head.rows.length ? span(head) : null };
+  });
+  return {
+    width: origin.width,
+    height: Math.max(origin.height, root.scrollHeight),
+    atoms: atoms.filter((a) => a.bottom - a.top > 0),
+    tables,
+  };
+};
+
+/**
+ * Split the capture into pages of `capacity` px: a cut never passes through an
+ * atom (unless that atom is taller than a page), and a page continuing a table
+ * starts with a copy of that table's heading row.
+ */
+const paginateForPdf = (layout: PdfBreakLayout, capacity: number): PdfPage[] => {
+  const pages: PdfPage[] = [];
+  let start = 0;
+  let header: PdfSpan | null = null;
+  while (start < layout.height - 0.5 && pages.length < 500) {
+    const headerHeight = header ? header.bottom - header.top : 0;
+    const room = Math.max(capacity * 0.25, capacity - headerHeight);
+    let end = Math.min(layout.height, start + room);
+    if (end < layout.height) {
+      // Pull the cut up above any atom it would slice, repeating until clear
+      for (let guard = 0; guard < 50; guard++) {
+        // Boxes taller than a page must be cut anyway — skip them so one large
+        // container cannot shrink every page to a sliver
+        const crossing = layout.atoms.filter(
+          (a) =>
+            a.top < end - 0.5 &&
+            a.bottom > end + 0.5 &&
+            a.top > start + 0.5 &&
+            a.bottom - a.top < room,
+        );
+        if (!crossing.length) break;
+        end = Math.min(...crossing.map((a) => a.top));
+      }
+      if (end <= start + 1) end = Math.min(layout.height, start + room);
+    }
+    pages.push({ start, end, header });
+    // The next page repeats the heading of a table that continues past the cut
+    const continuing = layout.tables.find(
+      (t) => t.header && t.top < end && t.bottom > end + 0.5 && t.header.bottom <= end,
+    );
+    header = continuing?.header ?? null;
+    start = end;
+  }
+  return pages;
+};
+
 const createPdfBlobFromElement = async (
   element: HTMLElement,
   options: PageFormat | PdfExportOptions = "a4-portrait"
@@ -1384,9 +1519,9 @@ const createPdfBlobFromElement = async (
     const margin = isTimetable ? 4 : fitOnePage ? (isLandscape ? 4 : 5) : isLandscape ? 8 : 10;
     const usableWidth = pageWidth - margin * 2;
     const usableHeight = pageHeight - margin * 2;
-    const imgData = canvas.toDataURL("image/jpeg", 0.94);
 
     if (fitOnePage) {
+      const imgData = canvas.toDataURL("image/jpeg", 0.94);
       // Fit image into usable box (scale up or down), center H+V — never add page 2
       const widthScale = usableWidth / canvas.width;
       const heightScale = usableHeight / canvas.height;
@@ -1401,18 +1536,60 @@ const createPdfBlobFromElement = async (
       return pdf.output("blob");
     }
 
-    const imgHeight = (canvas.height * usableWidth) / canvas.width;
-    let heightLeft = imgHeight;
-    let y = margin;
-    pdf.addImage(imgData, "JPEG", margin, y, usableWidth, imgHeight);
-    heightLeft -= pageHeight - margin * 2;
+    // Multi-page: cut only between rows / lines of text and repeat a table's
+    // heading row on every page it continues onto (a blind fixed-height slice
+    // cut rows in half and left later pages without column headings).
+    const layout = measurePdfBreakLayout(clone);
+    const pxToCanvas = canvas.width / Math.max(1, layout.width);
+    const mmPerPx = usableWidth / Math.max(1, layout.width);
+    const pages = paginateForPdf(layout, usableHeight / mmPerPx);
 
-    while (heightLeft > 1) {
-      y = margin - (imgHeight - heightLeft);
-      pdf.addPage();
-      pdf.addImage(imgData, "JPEG", margin, y, usableWidth, imgHeight);
-      heightLeft -= pageHeight - margin * 2;
-    }
+    pages.forEach((page, index) => {
+      const headerPx = page.header ? page.header.bottom - page.header.top : 0;
+      const bodyPx = page.end - page.start;
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = Math.max(1, Math.round((headerPx + bodyPx) * pxToCanvas));
+      const ctx = slice.getContext("2d");
+      if (!ctx) throw new Error("Could not prepare PDF page");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, slice.width, slice.height);
+      if (page.header) {
+        ctx.drawImage(
+          canvas,
+          0,
+          Math.round(page.header.top * pxToCanvas),
+          canvas.width,
+          Math.round(headerPx * pxToCanvas),
+          0,
+          0,
+          slice.width,
+          Math.round(headerPx * pxToCanvas),
+        );
+      }
+      ctx.drawImage(
+        canvas,
+        0,
+        Math.round(page.start * pxToCanvas),
+        canvas.width,
+        Math.round(bodyPx * pxToCanvas),
+        0,
+        Math.round(headerPx * pxToCanvas),
+        slice.width,
+        Math.round(bodyPx * pxToCanvas),
+      );
+      if (index > 0) pdf.addPage();
+      pdf.addImage(
+        slice.toDataURL("image/jpeg", 0.94),
+        "JPEG",
+        margin,
+        margin,
+        usableWidth,
+        (headerPx + bodyPx) * mmPerPx,
+        undefined,
+        "FAST",
+      );
+    });
 
     return pdf.output("blob");
   } finally {

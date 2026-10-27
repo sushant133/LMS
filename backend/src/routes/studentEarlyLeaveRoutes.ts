@@ -8,6 +8,7 @@ import {
 } from "../controllers/studentEarlyLeaveController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
+import { attachStudentAttendanceGrant } from "../utils/studentAttendanceAccess.js";
 
 const router = Router();
 
@@ -25,7 +26,8 @@ const earlyLeaveRoles = authorize(
   "AUDITOR"
 );
 
-router.use(protect, tenantGuard);
+// Load the "Student Attendance" grant once so controllers can honour it
+router.use(protect, tenantGuard, attachStudentAttendanceGrant);
 
 router.get("/", earlyLeaveRoles, listStudentEarlyLeaves);
 router.get("/by-date", earlyLeaveRoles, listEarlyLeavesForDate);

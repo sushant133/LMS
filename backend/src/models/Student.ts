@@ -63,6 +63,23 @@ const studentSchema = new Schema(
      * Stored as 0 for non-back students.
      */
     backCount: { type: Number, default: 0, min: 0, max: 50 },
+    /**
+     * The back papers themselves: subject and the program year it was failed
+     * in. When recorded, backCount equals the number of papers listed.
+     */
+    backPapers: {
+      type: [
+        new Schema(
+          {
+            subjectName: { type: String, required: true, trim: true, maxlength: 160 },
+            subjectCode: { type: String, trim: true, maxlength: 40, default: "" },
+            programYear: { type: Number, enum: [1, 2, 3], required: true }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
+    },
     admissionDateBs: { type: String, default: "" },
     /**
      * When the student was marked PASSED_OUT. Set by the promotion service on

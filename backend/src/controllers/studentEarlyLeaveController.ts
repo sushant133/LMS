@@ -9,6 +9,7 @@ import {
   type ModuleAccessMap
 } from "@phit-erp/shared";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { loadStudentAttendanceGrant } from "../utils/studentAttendanceAccess.js";
 import { StudentEarlyLeave } from "../models/StudentEarlyLeave.js";
 import { Student } from "../models/Student.js";
 import { DailyAttendance } from "../models/DailyAttendance.js";
@@ -71,6 +72,11 @@ const assertEarlyLeaveAccess = async (
 ): Promise<void> => {
   const role = req.user?.role ?? "";
   if (canManageInstitution(role) || hasInstitutionAccess(role)) return;
+
+  // "Student Attendance" grant: READ_ONLY may view, WRITE may also record.
+  // It only adds access — anyone else falls through to the checks below.
+  const grant = await loadStudentAttendanceGrant(req);
+  if (grant.write || (grant.read && !write)) return;
 
   const map = (await getUserModuleAccessMap(req.user!.userId)) as ModuleAccessMap;
   const canRead =

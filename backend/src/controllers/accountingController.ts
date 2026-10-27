@@ -53,6 +53,8 @@ import {
   calculateFeeTotals,
   calculateNetSalary,
   capProgramYearChargesNpr,
+  validateAdvanceAllocations,
+  carryExcessToNextYear,
   computeBalanceAfterEntry,
   computeYearScopedDueSnapshots,
   defaultCoversYearFromTopped,
@@ -1066,6 +1068,17 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   const fiscalYearBs = getFiscalYearFromBsDate(paidDateBs, settings.currentFiscalYearBs);
   const paymentMethod = payload.paymentMethod ?? settings.defaultPaymentMethod;
   const cashReceivedNpr = (payload.amountPaidNpr || 0) + securityDepositPaidNpr;
+  // Advance for 2nd / 3rd year paid on this receipt (part of amountPaidNpr)
+  let advanceAllocations: Array<{ programYear: 2 | 3; amountNpr: number }> = [];
+  try {
+    advanceAllocations = validateAdvanceAllocations(
+      payload.programYear,
+      payload.amountPaidNpr || 0,
+      payload.advanceAllocations
+    );
+  } catch (error) {
+    throw new ApiError(400, (error as Error).message);
+  }
 
   const collection = await withFinancialTransaction(async (session) => {
     // Reload student inside the transaction to reduce lost-update races on feesDueNpr
@@ -1133,6 +1146,48 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       lateFeeNpr
     });
 
+    // Money above what this year still owes (e.g. 1st year already cleared and
+    // more paid another day) goes to the next year instead of being lost.
+    if (payload.programYear === 1 || payload.programYear === 2) {
+      const existingQuery = FeeCollection.find({
+        schoolId,
+        studentId: payload.studentId,
+        isDeleted: false
+      });
+      const awardsQuery = StudentScholarshipAward.find({
+        schoolId,
+        studentId: payload.studentId,
+        isDeleted: false,
+        status: { $in: ["ACTIVE", "APPLIED"] }
+      });
+      if (session) {
+        existingQuery.session(session);
+        awardsQuery.session(session);
+      }
+      const [existingRows, awardRows] = await Promise.all([
+        existingQuery.lean(),
+        awardsQuery.lean()
+      ]);
+      advanceAllocations = carryExcessToNextYear({
+        existingCollections: existingRows as unknown as Array<Record<string, unknown>>,
+        awards: awardRows as unknown as Array<Record<string, unknown>>,
+        plannedFees: {
+          1: Math.max(0, Number(student.year1FeeNpr) || 0),
+          2: Math.max(0, Number(student.year2FeeNpr) || 0),
+          3: Math.max(0, Number(student.year3FeeNpr) || 0)
+        },
+        newRow: {
+          programYear: payload.programYear,
+          amountPaidNpr: payload.amountPaidNpr,
+          currentChargesNpr: effectiveChargesNpr,
+          discountNpr: payload.discountNpr,
+          scholarshipNpr: payload.scholarshipNpr,
+          paymentMethod,
+          advanceAllocations
+        }
+      });
+    }
+
     const receiptNumber = requireManualReceiptNumber(payload.receiptNumber);
     await assertReceiptNumberAvailable(schoolId, receiptNumber);
 
@@ -1173,6 +1228,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           academicYearBs: payload.academicYearBs ?? structure?.academicYearBs,
           semesterBs: payload.semesterBs ?? structure?.semesterBs,
           programYear: payload.programYear,
+          advanceAllocations,
           previousDueNpr,
           currentChargesNpr: effectiveChargesNpr,
           amountPaidNpr: payload.amountPaidNpr,
@@ -1716,6 +1772,28 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
     payload.scholarshipType !== undefined
       ? payload.scholarshipType
       : existing.scholarshipType ?? "NONE";
+  let nextAdvanceAllocations: Array<{ programYear: 2 | 3; amountNpr: number }> = [];
+  try {
+    nextAdvanceAllocations = validateAdvanceAllocations(
+      nextProgramYear,
+      nextAmountPaid,
+      payload.advanceAllocations !== undefined
+        ? payload.advanceAllocations
+        : ((existing as { advanceAllocations?: Array<{ programYear: number; amountNpr: number }> })
+            .advanceAllocations ?? [])
+    );
+  } catch (error) {
+    throw new ApiError(400, (error as Error).message);
+  }
+  const advanceChanged =
+    JSON.stringify(nextAdvanceAllocations) !==
+    JSON.stringify(
+      ((existing as { advanceAllocations?: Array<{ programYear: number; amountNpr: number }> })
+        .advanceAllocations ?? []).map((a) => ({
+        programYear: Number(a.programYear),
+        amountNpr: Number(a.amountNpr)
+      }))
+    );
 
   const accountingFieldsChanged =
     nextAmountPaid !== existing.amountPaidNpr ||
@@ -1846,6 +1924,10 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
       existing.attachments = payload.attachments as typeof existing.attachments;
     }
     if (nextProgramYear !== undefined) existing.programYear = nextProgramYear;
+    if (advanceChanged) {
+      (existing as unknown as { advanceAllocations: typeof nextAdvanceAllocations }).advanceAllocations =
+        nextAdvanceAllocations;
+    }
     if (nextScholarshipType) existing.scholarshipType = nextScholarshipType;
     existing.feeBreakdown = nextFeeBreakdown as typeof existing.feeBreakdown;
     if (payload.academicYearBs !== undefined) {
@@ -2383,6 +2465,10 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
       accountantName: collection.accountantName ?? "",
       rollNumber: student.rollNumber,
       feeBreakdown: collection.feeBreakdown ?? [],
+      advanceAllocations: (
+        (collection as { advanceAllocations?: Array<{ programYear: number; amountNpr: number }> })
+          .advanceAllocations ?? []
+      ).map((a) => ({ programYear: Number(a.programYear), amountNpr: Number(a.amountNpr) })),
       verificationCode: collection.verificationCode ?? undefined,
       transactionNumber: collection.transactionNumber ?? undefined,
       isDuplicate: isReprint

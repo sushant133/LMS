@@ -27,6 +27,8 @@ import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { TeacherPeriodLogPanel } from "features/attendance/TeacherPeriodLogPanel";
 import { api, unwrap } from "lib/api";
 import { getPrintInstitutionBranding } from "lib/printBranding";
+import { escapePrintText, printPageCss } from "lib/printPage";
+import { printHtmlViaIframe } from "features/accounting/voucherPrint";
 import { cn, parseErrorMessage } from "lib/utils";
 
 const STATUSES: EmployeeAttendanceStatus[] = [
@@ -587,34 +589,31 @@ export const EmployeeAttendancePanel = ({
       periodsTaught?: number;
       remarks?: string;
     }>;
-    const win = window.open("", "_blank");
-    if (!win) {
-      toast.error("Allow pop-ups to print");
-      return;
-    }
     const periodHeader = showPeriods ? "<th>Period</th>" : "";
     const colSpan = showPeriods ? 10 : 9;
     const body = reg
       .map((r) => {
         const periodCell = showPeriods
-          ? `<td>${r.periodsTaught ?? ""}</td>`
+          ? `<td class="num">${escapePrintText(r.periodsTaught)}</td>`
           : "";
-        return `<tr><td>${r.dateBs ?? ""}</td><td>${r.employeeCode ?? ""}</td><td>${r.fullName ?? ""}</td><td>${r.department ?? ""}</td><td>${r.designation ?? ""}</td><td>${r.status ?? ""}</td><td>${r.checkInTime ?? ""}</td><td>${r.checkOutTime ?? ""}</td>${periodCell}<td>${r.remarks ?? ""}</td></tr>`;
+        return `<tr><td class="nowrap">${escapePrintText(r.dateBs)}</td><td>${escapePrintText(r.employeeCode)}</td><td>${escapePrintText(r.fullName)}</td><td>${escapePrintText(r.department)}</td><td>${escapePrintText(r.designation)}</td><td>${escapePrintText(r.status)}</td><td class="nowrap">${escapePrintText(r.checkInTime)}</td><td class="nowrap">${escapePrintText(r.checkOutTime)}</td>${periodCell}<td>${escapePrintText(r.remarks)}</td></tr>`;
       })
       .join("");
     const branding = getPrintInstitutionBranding();
-    const instName = branding.name || "Institution";
+    const instName = escapePrintText(branding.name || "Institution");
     const instAddr = branding.address
-      ? `<p style="margin:2px 0 0;font-size:12px;color:#475569">${branding.address}</p>`
+      ? `<p style="margin:2px 0 0;font-size:12px;color:#475569">${escapePrintText(branding.address)}</p>`
       : "";
-    win.document.write(`<!DOCTYPE html><html><head><title>${instName} — ${label} Attendance</title>
-      <style>body{font-family:system-ui,sans-serif;padding:24px;color:#0f172a} .hdr{text-align:center;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:14px} .hdr h1{margin:0;font-size:18px;text-transform:uppercase} table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #ccc;padding:4px} th{background:#f1f5f9}</style>
+    // Hidden-frame print: no pop-up to be blocked, landscape for the wide
+    // table, heading row on every page and rows kept whole (printPageCss)
+    printHtmlViaIframe(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>${instName} — ${escapePrintText(label)} Attendance</title>
+      <style>body{font-family:system-ui,sans-serif;color:#0f172a} .hdr{text-align:center;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:14px} .hdr h1{margin:0;font-size:18px;text-transform:uppercase} table{border-collapse:collapse;width:100%;font-size:11px} th,td{border:1px solid #94a3b8;padding:4px;text-align:left;vertical-align:top} th{background:#f1f5f9} .nowrap{white-space:nowrap} .num{text-align:right}
+      ${printPageCss("A4 landscape", "8mm")}</style>
       </head><body>
-      <div class="hdr"><h1>${instName}</h1>${instAddr}<p style="margin:8px 0 0;font-size:15px;font-weight:600">${label} Attendance Register</p></div>
+      <div class="hdr"><h1>${instName}</h1>${instAddr}<p style="margin:8px 0 0;font-size:15px;font-weight:600">${escapePrintText(label)} Attendance Register</p></div>
       <table><thead><tr><th>Date</th><th>ID</th><th>Name</th><th>Dept</th><th>Designation</th><th>Status</th><th>In</th><th>Out</th>${periodHeader}<th>Remarks</th></tr></thead>
       <tbody>${body || `<tr><td colspan='${colSpan}'>No records</td></tr>`}</tbody></table>
-      <script>window.onload=()=>window.print()</script></body></html>`);
-    win.document.close();
+      </body></html>`);
   };
 
   const dash = dashQuery.data;

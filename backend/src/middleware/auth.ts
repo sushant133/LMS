@@ -15,6 +15,10 @@ import { enforceModuleAccess } from "./moduleAccessGuard.js";
 import { enforceDepartmentAccountScope } from "./departmentAccountGuard.js";
 import { ApiError } from "../utils/apiError.js";
 import {
+  isStudentAttendanceApiPath,
+  loadStudentAttendanceGrant
+} from "../utils/studentAttendanceAccess.js";
+import {
   getUserModuleAccessMap,
   getUserSecondaryRoles,
   primePermissionCache,
@@ -151,6 +155,20 @@ export const authorize =
          * even when their primary role is not in the route's role list.
          * READ_ONLY → GET only; WRITE → full methods (moduleAccessGuard still enforces).
          */
+        // "Student Attendance" grant: admin-only student attendance routes
+        // (submit for any class, edit / unlock a sheet, early leave). Deleting
+        // records stays with the roles the route names.
+        if (
+          req.method !== "DELETE" &&
+          isStudentAttendanceApiPath(req.originalUrl || req.path || "")
+        ) {
+          const grant = await loadStudentAttendanceGrant(req);
+          const isReadMethod = ["GET", "HEAD", "OPTIONS"].includes(req.method);
+          if (grant.read && (isReadMethod || grant.write)) {
+            return next();
+          }
+        }
+
         const requestModule = resolveModuleForRequest(req);
         /*
          * /exams resolves to the teaching module "examinations", which every

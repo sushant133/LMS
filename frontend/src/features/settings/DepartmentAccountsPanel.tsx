@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEPARTMENT_ACCOUNT_DESCRIPTIONS,
@@ -150,6 +151,7 @@ export const DepartmentAccountsPanel = () => {
       email: account.email,
       phone: account.phone ?? "",
     });
+    scrollToForm("department-account-edit");
   };
 
   const submitEdit = () => {
@@ -407,7 +409,7 @@ export const DepartmentAccountsPanel = () => {
         )}
 
         {editing ? (
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div id="department-account-edit" className="rounded-xl border border-slate-200 p-4">
             <div className="mb-4 flex items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-800">
                 Edit {editing.departmentLabel} account

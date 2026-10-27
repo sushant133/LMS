@@ -25,6 +25,10 @@ import {
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { isAssignedFieldCoordinator } from "../utils/fieldDutyService.js";
+import {
+  isStudentAttendanceApiPath,
+  loadStudentAttendanceGrant
+} from "../utils/studentAttendanceAccess.js";
 import { actorCanAdministerModule, wantsAdminWorkspaceScope } from "../utils/workspaceScope.js";
 import {
   getUserModuleAccessMap,
@@ -201,6 +205,21 @@ export const enforceModuleAccess = async (
     if (isModuleAccessBypassPath(req.method, originalPath)) return next();
     if (READ_METHODS.has(req.method) && isSharedAcademicsReadPath(originalPath)) {
       return next();
+    }
+
+    /**
+     * "Student Attendance" grant: the whole-college student attendance desk
+     * (daily marking for any class, history, reports, early leave, the student
+     * register). Its holder runs these records like the Administrator — edit
+     * and unlock included; delete stays Super Admin on the route. Controllers
+     * still check the grant for each action.
+     */
+    if (req.method !== "DELETE" && isStudentAttendanceApiPath(originalPath)) {
+      const grant = await loadStudentAttendanceGrant(req);
+      if (grant.read) {
+        if (READ_METHODS.has(req.method) || grant.write) return next();
+        return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+      }
     }
 
     /**
