@@ -1,13 +1,21 @@
 import type mongoose from "mongoose";
 import { Batch } from "../models/Batch.js";
+import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
+import { AcademicLogBook } from "../models/AcademicLogBook.js";
+import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
+import { AcademicProgress } from "../models/AcademicProgress.js";
+import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
+import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { Assignment } from "../models/Assignment.js";
 import { Attendance } from "../models/Attendance.js";
+import { DailyAttendance } from "../models/DailyAttendance.js";
 import { ExamRoutine } from "../models/ExamRoutine.js";
 import { MasterSubject } from "../models/MasterSubject.js";
 import { Notice } from "../models/Notice.js";
 import { Result } from "../models/Result.js";
 import { ResultSubmission } from "../models/ResultSubmission.js";
 import { Subject } from "../models/Subject.js";
+import { SubjectAssignment } from "../models/SubjectAssignment.js";
 import { Teacher } from "../models/Teacher.js";
 import { TimetableSlot } from "../models/TimetableSlot.js";
 import { Year } from "../models/Year.js";
@@ -205,6 +213,76 @@ export const isMasterSubjectInUse = async (schoolId: SchoolId, masterSubjectId: 
   ]);
 
   return checks.some(Boolean);
+};
+
+/** Subject ids (of those given) that any saved record points at. */
+const findSubjectIdsWithRecords = async (
+  schoolId: SchoolId,
+  subjectIds: SchoolId[]
+): Promise<Set<string>> => {
+  const filter = { schoolId, subjectId: { $in: subjectIds } };
+  const lists = await Promise.all([
+    Attendance.distinct("subjectId", filter),
+    DailyAttendance.distinct("subjectId", filter),
+    Assignment.distinct("subjectId", filter),
+    ExamRoutine.distinct("subjectId", filter),
+    ResultSubmission.distinct("subjectId", filter),
+    TimetableSlot.distinct("subjectId", filter),
+    Notice.distinct("subjectId", filter),
+    SubjectAssignment.distinct("subjectId", filter),
+    AcademicSyllabus.distinct("subjectId", filter),
+    AcademicSessionPlan.distinct("subjectId", filter),
+    AcademicLessonPlan.distinct("subjectId", filter),
+    AcademicLogBook.distinct("subjectId", filter),
+    AcademicLogBookEntry.distinct("subjectId", filter),
+    AcademicProgress.distinct("subjectId", filter),
+    Result.distinct("marks.subjectId", { schoolId, "marks.subjectId": { $in: subjectIds } }),
+    Teacher.distinct("tenders.subjectId", { schoolId, "tenders.subjectId": { $in: subjectIds } })
+  ]);
+  const wanted = new Set(subjectIds.map((id) => id.toString()));
+  const used = new Set<string>();
+  for (const list of lists) {
+    for (const id of list as unknown[]) {
+      const key = String(id);
+      if (wanted.has(key)) used.add(key);
+    }
+  }
+  return used;
+};
+
+/**
+ * Takes a master subject's batch copies out of the curriculum without losing
+ * history: copies nothing points at are deleted; copies that already carry
+ * attendance, marks, plans etc. are kept as inactive, unlinked subjects so those
+ * records still show the subject's name.
+ */
+export const releaseProvisionedSubjectsForMaster = async (
+  schoolId: SchoolId,
+  masterSubjectId: SchoolId
+): Promise<{ removed: number; kept: number }> => {
+  const subjectIds = await Subject.find({ schoolId, masterSubjectId }).distinct("_id");
+  if (!subjectIds.length) {
+    return { removed: 0, kept: 0 };
+  }
+
+  const withRecords = await findSubjectIdsWithRecords(schoolId, subjectIds);
+  const keepIds = subjectIds.filter((id) => withRecords.has(id.toString()));
+  const removeIds = subjectIds.filter((id) => !withRecords.has(id.toString()));
+
+  await Promise.all([
+    removeIds.length
+      ? Teacher.updateMany({ schoolId, subjects: { $in: removeIds } }, { $pull: { subjects: { $in: removeIds } } })
+      : null,
+    removeIds.length ? Subject.deleteMany({ _id: { $in: removeIds }, schoolId }) : null,
+    keepIds.length
+      ? Subject.updateMany(
+          { _id: { $in: keepIds }, schoolId },
+          { $set: { isActive: false }, $unset: { masterSubjectId: 1 } }
+        )
+      : null
+  ]);
+
+  return { removed: removeIds.length, kept: keepIds.length };
 };
 
 export const reconcileCurriculumForSchool = async (

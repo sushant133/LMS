@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { masterSubjectSchema } from "@phit-erp/shared";
+import { isSystemAdministrator, masterSubjectSchema } from "@phit-erp/shared";
 import { MasterSubject } from "../models/MasterSubject.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -10,9 +10,29 @@ import {
   isMasterSubjectInUse,
   migrateLegacyCollegeSubjects,
   provisionMasterSubjectToAllBatches,
+  releaseProvisionedSubjectsForMaster,
   syncMasterSubjectToInstances
 } from "../utils/masterSubjectProvisioning.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+
+/** Full authority over the master curriculum: no in-use restrictions. */
+const hasFullCurriculumAuthority = (req: Request): boolean =>
+  isSystemAdministrator(req.user?.role ?? "");
+
+/** Master subject codes are unique per institution. */
+const assertCodeAvailable = async (req: Request, code: string, exceptId?: string) => {
+  const clash = await MasterSubject.findOne(
+    withTenantScope(req, {
+      code: code.trim(),
+      ...(exceptId ? { _id: { $ne: exceptId } } : {})
+    })
+  )
+    .select("name code")
+    .lean();
+  if (clash) {
+    throw new ApiError(400, `Code ${clash.code} is already used by ${clash.name}`);
+  }
+};
 
 export const listMasterSubjects = asyncHandler(async (req: Request, res: Response) => {
   await requireCollegeInstitution(req);
@@ -28,6 +48,8 @@ export const createMasterSubject = asyncHandler(async (req: Request, res: Respon
   if (payload.passMarks > payload.fullMarks) {
     throw new ApiError(400, "Pass marks cannot exceed full marks");
   }
+
+  await assertCodeAvailable(req, payload.code);
 
   const masterSubject = await MasterSubject.create({
     ...payload,
@@ -53,12 +75,21 @@ export const updateMasterSubject = asyncHandler(async (req: Request, res: Respon
     throw new ApiError(404, "Master subject not found");
   }
 
+  if (payload.code.trim() !== existing.code.trim()) {
+    await assertCodeAvailable(req, payload.code, existing._id.toString());
+  }
+
   if (payload.yearLevel !== existing.yearLevel) {
-    const inUse = await isMasterSubjectInUse(schoolId, existing._id);
-    if (inUse) {
-      throw new ApiError(400, "Cannot change year level while this subject is in use");
+    if (hasFullCurriculumAuthority(req)) {
+      // Moves to the new year; copies that already hold records stay behind as history
+      await releaseProvisionedSubjectsForMaster(schoolId, existing._id);
+    } else {
+      const inUse = await isMasterSubjectInUse(schoolId, existing._id);
+      if (inUse) {
+        throw new ApiError(400, "Cannot change year level while this subject is in use");
+      }
+      await deleteProvisionedSubjectsForMaster(schoolId, existing._id);
     }
-    await deleteProvisionedSubjectsForMaster(schoolId, existing._id);
   }
 
   const masterSubject = await MasterSubject.findOneAndUpdate(
@@ -96,12 +127,16 @@ export const deleteMasterSubject = asyncHandler(async (req: Request, res: Respon
     throw new ApiError(404, "Master subject not found");
   }
 
-  const inUse = await isMasterSubjectInUse(schoolId, masterSubject._id);
-  if (inUse) {
-    throw new ApiError(400, "Cannot delete master subject while it is in use. Deactivate it instead.");
+  if (hasFullCurriculumAuthority(req)) {
+    // Copies that already hold attendance / marks / plans are kept (inactive) as history
+    await releaseProvisionedSubjectsForMaster(schoolId, masterSubject._id);
+  } else {
+    const inUse = await isMasterSubjectInUse(schoolId, masterSubject._id);
+    if (inUse) {
+      throw new ApiError(400, "Cannot delete master subject while it is in use. Deactivate it instead.");
+    }
+    await deleteProvisionedSubjectsForMaster(schoolId, masterSubject._id);
   }
-
-  await deleteProvisionedSubjectsForMaster(schoolId, masterSubject._id);
   await masterSubject.deleteOne();
 
   return sendSuccess(res, "Master subject deleted");

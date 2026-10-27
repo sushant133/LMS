@@ -25,7 +25,7 @@ import {
   reconcileMasterSubjects,
   updateMasterSubject
 } from "../controllers/masterSubjectController.js";
-import { authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
+import { authorizeInstitutionAdmin, protect, requireSystemAdministrator } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
@@ -51,7 +51,7 @@ router.get("/master-subjects", listMasterSubjects);
 router.post("/master-subjects/reconcile", authorizeInstitutionAdmin, reconcileMasterSubjects);
 router.post("/master-subjects", authorizeInstitutionAdmin, createMasterSubject);
 router.put("/master-subjects/:id", authorizeInstitutionAdmin, updateMasterSubject);
-router.delete("/master-subjects/:id", authorizeInstitutionAdmin, deleteMasterSubject);
+router.delete("/master-subjects/:id", requireSystemAdministrator, deleteMasterSubject);
 
 router.get("/batches", listBatches);
 router.post("/batches", authorizeInstitutionAdmin, createBatch);

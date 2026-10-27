@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   COLLEGE_PROGRAM_YEAR_NAMES,
+  isSystemAdministrator,
   masterSubjectSchema,
   type MasterSubjectInput,
   type MasterSubjectRecord,
@@ -16,6 +17,7 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -32,6 +34,8 @@ import {
  * Internal Marks — theoryMarks defaults to the full marks so an unedited subject prints
  * as a single combined column.
  */
+const DELETE_WORD = "delete";
+
 const defaultMasterSubjectValue: MasterSubjectInput = {
   name: "",
   code: "",
@@ -62,6 +66,12 @@ export const MasterSubjectManager = ({
   );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const { user } = useAuth();
+  // Deleting master subjects is reserved for the System Administrator
+  const canDelete = isSystemAdministrator(user?.role ?? "");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTyped, setDeleteTyped] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const masterSubjectsQuery = useQuery({
     queryKey: ["master-subjects"],
@@ -133,23 +143,28 @@ export const MasterSubjectManager = ({
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const openDelete = (subject: MasterSubjectRecord) => {
+    setDeletingId(subject._id);
+    setDeleteTyped("");
+  };
+
   const deleteMasterSubject = async (subject: MasterSubjectRecord) => {
-    const confirmed = window.confirm(
-      `Remove "${subject.name}" from the master curriculum?\n\nThis deletes the subject from all batches if it is not in use. Subjects used in attendance, exams, or results cannot be deleted — deactivate them instead.`,
-    );
-    if (!confirmed) {
+    if (deleteTyped.trim().toLowerCase() !== DELETE_WORD) {
       return;
     }
-
+    setIsDeleting(true);
     try {
       await api.delete(`/academics/master-subjects/${subject._id}`);
-      toast.success("Master subject removed");
+      toast.success(`${subject.name} deleted`);
+      setDeletingId(null);
       if (editingId === subject._id) {
         resetForm();
       }
       await refreshQueries();
     } catch (error) {
       toast.error(parseErrorMessage(error));
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -497,8 +512,8 @@ export const MasterSubjectManager = ({
                           </tr>
                         ) : (
                           yearSubjects.map((subject, subjectIndex) => (
+                            <Fragment key={subject._id}>
                             <tr
-                              key={subject._id}
                               className={
                                 editingId === subject._id
                                   ? "bg-brand-50/60"
@@ -565,18 +580,77 @@ export const MasterSubjectManager = ({
                                       ? "Deactivate"
                                       : "Activate"}
                                   </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() =>
-                                      void deleteMasterSubject(subject)
-                                    }
-                                  >
-                                    Remove
-                                  </Button>
+                                  {canDelete ? (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => openDelete(subject)}
+                                    >
+                                      Delete
+                                    </Button>
+                                  ) : null}
                                 </div>
                               </Td>
                             </tr>
+                            {canDelete && deletingId === subject._id ? (
+                              <tr>
+                                <Td colSpan={5} className="bg-red-50/60">
+                                  <form
+                                    className="flex flex-wrap items-center gap-2"
+                                    onSubmit={(event) => {
+                                      event.preventDefault();
+                                      void deleteMasterSubject(subject);
+                                    }}
+                                  >
+                                    <p className="w-full text-sm text-red-700">
+                                      Delete{" "}
+                                      <span className="font-semibold">
+                                        {subject.name} ({subject.code})
+                                      </span>{" "}
+                                      from the master curriculum and all
+                                      batches? Attendance, marks and other
+                                      records already saved for it are kept.
+                                      Type{" "}
+                                      <span className="font-semibold text-slate-900">
+                                        {DELETE_WORD}
+                                      </span>{" "}
+                                      to confirm.
+                                    </p>
+                                    <Input
+                                      autoFocus
+                                      value={deleteTyped}
+                                      aria-label={`Type ${DELETE_WORD} to confirm`}
+                                      placeholder={DELETE_WORD}
+                                      className="h-9 w-40"
+                                      onChange={(event) =>
+                                        setDeleteTyped(event.target.value)
+                                      }
+                                    />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setDeletingId(null)}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button
+                                      type="submit"
+                                      size="sm"
+                                      variant="destructive"
+                                      disabled={
+                                        isDeleting ||
+                                        deleteTyped.trim().toLowerCase() !==
+                                          DELETE_WORD
+                                      }
+                                    >
+                                      {isDeleting ? "Deleting…" : "Delete"}
+                                    </Button>
+                                  </form>
+                                </Td>
+                              </tr>
+                            ) : null}
+                            </Fragment>
                           ))
                         )}
                       </TableBody>
