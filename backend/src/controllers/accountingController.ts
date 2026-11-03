@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import type { Request, Response } from "express";
+import { keepProvidedFields } from "../utils/partialUpdate.js";
 import { Error as MongooseError, Types } from "mongoose";
 import {
   accountantSchema,
@@ -17,7 +18,11 @@ import {
   buildFinancialSummaryRows,
   buildFinancialSummaryCsv,
   buildReportCsv,
+  BS_MONTH_NAMES,
+  JOURNAL_SOURCE_LABELS,
+  resolveScholarshipType,
   sumAmount,
+  SYSTEM_ACCOUNT_CODES,
   type AccountingReportType,
   type FinancialSummaryReport
 } from "@phit-erp/shared";
@@ -50,6 +55,7 @@ import {
 import {
   applyScholarshipAwardToYearCollections,
   buildProgramYearFeeSummary,
+  buildStudentFeePosition,
   calculateFeeTotals,
   calculateNetSalary,
   capProgramYearChargesNpr,
@@ -60,12 +66,21 @@ import {
   defaultCoversYearFromTopped,
   ensureActiveScholarshipAwardsApplied,
   filterOutOpeningTuitionCharges,
+  REAL_RECEIPT_FILTER,
   PROGRAM_YEAR_LABELS,
   recalculateStudentFeesDue,
-  reverseScholarshipAwardFromCollections
+  receiptAdvanceTotalNpr,
+  reverseScholarshipAwardFromCollections,
+  summarizeUnassignedFees
 } from "../utils/accountingCalculations.js";
-import { getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
+import { buildLedgerCashBook, getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
+import { registerPurchasedAsset, resolvePurchasePosting } from "../utils/purchaseCapitalization.js";
 import { getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
+import {
+  aggregateJournalBalances,
+  buildGeneralLedger,
+  getBankOpeningTotal
+} from "../utils/accountingReports.js";
 import { generateReceiptVerificationCode } from "../utils/receiptVerification.js";
 import { nextVoucherNumber, nextVoucherNumberForDate } from "../utils/voucherNumbering.js";
 import {
@@ -208,6 +223,7 @@ import { formatAddressLine } from "../utils/formatAddress.js";
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { sendSuccess } from "../utils/response.js";
+import { sendReportCsv } from "../utils/reportCsv.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 const getOrCreateSettings = async (schoolId: ReturnType<typeof tenantObjectId>) => {
@@ -301,9 +317,10 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       isDeleted: false,
       status: { $nin: ["PENDING_APPROVAL", "REJECTED"] }
     }).select("amountNpr").lean(),
-    FeeCollection.find({ schoolId, isDeleted: false })
+    FeeCollection.find({ schoolId, isDeleted: false, ...REAL_RECEIPT_FILTER })
       .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
-      .sort({ createdAt: -1 })
+      // Latest by receipt date (BS), then by entry time for receipts of the same day
+      .sort({ paidDateBs: -1, createdAt: -1 })
       .limit(8)
       .lean(),
     AccountingExpense.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(8).lean(),
@@ -332,7 +349,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       .sort({ createdAt: -1 })
       .limit(8)
       .lean(),
-    CashBookEntry.find({ schoolId }).sort({ dateBs: -1, createdAt: -1 }).limit(10).lean()
+    buildLedgerCashBook(schoolId, { limit: 10 })
   ]);
 
   // Real payments only — exclude admission OPEN- plan rows from income / activity
@@ -348,14 +365,6 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
   const totalPurchasesPaidNpr = paidPurchases.reduce((sum, item) => sum + (item.totalAmountNpr || 0), 0);
   const totalRefundsNpr = refunds.reduce((sum, item) => sum + (item.amountNpr || 0), 0);
   const totalOtherIncomeNpr = incomes.reduce((sum, item) => sum + item.amountNpr, 0);
-  /** Cash received on a fee receipt = tuition paid + security deposit collected */
-  const cashReceivedOnCollection = (item: {
-    amountPaidNpr?: number;
-    securityDepositPaidNpr?: number;
-  }) =>
-    (Number(item.amountPaidNpr) || 0) +
-    (Number((item as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0);
-
   // Tuition fee income for cards (exclude OPEN plan rows and security deposit liability)
   const totalTuitionCollectedNpr = paymentCollections.reduce(
     (sum, item) => sum + (item.amountPaidNpr || 0),
@@ -366,50 +375,62 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
   const totalExpensesNpr =
     totalRegisterExpensesNpr + totalSalaryPaidNpr + totalPurchasesPaidNpr + totalRefundsNpr;
 
-  // Student collections (cash in) include fee + deposit
-  const todayCollectionNpr = paymentCollections
-    .filter((item) => item.paidDateBs === today)
-    .reduce((sum, item) => sum + cashReceivedOnCollection(item), 0);
-  const monthlyCollectionNpr = paymentCollections
-    .filter((item) => typeof item.paidDateBs === "string" && item.paidDateBs.startsWith(currentMonth))
-    .reduce((sum, item) => sum + cashReceivedOnCollection(item), 0);
+  // Fee collected (OPEN- plan charges already excluded). Security deposits are a liability,
+  // not fee income: they are left out of the cards and charts and shown as a memo figure.
+  const feePaid = (item: { amountPaidNpr?: number }) => Number(item.amountPaidNpr) || 0;
+  const depositPaid = (item: { securityDepositPaidNpr?: number }) => Number(item.securityDepositPaidNpr) || 0;
+  const todayReceipts = paymentCollections.filter((item) => item.paidDateBs === today);
+  const monthReceipts = paymentCollections.filter(
+    (item) => typeof item.paidDateBs === "string" && item.paidDateBs.startsWith(currentMonth)
+  );
+  const todayCollectionNpr = todayReceipts.reduce((sum, item) => sum + feePaid(item), 0);
+  const monthlyCollectionNpr = monthReceipts.reduce((sum, item) => sum + feePaid(item), 0);
+  const todayDepositNpr = todayReceipts.reduce((sum, item) => sum + depositPaid(item), 0);
+  const monthlyDepositNpr = monthReceipts.reduce((sum, item) => sum + depositPaid(item), 0);
+  const depositMemo = (amount: number) =>
+    amount > 0 ? `+ NPR ${amount.toLocaleString("en-IN")} security deposit (held, not income)` : undefined;
 
   const feeByMonth = paymentCollections.reduce<Record<string, number>>((acc, item) => {
     if (typeof item.paidDateBs !== "string" || item.paidDateBs.length < 7) return acc;
     const month = item.paidDateBs.slice(0, 7);
-    acc[month] = (acc[month] ?? 0) + cashReceivedOnCollection(item);
+    acc[month] = (acc[month] ?? 0) + feePaid(item);
     return acc;
   }, {});
 
-  const expenseByCategory = expenses.reduce<Record<string, number>>((acc, item) => {
-    acc[item.category] = (acc[item.category] ?? 0) + item.amountNpr;
-    return acc;
-  }, {});
-
-  // Revenue by type from cash actually received (not OPEN plan charge amounts)
-  const revenueByFeeType = paymentCollections.reduce<Record<string, number>>((acc, item) => {
-    const paid = Number(item.amountPaidNpr) || 0;
-    const deposit = Number((item as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0;
-    if (deposit > 0) {
-      acc.SECURITY_DEPOSIT = (acc.SECURITY_DEPOSIT ?? 0) + deposit;
-    }
-    if (paid <= 0) return acc;
-    const tuitionLines = (item.feeBreakdown ?? []).filter(
-      (b) => String(b.feeType) !== "SECURITY_DEPOSIT"
-    );
-    const lineTotal = tuitionLines.reduce((s, b) => s + Number(b.amountNpr || 0), 0);
-    if (lineTotal > 0) {
-      for (const breakdown of tuitionLines) {
-        const share = paid * (Number(breakdown.amountNpr || 0) / lineTotal);
-        acc[breakdown.feeType] = (acc[breakdown.feeType] ?? 0) + share;
-      }
-    } else {
-      acc.TUITION = (acc.TUITION ?? 0) + paid;
-    }
-    return acc;
-  }, {});
-
-  const cashBalanceNpr = await getLatestCashBalance(schoolId);
+  // Income, expense, cash and bank come from the ledger so the dashboard agrees with the
+  // Trial Balance, Income & Expenditure and Bank / Cash. (Register totals and the old cash
+  // book disagreed whenever a record had no voucher, a payment went through the bank, or
+  // cash moved between cash and bank.)
+  const [ledgerBalances, bankOpeningNpr, postedExpenseIds] = await Promise.all([
+    aggregateJournalBalances(schoolId, { excludeClosingEntries: true }),
+    getBankOpeningTotal(schoolId),
+    JournalEntry.distinct("referenceId", {
+      schoolId,
+      isDeleted: false,
+      isReversal: { $ne: true },
+      isReversed: { $ne: true },
+      referenceType: "AccountingExpense",
+      referenceId: { $in: recentExpenses.map((e) => e._id) }
+    })
+  ]);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const ledgerNet = (code: string) => {
+    const row = ledgerBalances.find((b) => b.accountCode === code);
+    return row ? row.debitNpr - row.creditNpr : 0;
+  };
+  const incomeAccounts = ledgerBalances
+    .filter((b) => b.accountType === "INCOME")
+    .map((b) => ({ label: b.accountName, amount: round2(b.creditNpr - b.debitNpr) }))
+    .filter((row) => Math.abs(row.amount) >= 0.01);
+  const expenseAccounts = ledgerBalances
+    .filter((b) => b.accountType === "EXPENSE")
+    .map((b) => ({ label: b.accountName, amount: round2(b.debitNpr - b.creditNpr) }))
+    .filter((row) => Math.abs(row.amount) >= 0.01);
+  const ledgerIncomeNpr = round2(incomeAccounts.reduce((s, r) => s + r.amount, 0));
+  const ledgerExpenseNpr = round2(expenseAccounts.reduce((s, r) => s + r.amount, 0));
+  const cashBalanceNpr = round2(ledgerNet(SYSTEM_ACCOUNT_CODES.CASH));
+  const bankBalanceNpr = round2(ledgerNet(SYSTEM_ACCOUNT_CODES.BANK) + bankOpeningNpr);
+  const postedExpenseSet = new Set(postedExpenseIds.map((id) => String(id)));
 
   const studentParty = (row: { studentId?: unknown }) => {
     const s = row.studentId as
@@ -442,19 +463,25 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
 
   return sendSuccess(res, "Accounting dashboard fetched", {
     stats: [
-      { label: "Today's Collection", value: todayCollectionNpr },
-      { label: "Monthly Collection", value: monthlyCollectionNpr },
-      { label: "Total Income", value: totalIncomeNpr },
-      { label: "Total Expenses", value: totalExpensesNpr },
-      { label: "Cash Balance", value: cashBalanceNpr }
+      { label: "Today's Collection", value: todayCollectionNpr, change: depositMemo(todayDepositNpr) },
+      { label: "Monthly Collection", value: monthlyCollectionNpr, change: depositMemo(monthlyDepositNpr) },
+      { label: "Total Income", value: ledgerIncomeNpr },
+      { label: "Total Expenses", value: ledgerExpenseNpr },
+      { label: "Cash Balance", value: cashBalanceNpr },
+      { label: "Bank Balance", value: bankBalanceNpr }
     ],
-    feeChart: Object.entries(feeByMonth).map(([label, amount]) => ({ label, amount })),
-    expenseChart: Object.entries(expenseByCategory).map(([label, amount]) => ({ label, amount })),
+    feeChart: Object.entries(feeByMonth)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([label, amount]) => ({ label, amount })),
+    // Every expense account in the ledger (indirect, direct, salary, refunds…), so the
+    // chart adds up to the Total Expenses card beside it.
+    expenseChart: expenseAccounts.sort((a, b) => b.amount - a.amount),
     collectionTrend: Object.entries(feeByMonth)
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-6)
       .map(([label, amount]) => ({ label, amount })),
-    revenueSources: Object.entries(revenueByFeeType).map(([label, amount]) => ({ label, amount })),
+    // Income accounts only — a security deposit is a liability, not revenue.
+    revenueSources: incomeAccounts.sort((a, b) => b.amount - a.amount),
     recentCollections: recentPayments,
     recentExpenses,
     recentTransactions: cashEntries.map((entry) => ({
@@ -466,8 +493,13 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     })),
     todayCollectionNpr,
     monthlyCollectionNpr,
-    totalIncomeNpr,
-    totalExpensesNpr,
+    todayDepositNpr,
+    monthlyDepositNpr,
+    totalIncomeNpr: ledgerIncomeNpr,
+    totalExpensesNpr: ledgerExpenseNpr,
+    /** Register-based totals, kept for reference (they include records without a voucher). */
+    registerIncomeNpr: totalIncomeNpr,
+    registerExpensesNpr: totalExpensesNpr,
     cashBalanceNpr,
     recentFees: recentPayments.map((c) => {
       const feePaid = Number(c.amountPaidNpr) || 0;
@@ -542,7 +574,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       voucherNo: e._id.toString().slice(-6).toUpperCase(),
       party: e.vendor,
       amountNpr: e.amountNpr,
-      status: "POSTED",
+      status: postedExpenseSet.has(e._id.toString()) ? "POSTED" : "NOT POSTED",
       linkTab: "expenses"
     })),
     recentRefunds: recentRefunds.map((r) => ({
@@ -570,7 +602,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     }),
     // legacy compatibility
     pendingFeesTotal: 0,
-    bankBalanceNpr: 0,
+    bankBalanceNpr,
     pendingApprovals: 0,
     generatedAt: today
   });
@@ -690,18 +722,21 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
       2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
       3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
     };
-    const yearWise = buildProgramYearFeeSummary(
-      studentCollections,
-      studentAwards,
+    const position = buildStudentFeePosition(
+      studentCollections as unknown as Array<Record<string, unknown>>,
+      studentAwards as unknown as Array<Record<string, unknown>>,
       plannedFees
     );
-    const yearWiseRemaining = yearWise.reduce(
-      (s, y) => s + Number(y.remainingNpr || 0),
-      0
-    );
+    const yearWise = position.years;
+    // Same outstanding as the Student Ledger and Receivables Aging
+    const yearWiseRemaining = position.totals.outstandingNpr;
+    const unassigned = position.unassigned;
 
     return {
       student,
+      unassignedFees:
+        unassigned.count > 0 && (unassigned.chargedNpr > 0 || unassigned.remainingNpr > 0) ? unassigned : undefined,
+      advanceNpr: position.totals.advanceNpr,
       className: primaryId ? (primaryMap.get(primaryId) ?? "") : "",
       sectionName: secondaryId ? (secondaryMap.get(secondaryId) ?? "") : "",
       previousDueNpr: yearWiseRemaining,
@@ -829,10 +864,7 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     0
   );
   const totalFine = feeCollections.reduce((sum, item) => sum + (item.lateFeeNpr ?? 0), 0);
-  const advanceBalance = feeCollections.reduce(
-    (sum, item) => sum + (item.advancePaymentNpr ?? 0),
-    0
-  );
+  // advanceBalance comes from the fee position below (paid beyond every due)
 
   const dueInstallments = feeCollections
     .filter((c) => c.isInstallment && c.installmentNumber && c.totalInstallments)
@@ -848,12 +880,14 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
     3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
   };
-  const yearWise = buildProgramYearFeeSummary(
+  const position = buildStudentFeePosition(
     feeCollections as unknown as Array<Record<string, unknown>>,
-    activeAwards,
+    activeAwards as unknown as Array<Record<string, unknown>>,
     plannedFees
   );
-  const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
+  const yearWise = position.years;
+  const yearWiseRemaining = position.totals.outstandingNpr;
+  const advanceBalance = position.totals.advanceNpr;
 
   const scholarshipStatus =
     activeAwards.length > 0
@@ -883,7 +917,7 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     guardianName: student.guardianName,
     scholarshipStatus,
     // Payable = year plan total (charged); outstanding = remaining after payments
-    totalPayableNpr: yearWise.reduce((s, y) => s + Number(y.chargedNpr || 0), 0),
+    totalPayableNpr: position.totals.payableNpr,
     outstandingDueNpr: yearWiseRemaining,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
@@ -1038,6 +1072,32 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     if (!structure) throw new ApiError(404, "Fee structure not found");
   }
 
+  if (payload.applyToOldestDue) {
+    const [existingRows, awardRows, planStudent] = await Promise.all([
+      FeeCollection.find({ schoolId, studentId: payload.studentId, isDeleted: false }).lean(),
+      StudentScholarshipAward.find({
+        schoolId,
+        studentId: payload.studentId,
+        isDeleted: false,
+        status: { $in: ["ACTIVE", "APPLIED"] }
+      }).lean(),
+      Student.findOne({ _id: payload.studentId, schoolId })
+        .select("year1FeeNpr year2FeeNpr year3FeeNpr")
+        .lean()
+    ]);
+    const summary = buildProgramYearFeeSummary(
+      existingRows as unknown as Array<Record<string, unknown>>,
+      awardRows as unknown as Array<Record<string, unknown>>,
+      {
+        1: Math.max(0, Number(planStudent?.year1FeeNpr) || 0),
+        2: Math.max(0, Number(planStudent?.year2FeeNpr) || 0),
+        3: Math.max(0, Number(planStudent?.year3FeeNpr) || 0)
+      }
+    );
+    const oldestDue = summary.find((y) => y.remainingNpr > 0);
+    if (oldestDue) payload.programYear = oldestDue.programYear;
+  }
+
   const currentChargesNpr = payload.currentChargesNpr || structure?.amountNpr || 0;
   const securityDepositPaidNpr = Math.max(0, Number(payload.securityDepositPaidNpr) || 0);
   const accountantName = await getActorName(req);
@@ -1047,6 +1107,15 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       : structure
         ? [{ feeType: structure.feeType, title: structure.title, amountNpr: currentChargesNpr }]
         : [];
+  // Money paid with no fee line: it is a payment against the fee plan — tuition.
+  const paidNpr = Math.max(0, Number(payload.amountPaidNpr) || 0);
+  if (paidNpr > 0 && !feeBreakdown.some((b) => String(b.feeType) !== "SECURITY_DEPOSIT")) {
+    console.warn(`[fee-collection] Receipt ${payload.receiptNumber ?? ""}: no fee breakdown sent — defaulting to Tuition`);
+    feeBreakdown = [
+      ...feeBreakdown,
+      { feeType: "TUITION" as const, title: "Tuition / program fee", amountNpr: currentChargesNpr > 0 ? currentChargesNpr : paidNpr }
+    ];
+  }
 
   // Append security deposit line when collecting deposit with this receipt
   if (securityDepositPaidNpr > 0) {
@@ -1201,9 +1270,19 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     // Align breakdown with effective (non-duplicated) charges
     let storedBreakdown = feeBreakdown;
     if (effectiveChargesNpr <= 0) {
-      storedBreakdown = feeBreakdown.filter(
-        (b) => String(b.feeType) === "SECURITY_DEPOSIT"
-      );
+      // No new charge (paying against the plan): keep the fee lines at the amount paid so
+      // the fee head survives later edits / reposting.
+      const feeLines = feeBreakdown.filter((b) => String(b.feeType) !== "SECURITY_DEPOSIT");
+      const feeLineTotal = feeLines.reduce((s, b) => s + (Number(b.amountNpr) || 0), 0);
+      storedBreakdown = [
+        ...(paidNpr > 0 && feeLineTotal > 0
+          ? feeLines.map((b) => ({
+              ...b,
+              amountNpr: Math.round(((Number(b.amountNpr) || 0) / feeLineTotal) * paidNpr * 100) / 100
+            }))
+          : []),
+        ...feeBreakdown.filter((b) => String(b.feeType) === "SECURITY_DEPOSIT")
+      ];
     } else if (
       effectiveChargesNpr !== currentChargesNpr &&
       storedBreakdown.length > 0
@@ -1235,7 +1314,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           securityDepositPaidNpr,
           discountNpr: payload.discountNpr,
           scholarshipNpr: payload.scholarshipNpr,
-          scholarshipType: payload.scholarshipType ?? "NONE",
+          scholarshipType: resolveScholarshipType(payload.scholarshipNpr, payload.scholarshipType),
           lateFeeNpr,
           advancePaymentNpr: totals.advancePaymentNpr,
           remainingDueNpr: totals.remainingDueNpr,
@@ -1294,7 +1373,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
         req,
         {
           dateBs: paidDateBs,
-          entryType: "CREDIT",
+          direction: "RECEIPT",
           category: cashCategory,
           description:
             securityDepositPaidNpr > 0
@@ -1669,7 +1748,8 @@ export const deleteStudentScholarshipAward = asyncHandler(async (req: Request, r
 export const updateAccountingFeeCollection = asyncHandler(async (req: Request, res: Response) => {
   await assertCanEditOrDeleteFeePayment(req);
 
-  const payload = enhancedFeeCollectionSchema.partial().parse(req.body);
+  // Only the fields sent are changed (schema defaults must not overwrite saved values)
+  const payload = keepProvidedFields(enhancedFeeCollectionSchema.partial().parse(req.body), req.body);
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
   const existing = await FeeCollection.findOne({
@@ -1804,6 +1884,8 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
     nextLateFee !== (existing.lateFeeNpr ?? 0) ||
     nextPaidDateBs !== existing.paidDateBs ||
     nextPaymentMethod !== existing.paymentMethod ||
+    // A different bank account re-tags the journal
+    (nextBankAccountId ?? "") !== (existing.bankAccountId?.toString() ?? "") ||
     (payload.feeBreakdown !== undefined && payload.feeBreakdown.length > 0) ||
     payload.securityDepositPaidNpr !== undefined;
 
@@ -1928,7 +2010,7 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
       (existing as unknown as { advanceAllocations: typeof nextAdvanceAllocations }).advanceAllocations =
         nextAdvanceAllocations;
     }
-    if (nextScholarshipType) existing.scholarshipType = nextScholarshipType;
+    existing.scholarshipType = resolveScholarshipType(nextScholarship, nextScholarshipType);
     existing.feeBreakdown = nextFeeBreakdown as typeof existing.feeBreakdown;
     if (payload.academicYearBs !== undefined) {
       existing.academicYearBs = emptyToUndef(payload.academicYearBs);
@@ -1970,7 +2052,7 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
           req,
           {
             dateBs: nextPaidDateBs,
-            entryType: "CREDIT",
+            direction: "RECEIPT",
             category:
               nextDepositPaid > 0
                 ? "Fee Collection + Security Deposit"
@@ -2446,7 +2528,7 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
   await generateFeeReceiptPDF(
     {
       schoolName: settings?.schoolName ?? school.name,
-      schoolNameNp: settings?.schoolNameNp ?? school.nameNp,
+      // Accounting documents are English only
       schoolAddress,
       receiptNumber: collection.receiptNumber,
       paidDateBs: collection.paidDateBs,
@@ -2477,9 +2559,37 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
   );
 });
 
+/** Mark which register rows have a journal voucher (rows without one are not in the ledger). */
+const withJournalPostedFlag = async <T extends { _id: Types.ObjectId }>(
+  schoolId: Types.ObjectId,
+  referenceType: string,
+  rows: T[]
+): Promise<Array<T & { journalPosted: boolean }>> => {
+  const posted = new Set(
+    (
+      // Active vouchers only: a reversed voucher no longer puts the record in the ledger
+      await JournalEntry.distinct("referenceId", {
+        schoolId,
+        isDeleted: false,
+        isReversal: { $ne: true },
+        isReversed: { $ne: true },
+        referenceType,
+        referenceId: { $in: rows.map((r) => r._id) }
+      })
+    ).map((id) => String(id))
+  );
+  return rows.map((row) => ({ ...row, journalPosted: posted.has(String(row._id)) }));
+};
+
 export const listExpenses = asyncHandler(async (req: Request, res: Response) => {
-  const expenses = await AccountingExpense.find(withTenantScope(req, { isDeleted: false })).sort({ dateBs: -1 });
-  return sendSuccess(res, "Expenses fetched", expenses);
+  const expenses = await AccountingExpense.find(withTenantScope(req, { isDeleted: false }))
+    .sort({ dateBs: -1 })
+    .lean();
+  return sendSuccess(
+    res,
+    "Expenses fetched",
+    await withJournalPostedFlag(tenantObjectId(req), "AccountingExpense", expenses)
+  );
 });
 
 /**
@@ -2516,13 +2626,14 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
 
   await recordCashEntry(req, {
     dateBs: payload.dateBs,
-    entryType: "DEBIT",
+    direction: "PAYMENT",
     category: payload.category,
     description: payload.description,
     amountNpr: payload.amountNpr,
     paymentMethod: payload.paymentMethod,
     referenceType: "AccountingExpense",
-    referenceId: expense._id.toString()
+    referenceId: expense._id.toString(),
+    bankAccountId: payload.bankAccountId
   });
 
   await postExpenseJournal({
@@ -2533,7 +2644,8 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
     amountNpr: payload.amountNpr,
     category: payload.category,
     paymentMethod: payload.paymentMethod,
-    description: payload.description
+    description: payload.description,
+    bankAccountId: payload.bankAccountId
   });
 
   await recordAudit(req, { action: "accounting.expense.create", entity: "AccountingExpense", entityId: expense._id.toString(), after: expense });
@@ -2541,7 +2653,10 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const updateExpense = asyncHandler(async (req: Request, res: Response) => {
-  const payload = accountingExpenseSchema.partial().parse(req.body);
+  // Only the fields sent are changed (schema defaults must not overwrite saved values)
+  const payload = keepProvidedFields(accountingExpenseSchema.partial().parse(req.body), req.body);
+  // Bank account is fixed once posted (journal is tagged with it)
+  delete payload.bankAccountId;
   const before = await AccountingExpense.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!before) throw new ApiError(404, "Expense not found");
 
@@ -2605,8 +2720,14 @@ export const deleteExpense = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const listPurchases = asyncHandler(async (req: Request, res: Response) => {
-  const purchases = await AccountingPurchase.find(withTenantScope(req, { isDeleted: false })).sort({ purchaseDateBs: -1 });
-  return sendSuccess(res, "Purchases fetched", purchases);
+  const purchases = await AccountingPurchase.find(withTenantScope(req, { isDeleted: false }))
+    .sort({ purchaseDateBs: -1 })
+    .lean();
+  return sendSuccess(
+    res,
+    "Purchases fetched",
+    await withJournalPostedFlag(tenantObjectId(req), "AccountingPurchase", purchases)
+  );
 });
 
 export const createPurchase = asyncHandler(async (req: Request, res: Response) => {
@@ -2630,18 +2751,21 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
   if (payload.paymentStatus === "PAID") {
     await recordCashEntry(req, {
       dateBs: payload.purchaseDateBs,
-      entryType: "DEBIT",
+      direction: "PAYMENT",
       category: "Purchase",
       description: `${payload.category} - ${payload.vendor}`,
       amountNpr: totalAmountNpr,
       paymentMethod: payload.paymentMethod,
       referenceType: "AccountingPurchase",
-      referenceId: purchase._id.toString()
+      referenceId: purchase._id.toString(),
+      bankAccountId: payload.bankAccountId
     });
   }
 
-  await postPurchaseJournal({
-    schoolId: tenantObjectId(req),
+  // Asset category at or above the capitalisation threshold → fixed-asset pool + register
+  const posting = await resolvePurchasePosting(schoolId, payload.category, totalAmountNpr);
+  const journal = await postPurchaseJournal({
+    schoolId,
     userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
     purchaseId: purchase._id,
     dateBs: payload.purchaseDateBs,
@@ -2649,19 +2773,33 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
     category: payload.category,
     paymentStatus: payload.paymentStatus,
     paymentMethod: payload.paymentMethod,
-    vendor: payload.vendor
+    vendor: payload.vendor,
+    bankAccountId: payload.bankAccountId,
+    debitAccountCode: posting.accountCode
   });
+  if (posting.assetPool) {
+    await registerPurchasedAsset({
+      schoolId,
+      userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+      pool: posting.assetPool,
+      purchase,
+      journalEntryId: journal._id
+    });
+  }
 
   await recordAudit(req, { action: "accounting.purchase.create", entity: "AccountingPurchase", entityId: purchase._id.toString(), after: purchase });
   return sendSuccess(res, "Purchase recorded", purchase, 201);
 });
 
 export const updatePurchase = asyncHandler(async (req: Request, res: Response) => {
-  const payload = accountingPurchaseSchema.partial().parse(req.body);
+  // Only the fields sent are changed (schema defaults must not overwrite saved values)
+  const payload = keepProvidedFields(accountingPurchaseSchema.partial().parse(req.body), req.body);
   const before = await AccountingPurchase.findOne(
     withTenantScope(req, { _id: req.params.id, isDeleted: false })
   );
   if (!before) throw new ApiError(404, "Purchase not found");
+  // Bank account can be chosen until the purchase is paid, then it is fixed
+  if (before.paymentStatus === "PAID") delete payload.bankAccountId;
 
   // Posted purchase amounts/date/vendor/category must not change — journal would desync
   if (
@@ -2705,13 +2843,14 @@ export const updatePurchase = asyncHandler(async (req: Request, res: Response) =
 
     await recordCashEntry(req, {
       dateBs: purchase.purchaseDateBs,
-      entryType: "DEBIT",
+      direction: "PAYMENT",
       category: "Purchase",
       description: `${purchase.category} - ${purchase.vendor}`,
       amountNpr: purchase.totalAmountNpr,
       paymentMethod: purchase.paymentMethod,
       referenceType: "AccountingPurchase",
-      referenceId: purchase._id.toString()
+      referenceId: purchase._id.toString(),
+      bankAccountId: purchase.bankAccountId?.toString()
     });
 
     // Settle AP from original pending purchase journal
@@ -2722,7 +2861,8 @@ export const updatePurchase = asyncHandler(async (req: Request, res: Response) =
       dateBs: purchase.purchaseDateBs,
       amountNpr: purchase.totalAmountNpr,
       paymentMethod: purchase.paymentMethod,
-      vendor: purchase.vendor
+      vendor: purchase.vendor,
+      bankAccountId: purchase.bankAccountId ?? undefined
     });
   }
 
@@ -2768,8 +2908,14 @@ export const deletePurchase = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const listIncome = asyncHandler(async (req: Request, res: Response) => {
-  const income = await AccountingIncome.find(withTenantScope(req, { isDeleted: false })).sort({ dateBs: -1 });
-  return sendSuccess(res, "Income records fetched", income);
+  const income = await AccountingIncome.find(withTenantScope(req, { isDeleted: false }))
+    .sort({ dateBs: -1 })
+    .lean();
+  return sendSuccess(
+    res,
+    "Income records fetched",
+    await withJournalPostedFlag(tenantObjectId(req), "AccountingIncome", income)
+  );
 });
 
 /** Human label for a fee type code on the income overview. */
@@ -2972,13 +3118,14 @@ export const createIncome = asyncHandler(async (req: Request, res: Response) => 
 
   await recordCashEntry(req, {
     dateBs: payload.dateBs,
-    entryType: "CREDIT",
+    direction: "RECEIPT",
     category: payload.category,
     description: payload.description || payload.source,
     amountNpr: payload.amountNpr,
     paymentMethod: payload.paymentMethod,
     referenceType: "AccountingIncome",
-    referenceId: income._id.toString()
+    referenceId: income._id.toString(),
+    bankAccountId: payload.bankAccountId
   });
 
   await postIncomeJournal({
@@ -2989,7 +3136,8 @@ export const createIncome = asyncHandler(async (req: Request, res: Response) => 
     amountNpr: payload.amountNpr,
     category: payload.category,
     paymentMethod: payload.paymentMethod,
-    description: payload.description || payload.source
+    description: payload.description || payload.source,
+    bankAccountId: payload.bankAccountId
   });
 
   await recordAudit(req, { action: "accounting.income.create", entity: "AccountingIncome", entityId: income._id.toString(), after: income });
@@ -2997,7 +3145,10 @@ export const createIncome = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const updateIncome = asyncHandler(async (req: Request, res: Response) => {
-  const payload = accountingIncomeSchema.partial().parse(req.body);
+  // Only the fields sent are changed (schema defaults must not overwrite saved values)
+  const payload = keepProvidedFields(accountingIncomeSchema.partial().parse(req.body), req.body);
+  // Bank account is fixed once posted (journal is tagged with it)
+  delete payload.bankAccountId;
   const before = await AccountingIncome.findOne(
     withTenantScope(req, { _id: req.params.id, isDeleted: false })
   );
@@ -3805,7 +3956,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       if (!wasPaid && saveStatus === "PAID" && payload.paidDateBs) {
         await recordCashEntry(req, {
           dateBs: payload.paidDateBs,
-          entryType: "DEBIT",
+          direction: "PAYMENT",
           category: "Salary",
           description: `Salary payment ${payload.monthBs} — ${row.employeeName || ""}`,
           amountNpr: money.netSalaryNpr,
@@ -3841,7 +3992,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       if (saveStatus === "PAID" && payload.paidDateBs) {
         await recordCashEntry(req, {
           dateBs: payload.paidDateBs,
-          entryType: "DEBIT",
+          direction: "PAYMENT",
           category: "Salary",
           description: `Salary payment ${payload.monthBs} — ${row.employeeName || ""}`,
           amountNpr: money.netSalaryNpr,
@@ -4125,7 +4276,7 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
   if (payload.status === "PAID" && payload.paidDateBs) {
     await recordCashEntry(req, {
       dateBs: payload.paidDateBs,
-      entryType: "DEBIT",
+      direction: "PAYMENT",
       category: "Salary",
       description: `Salary payment ${payload.monthBs}`,
       amountNpr: netSalaryNpr,
@@ -4203,7 +4354,7 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
 
     await recordCashEntry(req, {
       dateBs: paidDateBs,
-      entryType: "DEBIT",
+      direction: "PAYMENT",
       category: "Salary",
       description: `Salary payment ${salary.monthBs}`,
       amountNpr: netSalaryNpr,
@@ -4592,7 +4743,8 @@ export const createBankAccount = asyncHandler(async (req: Request, res: Response
 });
 
 export const updateBankAccount = asyncHandler(async (req: Request, res: Response) => {
-  const payload = bankAccountSchema.partial().parse(req.body);
+  // Only the fields sent are changed (schema defaults must not overwrite saved values)
+  const payload = keepProvidedFields(bankAccountSchema.partial().parse(req.body), req.body);
   const before = await BankAccount.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!before) throw new ApiError(404, "Bank account not found");
 
@@ -4612,27 +4764,24 @@ export const deleteBankAccount = asyncHandler(async (req: Request, res: Response
   return sendSuccess(res, "Bank account deactivated", account);
 });
 
+/** Cash Book from the ledger (1001 Cash in Hand): receipts DEBIT, payments CREDIT, newest first. */
 export const listCashBook = asyncHandler(async (req: Request, res: Response) => {
-  const entries = await CashBookEntry.find(withTenantScope(req)).sort({ dateBs: -1, createdAt: -1 });
+  const entries = await buildLedgerCashBook(tenantObjectId(req), {
+    fromDateBs: typeof req.query.fromDateBs === "string" && isBsDay(req.query.fromDateBs) ? req.query.fromDateBs : undefined,
+    toDateBs: typeof req.query.toDateBs === "string" && isBsDay(req.query.toDateBs) ? req.query.toDateBs : undefined
+  });
   return sendSuccess(res, "Cash book entries fetched", entries);
 });
 
-export const createCashBookEntry = asyncHandler(async (req: Request, res: Response) => {
-  const payload = cashBookEntrySchema.parse(req.body);
-  ensureValidBsDate(payload.dateBs);
-  const schoolId = tenantObjectId(req);
-  const previousBalance = await getLatestCashBalance(schoolId);
-  const balanceAfterNpr = computeBalanceAfterEntry(previousBalance, payload.entryType, payload.amountNpr);
-
-  const entry = await CashBookEntry.create({
-    ...payload,
-    schoolId,
-    balanceAfterNpr,
-    createdBy: req.user!.userId
-  });
-
-  await recordAudit(req, { action: "accounting.cashbook.create", entity: "CashBookEntry", entityId: entry._id.toString(), after: entry });
-  return sendSuccess(res, "Cash book entry created", entry, 201);
+/**
+ * A cash-book row without a voucher never reaches the ledger, so the cash book and
+ * 1001 Cash in Hand would disagree. Cash is recorded through Bank / Cash → Entry.
+ */
+export const createCashBookEntry = asyncHandler(async () => {
+  throw new ApiError(
+    400,
+    "Record cash transactions in Accounting → Bank / Cash → Entry — each one posts its voucher, so the cash book stays equal to Cash in Hand."
+  );
 });
 
 export const getAccountingSettings = asyncHandler(async (req: Request, res: Response) => {
@@ -4699,6 +4848,21 @@ const bsFieldDateFilter = (
   return {};
 };
 
+/** Refund rows with the student name / admission no. / approver the report columns show. */
+const mapRefundReportRows = <T extends { studentId?: unknown; approvedBy?: string | null }>(rows: T[]) =>
+  rows.map((row) => {
+    const student = row.studentId as
+      | { admissionNumber?: string; user?: { fullName?: string } }
+      | null
+      | undefined;
+    return {
+      ...row,
+      studentName: student?.user?.fullName ?? "—",
+      admissionNumber: student?.admissionNumber ?? "—",
+      approvedByName: row.approvedBy?.trim() || "—"
+    };
+  });
+
 export const generateAccountingReport = asyncHandler(async (req: Request, res: Response) => {
   const reportType = req.params.reportType as AccountingReportType;
   const schoolId = tenantObjectId(req);
@@ -4720,28 +4884,75 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
   let summaryPayload: FinancialSummaryReport | null = null;
 
   switch (reportType) {
-    case "daily-fee-collection": {
-      const filter: Record<string, unknown> = {
-        schoolId,
-        isDeleted: false,
-        ...bsFieldDateFilter("paidDateBs", dateOpts)
-      };
-      data = await FeeCollection.find(filter)
-        .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
-        .sort({ paidDateBs: -1 })
-        .lean();
-      break;
-    }
+    case "daily-fee-collection":
     case "monthly-fee-collection": {
       const filter: Record<string, unknown> = {
         schoolId,
         isDeleted: false,
+        ...REAL_RECEIPT_FILTER,
         ...bsFieldDateFilter("paidDateBs", dateOpts)
       };
-      data = await FeeCollection.find(filter)
-        .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
-        .sort({ paidDateBs: -1 })
-        .lean();
+      // Fee-plan rows created with the student are charges, not money received.
+      const receipts = filterOutOpeningTuitionCharges(
+        (await FeeCollection.find(filter)
+          .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+          .sort({ paidDateBs: -1, receiptNumber: -1 })
+          .lean()) as unknown as Array<Record<string, unknown>>
+      );
+      if (reportType === "daily-fee-collection") {
+        data = receipts;
+        break;
+      }
+      // Monthly report: one row per BS month (the daily report is the receipt-wise list).
+      type MonthRow = {
+        receipts: number;
+        amountPaidNpr: number;
+        discountNpr: number;
+        scholarshipNpr: number;
+        lateFeeNpr: number;
+        securityDepositPaidNpr: number;
+      };
+      const emptyMonth = (): MonthRow => ({
+        receipts: 0,
+        amountPaidNpr: 0,
+        discountNpr: 0,
+        scholarshipNpr: 0,
+        lateFeeNpr: 0,
+        securityDepositPaidNpr: 0
+      });
+      const months = new Map<string, MonthRow>();
+      // A From–To range lists every month in it, including months with no receipts.
+      if (isBsDay(fromDateBs) && isBsDay(toDateBs) && fromDateBs <= toDateBs) {
+        let [year, month] = fromDateBs.split("-").map(Number) as [number, number];
+        const last = toDateBs.slice(0, 7);
+        for (let guard = 0; guard < 120; guard++) {
+          const key = `${year}-${String(month).padStart(2, "0")}`;
+          if (key > last) break;
+          months.set(key, emptyMonth());
+          month = month === 12 ? 1 : month + 1;
+          if (month === 1) year += 1;
+        }
+      }
+      for (const r of receipts) {
+        const month = String(r.paidDateBs ?? "").slice(0, 7);
+        if (!month) continue;
+        const row = months.get(month) ?? emptyMonth();
+        row.receipts += 1;
+        row.amountPaidNpr += Number(r.amountPaidNpr) || 0;
+        row.discountNpr += Number(r.discountNpr) || 0;
+        row.scholarshipNpr += Number(r.scholarshipNpr) || 0;
+        row.lateFeeNpr += Number(r.lateFeeNpr) || 0;
+        row.securityDepositPaidNpr += Number(r.securityDepositPaidNpr) || 0;
+        months.set(month, row);
+      }
+      data = Array.from(months.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([monthKey, row]) => ({
+          monthBs: `${monthKey} ${BS_MONTH_NAMES[Number(monthKey.slice(5, 7)) - 1] ?? ""}`.trim(),
+          ...row,
+          // Fee paid + security deposit (the deposit is shown separately, not as fee).
+          totalReceivedNpr: row.amountPaidNpr + row.securityDepositPaidNpr
+        }));
       break;
     }
     case "pending-fees":
@@ -4804,22 +5015,12 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         status: { $nin: ["PENDING_APPROVAL", "REJECTED"] },
         ...bsFieldDateFilter("dateBs", dateOpts)
       };
-      const refunds = await FeeRefund.find(filter)
-        .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
-        .sort({ dateBs: -1 })
-        .lean();
-      data = refunds.map((row) => {
-        const student = row.studentId as
-          | { admissionNumber?: string; user?: { fullName?: string } }
-          | null
-          | undefined;
-        return {
-          ...row,
-          studentName: student?.user?.fullName ?? "—",
-          admissionNumber: student?.admissionNumber ?? "—",
-          approvedByName: row.approvedBy?.trim() || "—"
-        };
-      });
+      data = mapRefundReportRows(
+        await FeeRefund.find(filter)
+          .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+          .sort({ dateBs: -1 })
+          .lean()
+      );
       break;
     }
     case "journal": {
@@ -4828,7 +5029,51 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         isDeleted: false,
         ...bsFieldDateFilter("dateBs", dateOpts)
       };
-      data = await JournalEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).limit(1000).lean();
+      const vouchers = await JournalEntry.find(filter).sort({ dateBs: 1, voucherNumber: 1, createdAt: 1 }).lean();
+      // Summary: one line per voucher. Detailed (default): voucher heading, its account lines,
+      // and a voucher total; the grand TOTAL adds up the account lines only.
+      if (req.query.view === "summary") {
+        data = vouchers.map((v) => ({
+          dateBs: v.dateBs,
+          voucherNumber: v.voucherNumber,
+          voucherType: v.voucherType,
+          referenceType: v.referenceType,
+          particulars: v.narration,
+          debitNpr: v.totalDebitNpr ?? 0,
+          creditNpr: v.totalCreditNpr ?? 0
+        }));
+        break;
+      }
+      const sourceOf = (v: (typeof vouchers)[number]) =>
+        v.voucherType === "CONTRA"
+          ? "Cash/Bank Transfer"
+          : JOURNAL_SOURCE_LABELS[String(v.referenceType ?? "")] ?? (v.referenceType || "Manual");
+      data = vouchers.flatMap((v) => {
+        const lines = v.lines ?? [];
+        return [
+          {
+            rowKind: "heading",
+            dateBs: v.dateBs,
+            voucherNumber: v.voucherNumber,
+            voucherType: v.voucherType,
+            particulars: v.narration,
+            sourceLabel: sourceOf(v)
+          },
+          ...lines.map((line) => ({
+            accountCode: line.accountCode,
+            accountName: line.accountName,
+            particulars: line.description || "",
+            debitNpr: line.debitNpr ?? 0,
+            creditNpr: line.creditNpr ?? 0
+          })),
+          {
+            rowKind: "subtotal",
+            particulars: `Voucher total — ${v.voucherNumber}`,
+            debitNpr: Math.round(lines.reduce((t, l) => t + (l.debitNpr ?? 0), 0) * 100) / 100,
+            creditNpr: Math.round(lines.reduce((t, l) => t + (l.creditNpr ?? 0), 0) * 100) / 100
+          }
+        ];
+      });
       break;
     }
     case "ledger": {
@@ -4839,27 +5084,14 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       };
       const accountCode =
         typeof req.query.accountCode === "string" ? req.query.accountCode.trim() : "";
-      const entries = await JournalEntry.find(filter).sort({ dateBs: 1, createdAt: 1 }).limit(2000).lean();
-      const lines: Array<Record<string, unknown>> = [];
-      let running = 0;
-      for (const entry of entries) {
-        for (const line of entry.lines ?? []) {
-          if (accountCode && line.accountCode !== accountCode) continue;
-          running += (line.debitNpr ?? 0) - (line.creditNpr ?? 0);
-          lines.push({
-            dateBs: entry.dateBs,
-            voucherNumber: entry.voucherNumber,
-            accountCode: line.accountCode,
-            accountName: line.accountName,
-            narration: line.description || entry.narration,
-            debitNpr: line.debitNpr,
-            creditNpr: line.creditNpr,
-            runningBalanceNpr: running,
-            referenceType: entry.referenceType
-          });
-        }
-      }
-      data = lines.reverse();
+      const range = (filter.dateBs ?? {}) as { $gte?: string; $lte?: string } | string;
+      const fromBs = typeof range === "string" ? range : range.$gte;
+      const toBs = typeof range === "string" ? range : range.$lte;
+      data = await buildGeneralLedger(schoolId, {
+        fromDateBs: fromBs,
+        toDateBs: toBs,
+        accountCode: accountCode || undefined
+      });
       break;
     }
     case "cash-summary": {
@@ -4867,7 +5099,12 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         schoolId,
         ...bsFieldDateFilter("dateBs", dateOpts)
       };
-      data = await CashBookEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).lean();
+      void filter;
+      // From the ledger, so the running balance equals 1001 Cash in Hand
+      data = await buildLedgerCashBook(schoolId, {
+        fromDateBs: isBsDay(fromDateBs) ? fromDateBs : isBsDay(dateBs) ? dateBs : undefined,
+        toDateBs: isBsDay(toDateBs) ? toDateBs : isBsDay(dateBs) ? dateBs : undefined
+      });
       break;
     }
     case "financial-summary": {
@@ -4891,8 +5128,13 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         isBsDay(fromDateBs) || isBsDay(toDateBs)
           ? bsFieldDateFilter("purchaseDateBs", dateOpts)
           : { purchaseDateBs: monthDateFilter(monthBs) };
-      const [fees, income, expenses, purchases, salaries, pendingStudents] = await Promise.all([
-        FeeCollection.find({ schoolId, isDeleted: false, ...feeDateFilter })
+      const usesDayRange = isBsDay(fromDateBs) || isBsDay(toDateBs);
+      // Salary: paid within the day range when one is given, else the month's sheet.
+      const salaryFilter: Record<string, unknown> = usesDayRange
+        ? { schoolId, isDeleted: false, status: "PAID", ...bsFieldDateFilter("paidDateBs", dateOpts) }
+        : { schoolId, isDeleted: false, monthBs, status: "PAID" };
+      const [feeRows, income, expenses, purchases, salaries, pendingStudents, refundRows] = await Promise.all([
+        FeeCollection.find({ schoolId, isDeleted: false, ...REAL_RECEIPT_FILTER, ...feeDateFilter })
           .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
           .sort({ paidDateBs: -1 })
           .lean(),
@@ -4905,14 +5147,25 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         AccountingPurchase.find({ schoolId, isDeleted: false, ...purchaseDateFilter })
           .sort({ purchaseDateBs: -1 })
           .lean(),
-        SalaryPayment.find({ schoolId, monthBs, status: "PAID" })
+        SalaryPayment.find(salaryFilter)
           .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
           .populate("staffId")
           .sort({ monthBs: -1 })
           .lean(),
-        Student.find({ schoolId, feesDueNpr: { $gt: 0 } }).select("feesDueNpr").lean()
+        Student.find({ schoolId, feesDueNpr: { $gt: 0 } }).select("feesDueNpr").lean(),
+        FeeRefund.find({
+          schoolId,
+          isDeleted: false,
+          status: { $nin: ["PENDING_APPROVAL", "REJECTED"] },
+          ...dayDateFilter
+        })
+          .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+          .sort({ dateBs: -1 })
+          .lean()
       ]);
 
+      const fees = filterOutOpeningTuitionCharges(feeRows as unknown as Array<Record<string, unknown>>);
+      const refunds = mapRefundReportRows(refundRows);
       const feeCollectionNpr = sumAmount(fees, "amountPaidNpr");
       const incomeNpr = sumAmount(income, "amountNpr");
       const expenseNpr = sumAmount(expenses, "amountNpr");
@@ -4921,35 +5174,43 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       const purchaseNpr = sumAmount(paidPurchases, "totalAmountNpr");
       const salaryNpr = sumAmount(salaries, "netSalaryNpr");
       const pendingFeesNpr = sumAmount(pendingStudents, "feesDueNpr");
+      const refundNpr = sumAmount(refunds, "amountNpr");
       const inflowNpr = feeCollectionNpr + incomeNpr;
-      const outflowNpr = expenseNpr + purchaseNpr + salaryNpr;
+      const outflowNpr = expenseNpr + purchaseNpr + salaryNpr + refundNpr;
+      const round = (n: number) => Math.round(n * 100) / 100;
 
       const totals = {
-        feeCollectionNpr,
-        incomeNpr,
-        expenseNpr,
-        purchaseNpr,
-        salaryNpr,
-        pendingFeesNpr,
-        netSurplusNpr: inflowNpr - outflowNpr
+        feeCollectionNpr: round(feeCollectionNpr),
+        incomeNpr: round(incomeNpr),
+        expenseNpr: round(expenseNpr),
+        purchaseNpr: round(purchaseNpr),
+        salaryNpr: round(salaryNpr),
+        refundNpr: round(refundNpr),
+        pendingFeesNpr: round(pendingFeesNpr),
+        netSurplusNpr: round(inflowNpr - outflowNpr)
       };
 
       const periodLabel =
-        isBsDay(fromDateBs) || isBsDay(toDateBs)
-          ? `BS ${fromDateBs || "…"} → ${toDateBs || "…"}`
-          : `BS ${monthBs}`;
+        isBsDay(fromDateBs) && isBsDay(toDateBs)
+          ? `BS ${fromDateBs} to ${toDateBs}`
+          : isBsDay(fromDateBs)
+            ? `BS ${fromDateBs} onwards`
+            : isBsDay(toDateBs)
+              ? `Up to BS ${toDateBs}`
+              : `BS month ${monthBs}`;
 
       summaryPayload = {
         reportType: "financial-summary",
         period: { monthBs, label: periodLabel },
         totals,
-        sections: { fees, income, expenses, purchases, salaries },
+        sections: { fees, income, expenses, purchases, salaries, refunds },
         data: buildFinancialSummaryRows(totals, {
           fees: fees.length,
           income: income.length,
           expenses: expenses.length,
-          purchases: purchases.length,
+          purchases: paidPurchases.length,
           salaries: salaries.length,
+          refunds: refunds.length,
           pendingStudents: pendingStudents.length
         })
       };
@@ -4961,12 +5222,10 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
   }
 
   if (req.query.format === "csv") {
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${reportType}.csv"`);
-    if (summaryPayload) {
-      return res.send(buildFinancialSummaryCsv(summaryPayload));
-    }
-    return res.send(buildReportCsv(reportType, Array.isArray(data) ? data : []));
+    const csv = summaryPayload
+      ? buildFinancialSummaryCsv(summaryPayload)
+      : buildReportCsv(reportType, Array.isArray(data) ? data : []);
+    return sendReportCsv(res, csv, reportType, { fromDateBs, toDateBs });
   }
 
   if (summaryPayload) {

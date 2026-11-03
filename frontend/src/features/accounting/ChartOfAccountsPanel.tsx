@@ -3,11 +3,12 @@ import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   chartOfAccountSchema,
+  headerAccountCodes,
   type ChartOfAccountInput,
   type ChartOfAccountRecord,
   type JournalEntryRecord,
 } from "@phit-erp/shared";
-import { Pencil, Plus, Power } from "lucide-react";
+import { Pencil, Plus, Power, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -110,6 +111,22 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/accounting/chart-of-accounts/${id}`)),
+    onSuccess: async () => {
+      toast.success("Ledger deleted");
+      await queryClient.invalidateQueries({ queryKey: ["chart-of-accounts"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  /** Group (header) accounts: others sit under them; never posted to. */
+  const groupCodes = useMemo(
+    () => headerAccountCodes(accountsQuery.data ?? []),
+    [accountsQuery.data],
+  );
+
   /** code -> ledger name, so the Parent column reads "Assets", not "1000". */
   const nameByCode = useMemo(() => {
     const map = new Map<string, string>();
@@ -124,8 +141,7 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
       if (!q) return true;
       return (
         a.code.toLowerCase().includes(q) ||
-        a.name.toLowerCase().includes(q) ||
-        (a.nameNp ?? "").toLowerCase().includes(q)
+        a.name.toLowerCase().includes(q)
       );
     });
   }, [accountsQuery.data, search, typeFilter]);
@@ -246,14 +262,6 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
                   <option value="EXPENSE">Expense</option>
                 </Select>
               </FormField>
-              <FormField label="Name (Nepali)">
-                <Input
-                  value={form.nameNp ?? ""}
-                  onChange={(e) =>
-                    setForm((c) => ({ ...c, nameNp: e.target.value }))
-                  }
-                />
-              </FormField>
               <FormField label="Parent Code">
                 <Input
                   value={form.parentCode ?? ""}
@@ -354,12 +362,17 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
                     <tr key={account._id}>
                       <Td className="font-mono">{account.code}</Td>
                       <Td>
-                        <div className="font-medium">{account.name}</div>
-                        {account.nameNp ? (
-                          <div className="font-nepali text-xs leading-snug text-slate-500">
-                            {account.nameNp}
-                          </div>
-                        ) : null}
+                        <div className="font-medium">
+                          {account.name}
+                          {groupCodes.has(account.code) ? (
+                            <Badge
+                              className="ml-2 bg-slate-100 text-slate-700"
+                              title="Group (header) account — totals the ledgers under it; cannot be posted to"
+                            >
+                              Group
+                            </Badge>
+                          ) : null}
+                        </div>
                       </Td>
                       <Td>{typeLabel[account.accountType] ?? account.accountType}</Td>
                       <Td>
@@ -419,6 +432,30 @@ export const ChartOfAccountsPanel = ({ isAdmin }: { isAdmin: boolean }) => {
                             >
                               <Power className="h-3.5 w-3.5" />
                             </Button>
+                            {!account.isSystem &&
+                            !hasTx &&
+                            !(accountsQuery.data ?? []).some(
+                              (a) => a.parentCode === account.code,
+                            ) ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-rose-700"
+                                disabled={remove.isPending}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Delete ledger ${account.code} — ${account.name}? It has no transactions.`,
+                                    )
+                                  ) {
+                                    remove.mutate(account._id);
+                                  }
+                                }}
+                                title="Delete unused ledger"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : null}
                           </div>
                         </Td>
                       ) : null}

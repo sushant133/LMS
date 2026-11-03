@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import fs from "fs";
+import { Types } from "mongoose";
 import {
   chartOfAccountSchema,
   feeRefundSchema,
@@ -9,9 +10,14 @@ import {
   journalEntrySchema,
   normalizeUserRole,
   vendorSchema,
+  headerAccountCodes,
+  SYSTEM_ACCOUNT_CODES,
+  buildReportCsv,
   type AccountingReportType
 } from "@phit-erp/shared";
+import { BankAccount } from "../models/BankAccount.js";
 import { ChartOfAccount } from "../models/ChartOfAccount.js";
+import { Budget } from "../models/Budget.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeRefund } from "../models/FeeRefund.js";
 import { FiscalYear } from "../models/FiscalYear.js";
@@ -32,13 +38,22 @@ import { ApiError } from "../utils/apiError.js";
 import { getUserSecondaryRoles } from "../utils/moduleAccessService.js";
 import { recordAudit } from "../utils/audit.js";
 import { sendSuccess } from "../utils/response.js";
+import { sendReportCsv } from "../utils/reportCsv.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import { compareBsDates, ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getDefaultFiscalYearDates, getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
-import { filterOutOpeningTuitionCharges } from "../utils/accountingCalculations.js";
 import {
+  buildStudentFeePosition,
+  filterOutOpeningTuitionCharges,
+  REAL_RECEIPT_FILTER,
+  receiptAdvanceTotalNpr
+} from "../utils/accountingCalculations.js";
+import { StudentScholarshipAward } from "../models/StudentScholarshipAward.js";
+import {
+  AUTO_POSTING_ACCOUNT_CODES,
   ensureDefaultChartOfAccounts,
+  refreshAccountGroupFlags,
   postFeeRefundJournal,
   postJournalEntry,
   reverseJournalEntryById
@@ -46,7 +61,9 @@ import {
 import { assertStudentLoginActive } from "../utils/studentLoginAccess.js";
 import { nextVoucherNumberForDate } from "../utils/voucherNumbering.js";
 import {
+  aggregateDirectExpenseByAccount,
   aggregateJournalBalances,
+  aggregateTrialBalanceBalances,
   buildAccountLedger,
   buildBalanceSheet,
   buildCashFlowStatement,
@@ -75,13 +92,25 @@ export const listChartOfAccounts = asyncHandler(async (req: Request, res: Respon
   return sendSuccess(res, "Chart of accounts fetched", accounts);
 });
 
+/** A built-in posting ledger cannot become a group (it would stop automatic postings). */
+const assertParentCanHoldLedgers = (parentCode?: string | null) => {
+  if (parentCode && AUTO_POSTING_ACCOUNT_CODES.has(parentCode)) {
+    throw new ApiError(
+      400,
+      `${parentCode} is a built-in ledger the system posts to automatically — it cannot have ledgers under it. Add the new ledger under its group (e.g. ${parentCode.charAt(0)}000) instead.`
+    );
+  }
+};
+
 export const createChartOfAccount = asyncHandler(async (req: Request, res: Response) => {
   const payload = chartOfAccountSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
+  assertParentCanHoldLedgers(payload.parentCode);
   const existing = await ChartOfAccount.findOne({ schoolId, code: payload.code });
   if (existing) throw new ApiError(409, "Account code already exists");
 
   const account = await ChartOfAccount.create({ ...payload, schoolId, isSystem: false });
+  await refreshAccountGroupFlags(schoolId);
   await recordAudit(req, { action: "accounting.coa.create", entity: "ChartOfAccount", entityId: account._id.toString(), after: account });
   return sendSuccess(res, "Account created", account, 201);
 });
@@ -91,12 +120,49 @@ export const updateChartOfAccount = asyncHandler(async (req: Request, res: Respo
   const account = await ChartOfAccount.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!account) throw new ApiError(404, "Account not found");
   if (account.isSystem && payload.code) throw new ApiError(400, "Cannot change code of system account");
+  if (payload.parentCode !== undefined && payload.parentCode !== account.parentCode) {
+    assertParentCanHoldLedgers(payload.parentCode);
+  }
 
   const before = account.toObject();
   Object.assign(account, payload);
   await account.save();
+  await refreshAccountGroupFlags(account.schoolId);
   await recordAudit(req, { action: "accounting.coa.update", entity: "ChartOfAccount", entityId: account._id.toString(), before, after: account });
   return sendSuccess(res, "Account updated", account);
+});
+
+/**
+ * Delete a ledger that was never used. System ledgers (re-created automatically), group
+ * accounts with ledgers under them, and any ledger with postings or a budget line can only
+ * be deactivated — deleting them would orphan history.
+ */
+export const deleteChartOfAccount = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const account = await ChartOfAccount.findOne({ _id: req.params.id, schoolId });
+  if (!account) throw new ApiError(404, "Account not found");
+  if (account.isSystem) {
+    throw new ApiError(400, "Built-in ledgers cannot be deleted — deactivate it instead");
+  }
+  const [children, postings, budgets] = await Promise.all([
+    ChartOfAccount.countDocuments({ schoolId, parentCode: account.code }),
+    JournalEntry.countDocuments({ schoolId, "lines.accountCode": account.code }),
+    Budget.countDocuments({ schoolId, isDeleted: false, "lines.accountCode": account.code })
+  ]);
+  if (children > 0) throw new ApiError(400, "This group has ledgers under it — move or delete them first");
+  if (postings > 0) throw new ApiError(400, "This ledger has transactions — deactivate it instead");
+  if (budgets > 0) throw new ApiError(400, "This ledger is in a budget — remove it from the budget first");
+
+  const before = account.toObject();
+  await account.deleteOne();
+  await refreshAccountGroupFlags(schoolId);
+  await recordAudit(req, {
+    action: "accounting.coa.delete",
+    entity: "ChartOfAccount",
+    entityId: account._id.toString(),
+    before
+  });
+  return sendSuccess(res, "Ledger deleted");
 });
 
 export const seedChartOfAccounts = asyncHandler(async (req: Request, res: Response) => {
@@ -108,6 +174,15 @@ export const seedChartOfAccounts = asyncHandler(async (req: Request, res: Respon
 
 export const listJournalEntries = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = { ...withTenantScope(req), isDeleted: false };
+  // Journal Entries section: Direct / Indirect Expense vouchers and journals made there.
+  // Fee receipts, security deposits, other receipts, salary, refunds and cash ↔ bank
+  // transfers stay in the ledger (balances need them) but are listed in their own sections.
+  if (req.query.view === "journal") {
+    filter.$or = [
+      { referenceType: { $in: ["AccountingPurchase", "AccountingExpense", "GoshwaraVoucher"] } },
+      { referenceType: { $in: ["Manual", null] }, voucherType: { $ne: "CONTRA" } }
+    ];
+  }
   if (typeof req.query.fiscalYearBs === "string") filter.fiscalYearBs = req.query.fiscalYearBs;
   if (typeof req.query.fromDateBs === "string") filter.dateBs = { $gte: req.query.fromDateBs };
   if (typeof req.query.toDateBs === "string") {
@@ -144,10 +219,62 @@ export const listJournalEntries = asyncHandler(async (req: Request, res: Respons
   });
 });
 
+/**
+ * Rules for journals typed by hand:
+ * - no group (header) accounts — they only total their children;
+ * - no Student Security Deposit — deposits come from fee receipts so the Security
+ *   Deposits register and the ledger stay equal;
+ * - a Bank line names its bank account, so it reaches that bank's balance and
+ *   Bank Reconciliation instead of sitting as "unlinked bank".
+ */
+const assertManualJournalLines = async (
+  schoolId: import("mongoose").Types.ObjectId,
+  lines: Array<{ accountCode: string; bankAccountId?: string | null }>,
+  entryBankAccountId?: string | null
+) => {
+  const [accounts, banks] = await Promise.all([
+    ChartOfAccount.find({ schoolId }).select("code name parentCode isActive").lean(),
+    BankAccount.find({ schoolId }).select("_id isActive").lean()
+  ]);
+  const byCode = new Map(accounts.map((a) => [a.code, a]));
+  const headers = headerAccountCodes(accounts);
+  for (const [index, line] of lines.entries()) {
+    const label = `Line ${index + 1}`;
+    const account = byCode.get(line.accountCode);
+    if (!account) throw new ApiError(400, `${label}: account ${line.accountCode} is not in the chart of accounts`);
+    if (headers.has(account.code)) {
+      throw new ApiError(
+        400,
+        `${label}: ${account.code} ${account.name} is a group account — choose an account under it`
+      );
+    }
+    if (account.isActive === false) {
+      throw new ApiError(400, `${label}: ${account.code} ${account.name} is deactivated`);
+    }
+    if (account.code === SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY) {
+      throw new ApiError(
+        400,
+        `${label}: record security deposits from Student Fee Records / Security Deposits so the deposit register matches the ledger`
+      );
+    }
+    if (account.code === SYSTEM_ACCOUNT_CODES.BANK) {
+      const bankId = line.bankAccountId || entryBankAccountId;
+      if (!bankId) {
+        if (banks.some((b) => b.isActive !== false)) {
+          throw new ApiError(400, `${label}: select the bank account for this Bank line`);
+        }
+      } else if (!banks.some((b) => String(b._id) === String(bankId))) {
+        throw new ApiError(400, `${label}: bank account not found`);
+      }
+    }
+  }
+};
+
 export const createJournalEntry = asyncHandler(async (req: Request, res: Response) => {
   const payload = journalEntrySchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
   const schoolId = tenantObjectId(req);
+  await assertManualJournalLines(schoolId, payload.lines, payload.bankAccountId);
 
   const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
   await assertFiscalPeriodOpen(schoolId, payload.dateBs);
@@ -269,7 +396,7 @@ const resolveOfficeName = async (schoolId: import("mongoose").Types.ObjectId): P
 const sendGoshwaraPdfResponse = async (
   res: Response,
   pdfData: import("../utils/templates/goshwaraVoucherTemplate.js").ExactGoshwaraVoucherPdfData,
-  schoolInfo: { name?: string; nameNp?: string; logo?: string },
+  schoolInfo: { name?: string; nameNp?: string; logo?: string; address?: string; pan?: string },
   filename: string,
   format?: string
 ) => {
@@ -386,9 +513,13 @@ export const downloadGoshwaraVoucher = asyncHandler(async (req: Request, res: Re
           addressLine: branding.collegeAddressNp
         });
 
+  const accountingSettings = await AccountingSettings.findOne({ schoolId }).select("panNumber").lean();
   const schoolInfo = {
     name: branding.schoolName,
     nameNp: branding.schoolNameNp,
+    // Journal Vouchers print in English with the college's English address and PAN
+    address: branding.address,
+    pan: accountingSettings?.panNumber ?? undefined,
     logo: branding.logoDataUri
   };
 
@@ -404,6 +535,95 @@ export const downloadGoshwaraVoucher = asyncHandler(async (req: Request, res: Re
 });
 
 /** List Goshwara voucher records */
+/**
+ * Journal Voucher (AGF No. 10) for a Direct Expense (purchase) or Indirect Expense:
+ * the expense's own ledger voucher, with the details entered on the expense form.
+ * Query: ?format=html for printable HTML, default PDF.
+ */
+const downloadExpenseJournalVoucher = (kind: "AccountingExpense" | "AccountingPurchase") =>
+  asyncHandler(async (req: Request, res: Response) => {
+    const schoolId = tenantObjectId(req);
+    const record =
+      kind === "AccountingExpense"
+        ? await AccountingExpense.findOne({ _id: req.params.id, schoolId }).lean()
+        : await AccountingPurchase.findOne({ _id: req.params.id, schoolId }).lean();
+    if (!record) throw new ApiError(404, kind === "AccountingExpense" ? "Indirect expense not found" : "Purchase not found");
+
+    // The expense voucher itself (a purchase paid later also has a payment voucher)
+    const entry = await JournalEntry.findOne({
+      schoolId,
+      referenceType: kind,
+      referenceId: record._id,
+      isReversal: false,
+      isDeleted: false
+    })
+      .sort({ createdAt: 1 })
+      .lean();
+    if (!entry) {
+      throw new ApiError(
+        404,
+        kind === "AccountingPurchase"
+          ? "No journal voucher has been posted for this purchase"
+          : "No journal voucher has been posted for this indirect expense"
+      );
+    }
+
+    const details = (record.voucherDetails ?? {}) as Record<string, string | undefined>;
+    const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+    const isPurchase = kind === "AccountingPurchase";
+    const purchase = record as { invoiceNumber?: string; vendor?: string };
+    const expense = record as { vendor?: string; approvedBy?: string };
+
+    const pdfData = buildExactPdfDataFromJournal({
+      entry: {
+        voucherNumber: text(record.voucherNumber) || entry.voucherNumber,
+        dateBs: entry.dateBs,
+        narration: entry.narration,
+        lines: entry.lines.map((line) => ({
+          accountCode: line.accountCode,
+          accountName: line.accountName,
+          debitNpr: line.debitNpr ?? 0,
+          creditNpr: line.creditNpr ?? 0,
+          description: line.description ?? undefined
+        })),
+        totalDebitNpr: entry.totalDebitNpr,
+        totalCreditNpr: entry.totalCreditNpr
+      }
+    });
+
+    pdfData.particulars = text(details.narration) || entry.narration;
+    pdfData.receiptNo = text(details.receiptNo) || (isPurchase ? text(purchase.invoiceNumber) : "");
+    pdfData.chequeNo = text(details.chequeNo);
+    pdfData.chequeDate = text(details.chequeDateBs);
+    pdfData.chequeAmount = text(details.chequeNo) ? `Rs. ${entry.totalDebitNpr.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "";
+    pdfData.presenterName = text(details.preparedByName);
+    pdfData.presenterRank = text(details.preparedByDesignation);
+    pdfData.presenterDate = entry.dateBs;
+    pdfData.checkedByName = text(details.checkedByName);
+    pdfData.approvedByName = text(details.approvedByName) || (!isPurchase ? text(expense.approvedBy) : "");
+    pdfData.chequePresenter = text(details.receivedByName) || text(isPurchase ? purchase.vendor : expense.vendor);
+    pdfData.chequeRank = text(details.receivedByDesignation);
+
+    const branding = await resolveOfficeName(schoolId);
+    const accountingSettings = await AccountingSettings.findOne({ schoolId }).select("panNumber").lean();
+    await sendGoshwaraPdfResponse(
+      res,
+      pdfData,
+      {
+        name: branding.schoolName,
+        nameNp: branding.schoolNameNp,
+        address: branding.address,
+        pan: accountingSettings?.panNumber ?? undefined,
+        logo: branding.logoDataUri
+      },
+      `journal-voucher-${(text(record.voucherNumber) || entry.voucherNumber).replace(/[^\w.-]+/g, "_")}`,
+      String(req.query.format ?? "")
+    );
+  });
+
+export const downloadIndirectExpenseJournalVoucher = downloadExpenseJournalVoucher("AccountingExpense");
+export const downloadDirectExpenseJournalVoucher = downloadExpenseJournalVoucher("AccountingPurchase");
+
 export const listGoshwaraVouchers = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = { ...withTenantScope(req), isDeleted: false };
   if (typeof req.query.fiscalYearBs === "string") filter.fiscalYearBs = req.query.fiscalYearBs;
@@ -431,6 +651,7 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
   const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
   await assertFiscalPeriodOpen(schoolId, payload.dateBs);
   await ensureDefaultChartOfAccounts(schoolId);
+  await assertManualJournalLines(schoolId, payload.lines);
 
   /*
    * Nepal Government header is never typed per voucher — it is the institution's
@@ -443,7 +664,6 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
     (payload.govOfficeName || "").trim() ||
     (payload.instituteName || "").trim();
   const addressLine = govHeader.collegeAddressNp || (payload.addressLine || "").trim();
-  const manualVoucherNo = (payload.voucherNo || "").trim();
 
   // Resolve account names from COA when missing
   const codes = [...new Set(payload.lines.map((l) => l.accountCode))];
@@ -456,7 +676,10 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
     debitNpr: line.debitNpr ?? 0,
     creditNpr: line.creditNpr ?? 0,
     // Per-line particular (reason) — required for PDF विवरण column
-    description: (line.description || "").trim() || payload.particulars
+    description: (line.description || "").trim() || payload.particulars,
+    ...(line.accountCode === SYSTEM_ACCOUNT_CODES.BANK && line.bankAccountId
+      ? { bankAccountId: line.bankAccountId }
+      : {})
   }));
 
   const totalDebitNpr = lines.reduce((s, l) => s + l.debitNpr, 0);
@@ -501,7 +724,7 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
         narration: payload.particulars,
         lines,
         voucherType: payload.voucherType,
-        voucherNumber: manualVoucherNo || undefined,
+
         referenceType: "GoshwaraVoucher",
         session
       });
@@ -665,9 +888,13 @@ export const downloadGoshwaraVoucherById = asyncHandler(async (req: Request, res
         amountInWords: voucher.amountInWords
       });
 
+  const accountingSettings = await AccountingSettings.findOne({ schoolId }).select("panNumber").lean();
   const schoolInfo = {
     name: branding.schoolName,
     nameNp: branding.schoolNameNp,
+    // Journal Vouchers print in English with the college's English address and PAN
+    address: branding.address,
+    pan: accountingSettings?.panNumber ?? undefined,
     logo: branding.logoDataUri
   };
 
@@ -813,7 +1040,7 @@ const applyApprovedFeeRefund = async (
 
   await recordCashEntry(req, {
     dateBs: refund.dateBs,
-    entryType: "DEBIT",
+    direction: "PAYMENT",
     category:
       refundType === "DEPOSIT_REFUND" ? "Security Deposit Refund" : "Fee Refund",
     description: `${refundType === "DEPOSIT_REFUND" ? "Deposit refund" : "Refund"} ${refund.refundNumber}`,
@@ -1117,17 +1344,26 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
   const accountCode = typeof req.query.accountCode === "string" ? req.query.accountCode : undefined;
   const batchId = typeof req.query.batchId === "string" ? req.query.batchId : undefined;
 
+  // ?format=csv downloads the rows the on-screen table shows (same serializer as /reports/:type).
+  const respond = (message: string, payload: { reportType: AccountingReportType; data: unknown; summary?: unknown }) => {
+    if (req.query.format !== "csv") return sendSuccess(res, message, payload);
+    const rows = Array.isArray(payload.data)
+      ? payload.data
+      : Object.values((payload.data ?? {}) as Record<string, unknown>).flat();
+    return sendReportCsv(res, buildReportCsv(reportType, rows), reportType, { fromDateBs, toDateBs });
+  };
+
   switch (reportType) {
     case "trial-balance": {
-      // Pre-closing trial balance: closing vouchers would zero the income/expense columns.
-      const balances = await aggregateJournalBalances(schoolId, {
+      // Pre-closing trial balance: asset/liability/equity as at the To date, income and
+      // expense for the period, earlier surplus brought forward.
+      const balances = await aggregateTrialBalanceBalances(schoolId, {
         fiscalYearBs,
         fromDateBs,
-        toDateBs,
-        excludeClosingEntries: true
+        toDateBs
       });
       const trialBalance = buildTrialBalanceReport(balances);
-      return sendSuccess(res, "Trial balance generated", {
+      return respond("Trial balance generated", {
         reportType,
         data: trialBalance.rows,
         summary: {
@@ -1143,9 +1379,9 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
       // up to `toDateBs`. Scoping it to one fiscal year would drop every prior year's
       // assets and liabilities and could never balance. Closing vouchers are included so
       // closed years report their surplus inside Accumulated Fund instead of twice.
-      const balances = await aggregateJournalBalances(schoolId, { toDateBs });
+      const balances = await aggregateJournalBalances(schoolId, { toDateBs, includeBankOpening: true });
       const sheet = buildBalanceSheet(balances);
-      return sendSuccess(res, "Balance sheet generated", {
+      return respond("Balance sheet generated", {
         reportType,
         data: flattenBalanceSheet(sheet),
         summary: {
@@ -1159,26 +1395,27 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
       });
     }
     case "income-expenditure": {
-      const balances = await aggregateJournalBalances(schoolId, {
-        fiscalYearBs,
-        fromDateBs,
-        toDateBs,
-        excludeClosingEntries: true
-      });
-      const statement = buildIncomeExpenditure(balances);
-      return sendSuccess(res, "Income & expenditure generated", {
+      const scope = { fiscalYearBs, fromDateBs, toDateBs, excludeClosingEntries: true };
+      const [balances, directByAccount] = await Promise.all([
+        aggregateJournalBalances(schoolId, scope),
+        aggregateDirectExpenseByAccount(schoolId, scope)
+      ]);
+      const statement = buildIncomeExpenditure(balances, directByAccount);
+      return respond("Income & expenditure generated", {
         reportType,
         data: flattenIncomeExpenditure(statement),
         summary: {
           totalIncomeNpr: statement.totalIncomeNpr,
           totalExpenseNpr: statement.totalExpenseNpr,
+          directExpenseNpr: statement.directExpenseNpr,
+          indirectExpenseNpr: statement.indirectExpenseNpr,
           netSurplusNpr: statement.netSurplusNpr
         }
       });
     }
     case "bank-book": {
       const data = await buildAccountLedger(schoolId, "1101", { fromDateBs, toDateBs });
-      return sendSuccess(res, "Bank book generated", { reportType, data });
+      return respond("Bank book generated", { reportType, data });
     }
     case "day-book": {
       const filter: Record<string, unknown> = { schoolId, isDeleted: false };
@@ -1187,8 +1424,11 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
         if (fromDateBs) (filter.dateBs as Record<string, string>).$gte = fromDateBs;
         if (toDateBs) (filter.dateBs as Record<string, string>).$lte = toDateBs;
       }
-      const data = await JournalEntry.find(filter).sort({ dateBs: 1, createdAt: 1 }).limit(500);
-      return sendSuccess(res, "Day book generated", { reportType, data });
+      const data = await JournalEntry.find(filter)
+        .select("-lines")
+        .sort({ dateBs: 1, voucherNumber: 1, createdAt: 1 })
+        .lean(); // every voucher in the range: no row cap (screen and exports show all)
+      return respond("Day book generated", { reportType, data });
     }
     case "student-ledger":
     case "student-due": {
@@ -1196,8 +1436,14 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
       const college = isCollege(institutionType);
       const studentFilter: Record<string, unknown> = { schoolId };
       if (batchId) studentFilter.batchId = batchId;
+      // Student Ledger for one student (detailed transactions)
+      const ledgerStudentId =
+        reportType === "student-ledger" && typeof req.query.studentId === "string" && Types.ObjectId.isValid(req.query.studentId)
+          ? req.query.studentId
+          : undefined;
+      if (ledgerStudentId) studentFilter._id = new Types.ObjectId(ledgerStudentId);
 
-      const [students, collections, refunds, batches, years, classes, sections] = await Promise.all([
+      const [students, collections, refunds, batches, years, classes, sections, awards] = await Promise.all([
         Student.find(studentFilter).populate("user", "-password").sort({ rollNumber: 1 }).lean(),
         FeeCollection.find({ schoolId, isDeleted: false }).lean(),
         FeeRefund.find({
@@ -1208,21 +1454,31 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
         college ? Batch.find({ schoolId }).lean() : [],
         college ? Year.find({ schoolId }).lean() : [],
         college ? [] : SchoolClass.find({ schoolId }).lean(),
-        college ? [] : Section.find({ schoolId }).lean()
+        college ? [] : Section.find({ schoolId }).lean(),
+        StudentScholarshipAward.find({ schoolId, isDeleted: false, status: { $in: ["ACTIVE", "APPLIED"] } }).lean()
       ]);
 
       const primaryMap = new Map((college ? batches : classes).map((g) => [g._id.toString(), g.name]));
       const secondaryMap = new Map((college ? years : sections).map((g) => [g._id.toString(), g.name]));
 
+      // As at the To date: receipts after it have not happened yet. The position is the same
+      // calculation Student Fee Records and Receivables Aging use, so all three agree.
+      const afterTo = (c: { paidDateBs?: string | null }) => Boolean(toDateBs && String(c.paidDateBs ?? "") > toDateBs);
       const data = students.map((student) => {
-        const studentCollections = collections.filter((c) => c.studentId.toString() === student._id.toString());
-        const studentRefunds = refunds.filter((r) => r.studentId.toString() === student._id.toString());
-        const totalPaid = studentCollections.reduce((sum, c) => sum + c.amountPaidNpr, 0);
-        const totalDiscount = studentCollections.reduce((sum, c) => sum + (c.discountNpr ?? 0), 0);
-        const totalScholarship = studentCollections.reduce((sum, c) => sum + (c.scholarshipNpr ?? 0), 0);
+        const sid = student._id.toString();
+        const studentCollections = collections.filter((c) => c.studentId.toString() === sid && !afterTo(c));
+        const studentRefunds = refunds.filter((r) => r.studentId.toString() === sid);
+        const position = buildStudentFeePosition(
+          studentCollections as unknown as Array<Record<string, unknown>>,
+          awards.filter((a) => String(a.studentId) === sid) as unknown as Array<Record<string, unknown>>,
+          {
+            1: Math.max(0, Number(student.year1FeeNpr) || 0),
+            2: Math.max(0, Number(student.year2FeeNpr) || 0),
+            3: Math.max(0, Number(student.year3FeeNpr) || 0)
+          }
+        );
         const totalFine = studentCollections.reduce((sum, c) => sum + (c.lateFeeNpr ?? 0), 0);
         const totalRefunds = studentRefunds.reduce((sum, r) => sum + r.amountNpr, 0);
-        const advanceBalance = studentCollections.reduce((sum, c) => sum + (c.advancePaymentNpr ?? 0), 0);
 
         const primaryId = college ? student.batchId?.toString() : student.classId?.toString();
         const secondaryId = college ? student.yearId?.toString() : student.sectionId?.toString();
@@ -1235,60 +1491,231 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
           batchName: primaryId ? (primaryMap.get(primaryId) ?? "") : "",
           yearName: secondaryId ? (secondaryMap.get(secondaryId) ?? "") : "",
           guardianName: student.guardianName,
-          scholarshipStatus: totalScholarship > 0 ? "Scholarship Applied" : "None",
+          scholarshipStatus: position.totals.scholarshipNpr > 0 ? "Scholarship Applied" : "None",
           status: "Active",
-          totalPayableNpr: totalPaid + (student.feesDueNpr ?? 0) + totalDiscount + totalScholarship,
-          totalPaidNpr: totalPaid,
-          outstandingBalanceNpr: student.feesDueNpr ?? 0,
-          totalDiscountNpr: totalDiscount,
-          totalScholarshipNpr: totalScholarship,
+          totalPayableNpr: position.totals.payableNpr,
+          totalPaidNpr: position.totals.paidNpr,
+          outstandingBalanceNpr: position.totals.outstandingNpr,
+          totalDiscountNpr: position.totals.discountNpr,
+          totalScholarshipNpr: position.totals.scholarshipNpr,
           totalFineNpr: totalFine,
-          advanceBalanceNpr: advanceBalance,
+          advanceBalanceNpr: position.totals.advanceNpr,
           totalRefundsNpr: totalRefunds,
+          refunds: studentRefunds,
           collections:
             reportType === "student-ledger"
-              ? filterOutOpeningTuitionCharges(
-                  studentCollections as unknown as Array<Record<string, unknown>>
-                )
+              ? (studentCollections as unknown as Array<Record<string, unknown>>)
               : undefined
         };
       });
 
-      const filtered = reportType === "student-due" ? data.filter((s) => s.outstandingBalanceNpr > 0) : data;
-      return sendSuccess(res, "Student ledger generated", { reportType, data: filtered });
+      if (reportType === "student-due") {
+        return respond("Student fee summary generated", {
+          reportType,
+          data: data.filter((s) => s.outstandingBalanceNpr > 0).map(({ refunds: _refunds, ...row }) => row)
+        });
+      }
+
+      // Student Ledger. Without a student: one line per student (fee charged, paid, discount,
+      // scholarship, fine, advance, refunds, balance due). With ?studentId: that student's
+      // transactions — fee charged, then each receipt — with a running balance. Balance is as
+      // at the To date; dates before From (if sent) roll into the opening balance.
+      const round = (n: number) => Math.round(n * 100) / 100;
+      const sumOf = (list: Array<Record<string, unknown>>, key: string) =>
+        round(list.reduce((t, row) => t + (Number(row[key]) || 0), 0));
+      if (!ledgerStudentId) {
+        const rows: Array<Record<string, unknown>> = data
+          .filter((s) => s.totalPayableNpr || s.totalPaidNpr || s.totalRefundsNpr)
+          .map((s) => ({
+            studentId: s.studentId,
+            refNo: s.admissionNumber,
+            particulars: `${s.fullName}${s.batchName ? ` · ${s.batchName}` : ""}${s.yearName ? ` / ${s.yearName}` : ""}`,
+            debitNpr: s.totalPayableNpr,
+            creditNpr: s.totalPaidNpr,
+            discountNpr: s.totalDiscountNpr,
+            scholarshipNpr: s.totalScholarshipNpr,
+            fineNpr: s.totalFineNpr,
+            advanceNpr: s.advanceBalanceNpr,
+            refundNpr: s.totalRefundsNpr,
+            balanceNpr: s.outstandingBalanceNpr
+          }));
+        if (rows.length) {
+          rows.push({
+            rowKind: "total",
+            particulars: `TOTAL (${rows.length} students)`,
+            ...Object.fromEntries(
+              ["debitNpr", "creditNpr", "discountNpr", "scholarshipNpr", "fineNpr", "advanceNpr", "refundNpr", "balanceNpr"].map(
+                (key) => [key, sumOf(rows, key)]
+              )
+            )
+          });
+        }
+        return respond("Student ledger generated", { reportType, data: rows });
+      }
+
+      const rows: Array<Record<string, unknown>> = [];
+      for (const s of data) {
+        const receipts = filterOutOpeningTuitionCharges(
+          (s.collections ?? []) as Array<Record<string, unknown>>
+        ).sort((a, b) => String(a.paidDateBs).localeCompare(String(b.paidDateBs)));
+        const credit = (r: Record<string, unknown>) =>
+          (Number(r.amountPaidNpr) || 0) + (Number(r.discountNpr) || 0) + (Number(r.scholarshipNpr) || 0);
+        const before = fromDateBs ? receipts.filter((r) => String(r.paidDateBs) < fromDateBs) : [];
+        const inRange = receipts.filter(
+          (r) =>
+            (!fromDateBs || String(r.paidDateBs) >= fromDateBs) && (!toDateBs || String(r.paidDateBs) <= toDateBs)
+        );
+
+        rows.push({
+          rowKind: "heading",
+          particulars: `${s.fullName} — Adm ${s.admissionNumber}${s.batchName ? ` · ${s.batchName}` : ""}${s.yearName ? ` / ${s.yearName}` : ""}`
+        });
+        let balance = round(s.totalPayableNpr - before.reduce((t, r) => t + credit(r), 0));
+        rows.push({
+          particulars: fromDateBs ? "Opening balance (fee charged less earlier receipts)" : "Total fee charged (fee plan)",
+          debitNpr: balance,
+          balanceNpr: balance
+        });
+        const lines: Array<Record<string, unknown>> = [];
+        for (const r of inRange) {
+          balance = round(balance - credit(r));
+          const deposit = Number(r.securityDepositPaidNpr) || 0;
+          lines.push({
+            dateBs: r.paidDateBs,
+            refNo: r.receiptNumber,
+            particulars: [
+              `Fee received${Number(r.programYear) ? ` — Year ${r.programYear}` : ""}`,
+              ...(deposit > 0 ? [`+ security deposit ${deposit.toLocaleString("en-IN")} (held separately)`] : [])
+            ].join("; "),
+            creditNpr: Number(r.amountPaidNpr) || 0,
+            discountNpr: Number(r.discountNpr) || 0,
+            scholarshipNpr: Number(r.scholarshipNpr) || 0,
+            fineNpr: Number(r.lateFeeNpr) || 0,
+            advanceNpr: receiptAdvanceTotalNpr(r),
+            balanceNpr: balance
+          });
+        }
+        // Scholarship awards (merit waivers) not written on any receipt
+        const receiptScholarship = receipts.reduce((t, r) => t + (Number(r.scholarshipNpr) || 0), 0);
+        const awardCredit = round(s.totalScholarshipNpr - receiptScholarship);
+        if (awardCredit > 0.004) {
+          balance = round(balance - awardCredit);
+          lines.push({ particulars: "Scholarship award (fee waiver)", scholarshipNpr: awardCredit, balanceNpr: balance });
+        }
+        // Refunds are paid out of the college: shown, but not part of the fee balance.
+        for (const refund of s.refunds) {
+          if (toDateBs && String(refund.dateBs ?? "") > toDateBs) continue;
+          lines.push({
+            dateBs: refund.dateBs,
+            refNo: refund.refundNumber,
+            particulars: `Refund paid${refund.reason ? ` — ${refund.reason}` : ""} (not in fee balance)`,
+            refundNpr: Number(refund.amountNpr) || 0,
+            balanceNpr: balance
+          });
+        }
+        rows.push(...lines);
+        rows.push({
+          rowKind: "total",
+          particulars:
+            balance < 0
+              ? `Advance paid (credit balance) — NPR ${Math.abs(balance).toLocaleString("en-IN")}`
+              : toDateBs
+                ? `Balance due as at ${toDateBs}`
+                : "Balance due",
+          debitNpr: rows.find((row) => row.debitNpr !== undefined && !row.rowKind)?.debitNpr,
+          ...Object.fromEntries(
+            ["creditNpr", "discountNpr", "scholarshipNpr", "fineNpr", "advanceNpr", "refundNpr"].map((key) => [key, sumOf(lines, key)])
+          ),
+          balanceNpr: balance
+        });
+      }
+      return respond("Student ledger generated", { reportType, data: rows });
     }
     case "scholarship-report": {
-      const filter: Record<string, unknown> = { schoolId, scholarshipNpr: { $gt: 0 }, isDeleted: false };
+      const filter: Record<string, unknown> = { schoolId, scholarshipNpr: { $gt: 0 }, isDeleted: false, ...REAL_RECEIPT_FILTER };
       if (fromDateBs || toDateBs) {
         filter.paidDateBs = {};
         if (fromDateBs) (filter.paidDateBs as Record<string, string>).$gte = fromDateBs;
         if (toDateBs) (filter.paidDateBs as Record<string, string>).$lte = toDateBs;
       }
-      const data = await FeeCollection.find(filter)
-        .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
-        .sort({ paidDateBs: -1 })
-        .lean();
-      return sendSuccess(res, "Scholarship report generated", { reportType, data });
+      const data = filterOutOpeningTuitionCharges(
+        (await FeeCollection.find(filter)
+          .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+          .sort({ paidDateBs: -1 })
+          .lean()) as unknown as Array<Record<string, unknown>>
+      );
+      return respond("Scholarship report generated", { reportType, data });
     }
     case "fee-collection-summary": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false, ...REAL_RECEIPT_FILTER };
       if (fromDateBs || toDateBs) {
         filter.paidDateBs = {};
         if (fromDateBs) (filter.paidDateBs as Record<string, string>).$gte = fromDateBs;
         if (toDateBs) (filter.paidDateBs as Record<string, string>).$lte = toDateBs;
       }
-      const collections = await FeeCollection.find(filter).lean();
-      const byFeeType = collections.reduce<Record<string, { count: number; totalNpr: number }>>((acc, c) => {
-        for (const item of c.feeBreakdown ?? [{ feeType: "OTHER", amountNpr: c.amountPaidNpr }]) {
-          const key = item.feeType ?? "OTHER";
-          acc[key] = acc[key] ?? { count: 0, totalNpr: 0 };
-          acc[key].count += 1;
-          acc[key].totalNpr += item.amountNpr;
+      const collections = filterOutOpeningTuitionCharges(
+        (await FeeCollection.find(filter).lean()) as unknown as Array<Record<string, unknown>>
+      );
+      // Money actually received, split across the receipt's fee lines in proportion to
+      // their charges (the breakdown holds charges, not the amount paid). Security
+      // deposits are reported on their own line.
+      const byFeeType = new Map<string, { count: number; totalNpr: number }>();
+      const add = (key: string, amount: number) => {
+        if (amount <= 0) return;
+        const entry = byFeeType.get(key) ?? { count: 0, totalNpr: 0 };
+        entry.count += 1;
+        entry.totalNpr += amount;
+        byFeeType.set(key, entry);
+      };
+      for (const c of collections) {
+        const paid = Number(c.amountPaidNpr) || 0;
+        add("SECURITY_DEPOSIT", Number(c.securityDepositPaidNpr) || 0);
+        if (paid <= 0) continue;
+        const lines = ((c.feeBreakdown as Array<{ feeType?: string; amountNpr?: number }>) ?? []).filter(
+          (b) => String(b.feeType) !== "SECURITY_DEPOSIT" && (Number(b.amountNpr) || 0) > 0
+        );
+        const lineTotal = lines.reduce((s, b) => s + (Number(b.amountNpr) || 0), 0);
+        if (lineTotal <= 0) {
+          add("TUITION", paid);
+          continue;
         }
-        return acc;
-      }, {});
-      const data = Object.entries(byFeeType).map(([feeType, stats]) => ({ feeType, ...stats }));
-      return sendSuccess(res, "Fee collection summary generated", { reportType, data });
+        // Group by fee type first so one receipt counts once per fee type.
+        const shares = new Map<string, number>();
+        for (const b of lines) {
+          const key = String(b.feeType || "OTHER");
+          shares.set(key, (shares.get(key) ?? 0) + paid * ((Number(b.amountNpr) || 0) / lineTotal));
+        }
+        shares.forEach((amount, key) => add(key, amount));
+      }
+      const deposit = byFeeType.get("SECURITY_DEPOSIT");
+      byFeeType.delete("SECURITY_DEPOSIT");
+      const feeRows = Array.from(byFeeType.entries())
+        .map(([feeType, stats]) => ({
+          feeType,
+          count: stats.count,
+          totalNpr: Math.round(stats.totalNpr * 100) / 100
+        }))
+        .sort((a, b) => b.totalNpr - a.totalNpr);
+      const feeReceipts = collections.filter((c) => (Number(c.amountPaidNpr) || 0) > 0).length;
+      const data: Array<Record<string, unknown>> = [
+        ...feeRows,
+        {
+          rowKind: "total",
+          feeType: "TOTAL FEE INCOME",
+          count: feeReceipts,
+          totalNpr: Math.round(feeRows.reduce((s, r) => s + r.totalNpr, 0) * 100) / 100
+        },
+        ...(deposit
+          ? [
+              {
+                feeType: "Security deposits received (held — not income)",
+                count: deposit.count,
+                totalNpr: Math.round(deposit.totalNpr * 100) / 100
+              }
+            ]
+          : [])
+      ];
+      return respond("Fee collection summary generated", { reportType, data });
     }
     case "vendor-ledger": {
       const vendorName = typeof req.query.vendor === "string" ? req.query.vendor : undefined;
@@ -1308,12 +1735,13 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
           .sort({ purchaseDateBs: -1 })
           .lean()
       ]);
-      return sendSuccess(res, "Vendor ledger generated", { reportType, data: { expenses, purchases } });
+      return respond("Vendor ledger generated", { reportType, data: { expenses, purchases } });
     }
     case "receivables-aging": {
       const { buildReceivablesAging, flattenReceivablesAging } = await import("../utils/receivablesAging.js");
       const aging = await buildReceivablesAging(schoolId, { asOfDateBs: toDateBs, batchId });
-      return sendSuccess(res, "Receivables aging generated", {
+      // (Outstanding is as at the To date: receipts after it are added back.)
+      return respond("Receivables aging generated", {
         reportType,
         data: flattenReceivablesAging(aging),
         summary: aging.totals
@@ -1321,7 +1749,7 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
     }
     case "cash-flow": {
       const statement = await buildCashFlowStatement(schoolId, { fromDateBs, toDateBs });
-      return sendSuccess(res, "Cash flow generated", {
+      return respond("Cash flow generated", {
         reportType,
         data: flattenCashFlow(statement),
         summary: {

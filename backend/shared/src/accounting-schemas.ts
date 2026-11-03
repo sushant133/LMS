@@ -49,6 +49,11 @@ export const enhancedFeeCollectionSchema = z
     /** HA / multi-year: 1 = 1st year, 2 = 2nd year, 3 = 3rd year */
     programYear: z.coerce.number().int().min(1).max(3).optional(),
     /**
+     * Payment against the existing fee plan (Bank / Cash entry): book it to the earliest
+     * program year that still has a due, instead of the year picked on the form.
+     */
+    applyToOldestDue: z.boolean().optional(),
+    /**
      * Advance on this receipt for later program years (2nd / 3rd year), paid
      * together with this year's fee. Included in amountPaidNpr.
      */
@@ -148,6 +153,22 @@ export const accountantSchema = z.object({
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE")
 });
 
+const optionalText = (max: number) => z.string().trim().max(max).optional().or(z.literal(""));
+
+/** Extra details printed on an expense's Journal Voucher (AGF No. 10). */
+export const journalVoucherDetailsSchema = z.object({
+  narration: optionalText(500),
+  receiptNo: optionalText(60),
+  chequeNo: optionalText(60),
+  chequeDateBs: optionalText(20),
+  preparedByName: optionalText(120),
+  preparedByDesignation: optionalText(80),
+  checkedByName: optionalText(120),
+  approvedByName: optionalText(120),
+  receivedByName: optionalText(120),
+  receivedByDesignation: optionalText(80)
+});
+
 export const accountingExpenseSchema = z.object({
   category: z.enum(EXPENSE_CATEGORIES),
   /** Optional for legacy; new daily expenses often omit vendor */
@@ -155,10 +176,14 @@ export const accountingExpenseSchema = z.object({
   dateBs: bsDateSchema,
   amountNpr: moneySchema,
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  /** Bank account used when paid by bank (Bank / Cash register). */
+  bankAccountId: optionalObjectIdSchema,
   description: z.string().min(1),
   voucherNumber: z.string().optional().or(z.literal("")),
   approvedBy: z.string().optional().or(z.literal("")),
-  attachmentUrl: z.string().optional().or(z.literal(""))
+  attachmentUrl: z.string().optional().or(z.literal("")),
+  /** Printed on the Journal Voucher */
+  voucherDetails: journalVoucherDetailsSchema.optional()
 });
 
 export const accountingPurchaseSchema = z.object({
@@ -172,9 +197,13 @@ export const accountingPurchaseSchema = z.object({
   unitPriceNpr: moneySchema,
   paymentStatus: z.enum(PAYMENT_STATUSES).default("PENDING"),
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  /** Bank account used when paid by bank (Bank / Cash register). */
+  bankAccountId: optionalObjectIdSchema,
   description: z.string().optional().or(z.literal("")),
   voucherNumber: z.string().optional().or(z.literal("")),
-  attachmentUrl: z.string().optional().or(z.literal(""))
+  attachmentUrl: z.string().optional().or(z.literal("")),
+  /** Printed on the Journal Voucher */
+  voucherDetails: journalVoucherDetailsSchema.optional()
 });
 
 export const accountingIncomeSchema = z.object({
@@ -183,8 +212,11 @@ export const accountingIncomeSchema = z.object({
   dateBs: bsDateSchema,
   amountNpr: moneySchema,
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  /** Bank account received into when paid by bank (Bank / Cash register). */
+  bankAccountId: optionalObjectIdSchema,
   description: z.string().optional().or(z.literal("")),
-  receiptNumber: z.string().optional().or(z.literal("")),
+  /** Manual receipt number — required (the server checks it is not already used). */
+  receiptNumber: z.string().trim().min(1, "Enter the receipt number"),
   voucherNumber: z.string().optional().or(z.literal(""))
 });
 
@@ -274,6 +306,41 @@ export const bankAccountSchema = z.object({
   isActive: z.boolean().default(true)
 });
 
+export const BANK_CASH_TRANSFER_TYPES = ["CASH_TO_BANK", "BANK_TO_CASH", "BANK_TO_BANK"] as const;
+
+/** Contra voucher between Cash in Hand and bank accounts. */
+export const bankCashTransferSchema = z
+  .object({
+    transferType: z.enum(BANK_CASH_TRANSFER_TYPES),
+    dateBs: bsDateSchema,
+    amountNpr: moneySchema,
+    fromBankAccountId: optionalObjectIdSchema,
+    toBankAccountId: optionalObjectIdSchema,
+    /** Deposit slip / cheque / transaction number */
+    referenceNumber: z.string().trim().max(60).optional().or(z.literal("")),
+    narration: z.string().trim().max(300).optional().or(z.literal(""))
+  })
+  .superRefine((value, ctx) => {
+    if (!(value.amountNpr > 0)) {
+      ctx.addIssue({ code: "custom", message: "Amount must be more than 0", path: ["amountNpr"] });
+    }
+    const needsFrom = value.transferType !== "CASH_TO_BANK";
+    const needsTo = value.transferType !== "BANK_TO_CASH";
+    if (needsFrom && !value.fromBankAccountId) {
+      ctx.addIssue({ code: "custom", message: "Select the bank account money leaves", path: ["fromBankAccountId"] });
+    }
+    if (needsTo && !value.toBankAccountId) {
+      ctx.addIssue({ code: "custom", message: "Select the bank account money goes into", path: ["toBankAccountId"] });
+    }
+    if (
+      value.transferType === "BANK_TO_BANK" &&
+      value.fromBankAccountId &&
+      value.fromBankAccountId === value.toBankAccountId
+    ) {
+      ctx.addIssue({ code: "custom", message: "Choose two different bank accounts", path: ["toBankAccountId"] });
+    }
+  });
+
 export const cashBookEntrySchema = z.object({
   dateBs: bsDateSchema,
   entryType: z.enum(["DEBIT", "CREDIT"]),
@@ -296,6 +363,8 @@ export const accountingSettingsSchema = z.object({
   auditLockDateBs: z.string().optional().or(z.literal("")),
   /** Amounts at or above this NPR require dual approval for reverse/void. */
   approvalThresholdNpr: z.coerce.number().min(0).default(25000),
+  /** Direct Expense in an asset category at or above this is capitalised (Fixed Assets). */
+  capitalizationThresholdNpr: z.coerce.number().min(0).default(5000),
   panNumber: z.string().optional().or(z.literal("")),
   vatNumber: z.string().optional().or(z.literal("")),
   tdsEnabled: z.boolean().default(false),
@@ -388,5 +457,8 @@ export const salarySheetSaveSchema = z.object({
 });
 export type BankAccountInput = z.infer<typeof bankAccountSchema>;
 export type CashBookEntryInput = z.infer<typeof cashBookEntrySchema>;
+export type BankCashTransferInput = z.infer<typeof bankCashTransferSchema>;
+export type JournalVoucherDetails = z.infer<typeof journalVoucherDetailsSchema>;
+export type BankCashTransferType = (typeof BANK_CASH_TRANSFER_TYPES)[number];
 export type AccountingSettingsInput = z.infer<typeof accountingSettingsSchema>;
 export type ExtendedFeeStructureInput = z.infer<typeof extendedFeeStructureSchema>;

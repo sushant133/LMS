@@ -51,3 +51,23 @@ export const getAcademicLabels = (institutionType: InstitutionType) =>
         secondaryPlural: "Sections",
         groupLabel: "Class / Section"
       };
+/**
+ * Year lists hold one "1st Year", "2nd Year"… per batch, so an unfiltered dropdown showed
+ * each name several times. Names used by more than one batch get the batch added.
+ */
+export const labelYearsWithBatch = <Y extends { name: string; batchId?: unknown }>(
+  years: Y[],
+  batches: Array<{ _id: string; name: string }>,
+): Y[] => {
+  const idOf = (value: unknown) =>
+    value && typeof value === "object" && "_id" in value
+      ? String((value as { _id: unknown })._id)
+      : String(value ?? "");
+  const uses = new Map<string, number>();
+  years.forEach((y) => uses.set(y.name, (uses.get(y.name) ?? 0) + 1));
+  const batchName = new Map(batches.map((b) => [String(b._id), b.name]));
+  return years.map((y) => {
+    const batch = batchName.get(idOf(y.batchId));
+    return (uses.get(y.name) ?? 0) > 1 && batch ? { ...y, name: `${y.name} — ${batch}` } : y;
+  });
+};

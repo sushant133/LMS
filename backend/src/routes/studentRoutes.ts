@@ -9,12 +9,14 @@ import {
   createStudent,
   deleteStudent,
   getStudentById,
+  getStudentDataChecks,
   listStudents,
   setStudentLoginAccess,
   updateCtevtExamFee,
   updateCtevtRegistrationFee,
   updateStudent,
-  updateStudentBackCount
+  updateStudentBackCount,
+  updateStudentRunningBacklogs
 } from "../controllers/studentController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
@@ -50,6 +52,8 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", studentReaders, listStudents);
+/** Read-only data check (admins) — before /:id */
+router.get("/data-checks", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), getStudentDataChecks);
 /**
  * CTEVT registration / exam fees — must be registered before `/:id` routes.
  * Role list is broad so Module Access grants work; enforceModuleAccess requires
@@ -84,6 +88,12 @@ router.patch(
   "/:id/back-count",
   authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
   updateStudentBackCount
+);
+/** Examination → CTEVT → Running Batch Backlogs */
+router.patch(
+  "/:id/running-backlogs",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
+  updateStudentRunningBacklogs
 );
 router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createStudent);
 router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateStudent);

@@ -38,6 +38,7 @@ import {
 } from "hooks/useModuleAccess";
 import { getPdfErrorMessage, printAdmitCardsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
+import { labelYearsWithBatch } from "lib/academicStructureUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 
 /**
@@ -650,8 +651,8 @@ export const AdmitCardPanel = ({
   );
 
   const yearOptions = useMemo(
-    () => (batchId ? filterYearsByBatch(years, batchId) : years),
-    [years, batchId],
+    () => (batchId ? filterYearsByBatch(years, batchId) : labelYearsWithBatch(years, batches)),
+    [years, batchId, batches],
   );
   const sectionOptions = useMemo(
     () => (classId ? sections.filter((s) => s.classId === classId) : sections),

@@ -157,7 +157,7 @@ export const ComplaintsManager = () => {
   return (
     <PageContent className="space-y-6">
       <PageHeader
-        title="Complains"
+        title="Complaints"
         description={
           canViewAll
             ? "Review complaints submitted by students, teachers, and staff. Only the complainant and administrators can see each complaint."

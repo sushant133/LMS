@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { Select } from "components/ui/select";
+import { headerAccountCodes } from "@phit-erp/shared";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -17,6 +19,7 @@ interface ChartAccount {
   name: string;
   accountType: string;
   isActive: boolean;
+  parentCode?: string;
 }
 
 interface VarianceRow {
@@ -59,6 +62,20 @@ export const BudgetPanel = ({ isAdmin }: { isAdmin: boolean }) => {
     queryFn: () => unwrap<ChartAccount[]>(api.get("/accounting/chart-of-accounts")),
   });
 
+  const fiscalYearsQuery = useQuery({
+    queryKey: ["fiscal-years"],
+    queryFn: () =>
+      unwrap<Array<{ _id: string; yearBs: string; isCurrent?: boolean; isClosed?: boolean }>>(
+        api.get("/accounting/fiscal-years"),
+      ),
+  });
+  // Start on the current fiscal year.
+  useEffect(() => {
+    if (fiscalYearBs) return;
+    const current = (fiscalYearsQuery.data ?? []).find((fy) => fy.isCurrent);
+    if (current) setFiscalYearBs(current.yearBs);
+  }, [fiscalYearsQuery.data, fiscalYearBs]);
+
   const budgetsQuery = useQuery({
     queryKey: ["budgets"],
     queryFn: () => unwrap<Array<Record<string, unknown>>>(api.get("/accounting/budgets")),
@@ -73,14 +90,19 @@ export const BudgetPanel = ({ isAdmin }: { isAdmin: boolean }) => {
     enabled: fiscalYearBs.trim().length > 0,
   });
 
-  // Only income and expense accounts are budgeted — a balance sheet account has no annual plan.
-  const budgetableAccounts = useMemo(
-    () =>
-      (accountsQuery.data ?? [])
-        .filter((a) => a.accountType === "INCOME" || a.accountType === "EXPENSE")
-        .sort((a, b) => a.code.localeCompare(b.code)),
-    [accountsQuery.data],
-  );
+  // Only income and expense accounts are budgeted — a balance sheet account has no annual
+  // plan. Group (header) accounts only total their children, so budgeting them would count
+  // the same money twice.
+  const budgetableAccounts = useMemo(() => {
+    const headers = headerAccountCodes(accountsQuery.data ?? []);
+    return (accountsQuery.data ?? [])
+      .filter(
+        (a) =>
+          (a.accountType === "INCOME" || a.accountType === "EXPENSE") &&
+          !headers.has(a.code),
+      )
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [accountsQuery.data]);
 
   // Load the saved budget for the selected year into the editable grid.
   useEffect(() => {
@@ -131,18 +153,28 @@ export const BudgetPanel = ({ isAdmin }: { isAdmin: boolean }) => {
         <CardContent className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-3">
             <FormField label="Fiscal year (BS)">
-              <Input
+              <Select
                 value={fiscalYearBs}
                 onChange={(e) => setFiscalYearBs(e.target.value)}
-                placeholder="2083/2084"
-              />
+              >
+                <option value="">Select fiscal year</option>
+                {(fiscalYearsQuery.data ?? [])
+                  .slice()
+                  .sort((a, b) => b.yearBs.localeCompare(a.yearBs))
+                  .map((fy) => (
+                    <option key={fy._id} value={fy.yearBs}>
+                      {fy.yearBs}
+                      {fy.isCurrent ? " (current)" : fy.isClosed ? " (closed)" : ""}
+                    </option>
+                  ))}
+              </Select>
             </FormField>
           </div>
 
           {!fiscalYearBs.trim() ? (
             <EmptyState
               title="Choose a fiscal year"
-              description="Enter a fiscal year such as 2083/2084 to plan or review its budget."
+              description="Select a fiscal year to plan or review its budget."
             />
           ) : accountsQuery.isLoading ? (
             <LoadingState />

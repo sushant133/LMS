@@ -15,7 +15,7 @@ const BackStudentsPanel = lazy(() =>
 );
 
 interface CtevtStudentListsPanelProps {
-  view: "passed-out" | "back-students";
+  view: "passed-out" | "back-students" | "running-backlogs";
 }
 
 /**
@@ -64,7 +64,12 @@ export const CtevtStudentListsPanel = ({ view }: CtevtStudentListsPanelProps) =>
       {view === "passed-out" ? (
         <PassedOutStudentsPanel batches={batches} years={years} />
       ) : (
-        <BackStudentsPanel batches={batches} years={years} />
+        <BackStudentsPanel
+          key={view}
+          batches={batches}
+          years={years}
+          mode={view === "running-backlogs" ? "running" : "back"}
+        />
       )}
     </Suspense>
   );

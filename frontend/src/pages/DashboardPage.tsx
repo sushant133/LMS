@@ -1,3 +1,5 @@
+import { isPathHidden } from "lib/hiddenModules";
+import { labelYearsWithBatch } from "lib/academicStructureUtils";
 import { useEffect, useId, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { printPageCss } from "lib/printPage";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
@@ -422,9 +424,9 @@ const StudentDemographicsCharts = ({
   const rows = data.studentDemographics ?? [];
 
   const yearOptions = useMemo(() => {
-    if (!batchId || batchId === ALL_BATCHES) return years;
+    if (!batchId || batchId === ALL_BATCHES) return labelYearsWithBatch(years, batches);
     return years.filter((y) => !y.batchId || y.batchId === batchId);
-  }, [batchId, years]);
+  }, [batchId, years, batches]);
 
   // College rows include every status, so a chosen batch shows all of its students
   const filteredRows = useMemo(() => {
@@ -974,7 +976,7 @@ const teacherAdminQuickActions = (
   if (canAccessModule(map, "accounts")) {
     actions.push({ label: "Accounting", href: "/accounting" });
   }
-  if (canAccessModule(map, "hr")) {
+  if (canAccessModule(map, "hr") && !isPathHidden("/hr")) {
     actions.push({ label: "HR & Payroll", href: "/hr" });
   }
   if (canAccessModule(map, "settings")) {
@@ -1350,8 +1352,11 @@ const StatGrid = ({ stats }: { stats: DashboardMetric[] }) => (
   <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
     {stats.map((stat) => {
       const Icon = statIconMap[stat.label] ?? Sparkles;
-      const href = resolveDashboardStatHref(stat.label);
-      const hint = dashboardStatHint(stat.label, href);
+      // Cards built by the server (year / status counts) carry their own filtered link
+      const href = stat.href ?? resolveDashboardStatHref(stat.label);
+      const hint = stat.href?.startsWith("/students/list")
+        ? "View students →"
+        : dashboardStatHint(stat.label, href);
       const content = (
         <Card
           className={cn(
@@ -1630,7 +1635,7 @@ const DEPARTMENT_QUICK_ACTIONS: Record<DepartmentAccountType, Array<{ label: str
   ACCOUNTING: [
     { label: "Accounting", href: "/accounting" },
     { label: "Finance Management", href: "/finance" },
-    { label: "HR & Payroll", href: "/hr" },
+    ...(isPathHidden("/hr") ? [] : [{ label: "HR & Payroll", href: "/hr" }]),
     { label: "Academic Calendar", href: "/academic-calendar" }
   ],
   EXAMINATION: [
@@ -1670,7 +1675,7 @@ const QuickActions = ({ actions }: { actions: Array<{ label: string; href: strin
 const baseStaffActions: Array<{ label: string; href: string }> = [
   { label: "Notifications", href: "/notifications" },
   { label: "Academic Calendar", href: "/academic-calendar" },
-  { label: "Complains", href: "/complains" }
+  { label: "Complaints", href: "/complains" }
 ];
 
 const categoryQuickActions = (
@@ -1726,20 +1731,20 @@ const StaffModuleDashboard = ({
       ? [
           { label: "Fees & Accounts", href: "/accounting" },
           { label: "Notifications", href: "/notifications" },
-          { label: "Complains", href: "/complains" }
+          { label: "Complaints", href: "/complains" }
         ]
       : user.role === "LIBRARY_STAFF"
         ? [
             { label: "Library Management", href: "/library" },
             { label: "Notifications", href: "/notifications" },
-            { label: "Complains", href: "/complains" }
+            { label: "Complaints", href: "/complains" }
           ]
         : user.role === "LABORATORY_STAFF"
           ? [
               { label: "Laboratory Inventory", href: "/laboratory" },
               { label: "Stock Requests", href: "/laboratory" },
               { label: "Notifications", href: "/notifications" },
-              { label: "Complains", href: "/complains" }
+              { label: "Complaints", href: "/complains" }
             ]
           : categoryQuickActions(staffCategory);
 

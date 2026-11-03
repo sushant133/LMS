@@ -30,9 +30,12 @@ import { parseErrorMessage } from "lib/utils";
 interface BackStudentsPanelProps {
   batches?: Array<{ _id: string; name: string }>;
   years?: Array<{ _id: string; name: string; batchId?: string }>;
+  /**
+   * "back": students with academic status Back (default).
+   * "running": students still studying in a running batch who carry backlog papers.
+   */
+  mode?: "back" | "running";
 }
-
-const PRINT_AREA_ID = "back-students-print-area";
 
 const printTh: CSSProperties = {
   border: "1px solid #94a3b8",
@@ -99,7 +102,20 @@ const currentProgramYearOf = (student: StudentRecord): number => {
 export const BackStudentsPanel = ({
   batches = [],
   years = [],
+  mode = "back",
 }: BackStudentsPanelProps) => {
+  const running = mode === "running";
+  const PRINT_AREA_ID = running ? "running-backlogs-print-area" : "back-students-print-area";
+  /** Back papers (Back status) or running-batch backlogs, by section */
+  const papersOf = (student: StudentRecord): BackPaper[] =>
+    running
+      ? (student.runningBacklogs ?? []).filter((p) => asText(p?.subjectName))
+      : resolveBackPapers(student);
+  const countOf = (student: StudentRecord): number =>
+    running ? papersOf(student).length : resolveBackCount(student);
+  /** Running students picked with "Add student" before any backlog is saved */
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [addStudentId, setAddStudentId] = useState("");
   const queryClient = useQueryClient();
   const { user, availableSchools } = useAuth();
   const [batchFilter, setBatchFilter] = useState("");
@@ -165,9 +181,24 @@ export const BackStudentsPanel = ({
       backCount?: number;
       backPapers?: BackPaper[];
     }) =>
-      unwrap(api.patch(`/students/${id}/back-count`, { backCount, backPapers })),
-    onSuccess: async () => {
-      toast.success("Back subjects updated");
+      running
+        ? unwrap(api.patch(`/students/${id}/running-backlogs`, { backlogs: backPapers ?? [] }))
+        : unwrap(api.patch(`/students/${id}/back-count`, { backCount, backPapers })),
+    onSuccess: async (_data, variables) => {
+      toast.success(
+        running
+          ? (variables.backPapers ?? []).length
+            ? "Backlog subjects updated"
+            : "Backlogs cleared — student removed from this list"
+          : "Back subjects updated",
+      );
+      if (running && !(variables.backPapers ?? []).length) {
+        setAddedIds((current) => {
+          const next = new Set(current);
+          next.delete(variables.id);
+          return next;
+        });
+      }
       setEditingId(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["students"] }),
@@ -237,8 +268,11 @@ export const BackStudentsPanel = ({
   };
 
   const backStudents = useMemo(() => {
-    const rows = (studentsQuery.data ?? []).filter(
-      (student) => (student.academicStatus ?? "ACTIVE") === "PENDING_NOT_PASSED",
+    const rows = (studentsQuery.data ?? []).filter((student) =>
+      running
+        ? (student.academicStatus ?? "ACTIVE") === "ACTIVE" &&
+          (papersOf(student).length > 0 || addedIds.has(asText(student._id)))
+        : (student.academicStatus ?? "ACTIVE") === "PENDING_NOT_PASSED",
     );
     const needle = search.trim().toLowerCase();
     const yearNeedle = yearFilter.trim().toLowerCase();
@@ -270,7 +304,7 @@ export const BackStudentsPanel = ({
         const registration = asText(student.registrationNumber).toLowerCase();
         const roll = asText(student.rollNumber);
 
-        const backSubjects = resolveBackPapers(student)
+        const backSubjects = papersOf(student)
           .map((p) => asText(p.subjectName).toLowerCase())
           .join(" ");
 
@@ -290,7 +324,27 @@ export const BackStudentsPanel = ({
         if (nameA !== nameB) return nameA.localeCompare(nameB);
         return (Number(a.rollNumber) || 0) - (Number(b.rollNumber) || 0);
       });
-  }, [studentsQuery.data, batchFilter, yearFilter, search, yearNameById]);
+  }, [studentsQuery.data, batchFilter, yearFilter, search, yearNameById, running, addedIds]);
+
+  /** Running-batch students without backlogs yet, for "Add student" */
+  const addableStudents = useMemo(() => {
+    if (!running) return [];
+    return (studentsQuery.data ?? [])
+      .filter((student) => (student.academicStatus ?? "ACTIVE") === "ACTIVE")
+      .filter((student) => papersOf(student).length === 0 && !addedIds.has(asText(student._id)))
+      .filter((student) => !batchFilter || asText(student.batchId) === batchFilter)
+      .filter((student) =>
+        !yearFilter
+          ? true
+          : batchFilter
+            ? asText(student.yearId) === yearFilter
+            : resolveYearName(student).toLowerCase() === yearFilter.trim().toLowerCase(),
+      )
+      .sort((a, b) =>
+        asText(resolveStudentUser(a)?.fullName).localeCompare(asText(resolveStudentUser(b)?.fullName)),
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- papersOf / resolveYearName follow these inputs
+  }, [studentsQuery.data, running, addedIds, batchFilter, yearFilter, yearNameById]);
 
   const printScopeLines = useMemo(() => {
     const lines: string[] = [];
@@ -311,10 +365,10 @@ export const BackStudentsPanel = ({
   }, [batchFilter, yearFilter, search, batchNameById, yearNameById]);
 
   const startEditBacks = (student: StudentRecord) => {
-    const papers = resolveBackPapers(student);
+    const papers = papersOf(student);
     const yearDefault = currentProgramYearOf(student);
     setEditingId(asText(student._id));
-    setEditValue(resolveBackCount(student));
+    setEditValue(running ? 1 : resolveBackCount(student));
     setEditYearDefault(yearDefault);
     // Start with one empty line so a subject can be chosen straight away
     const initial =
@@ -347,6 +401,17 @@ export const BackStudentsPanel = ({
     );
 
   const cancelEditBacks = () => {
+    // A student added just now with nothing saved leaves the list again
+    if (running && editingId) {
+      const student = (studentsQuery.data ?? []).find((s) => asText(s._id) === editingId);
+      if (student && papersOf(student).length === 0) {
+        setAddedIds((current) => {
+          const next = new Set(current);
+          next.delete(editingId);
+          return next;
+        });
+      }
+    }
     setEditingId(null);
   };
 
@@ -367,8 +432,9 @@ export const BackStudentsPanel = ({
       }
       seen.add(key);
     }
-    if (papers.length > 0) {
-      // Subjects listed → they are the backs; their count is the number of backs
+    if (papers.length > 0 || running) {
+      // Subjects listed → they are the backs; their count is the number of backs.
+      // Running batch: saving with no subjects clears the student's backlogs.
       updateBackCount.mutate({ id: studentId, backPapers: papers });
       return;
     }
@@ -382,7 +448,7 @@ export const BackStudentsPanel = ({
 
   const handlePrintList = async () => {
     if (backStudents.length === 0) {
-      toast.error("No back students to print");
+      toast.error(running ? "No students with backlogs to print" : "No back students to print");
       return;
     }
     setPrinting(true);
@@ -391,7 +457,7 @@ export const BackStudentsPanel = ({
       if (!el?.textContent?.trim()) {
         throw new Error("Print content is empty — try again");
       }
-      await printElementById(PRINT_AREA_ID, "back-students-print");
+      await printElementById(PRINT_AREA_ID, running ? "running-backlogs-print" : "back-students-print");
       toast.success(
         `Print dialog opened — ${backStudents.length} student${
           backStudents.length === 1 ? "" : "s"
@@ -408,11 +474,11 @@ export const BackStudentsPanel = ({
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <CardTitle>Back Students</CardTitle>
+          <CardTitle>{running ? "Running Batch Backlogs" : "Back Students"}</CardTitle>
           <p className="mt-1 text-sm text-slate-500">
-            Students marked with academic status Back. Record each back subject
-            and the year it was failed in; the number of backs follows the
-            subjects listed. Remove a subject when the student clears it.
+            {running
+              ? "Students still studying in a running batch who have backlog papers. Add a student, record each backlog subject and the year it is from; remove a subject when the student clears it."
+              : "Students marked with academic status Back. Record each back subject and the year it was failed in; the number of backs follows the subjects listed. Remove a subject when the student clears it."}
           </p>
         </div>
         <Button
@@ -466,6 +532,43 @@ export const BackStudentsPanel = ({
           </div>
         </div>
 
+        {running ? (
+          <div className="flex flex-col gap-2 rounded-2xl border border-brand-100 bg-brand-50/40 p-3 sm:flex-row sm:items-center">
+            <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <Plus className="h-4 w-4 text-brand-600" /> Add student with backlogs
+            </span>
+            <Select
+              className="sm:max-w-md"
+              value={addStudentId}
+              aria-label="Student to add"
+              onChange={(event) => {
+                const id = event.target.value;
+                setAddStudentId("");
+                const student = addableStudents.find((s) => asText(s._id) === id);
+                if (!student) return;
+                setAddedIds((current) => new Set(current).add(id));
+                startEditBacks(student);
+              }}
+            >
+              <option value="">
+                {studentsQuery.isLoading
+                  ? "Loading students…"
+                  : addableStudents.length
+                    ? `Select student (${addableStudents.length}${batchFilter || yearFilter ? " in this batch / year" : ""})`
+                    : "No more active students to add"}
+              </option>
+              {addableStudents.map((student) => (
+                <option key={asText(student._id)} value={asText(student._id)}>
+                  {asText(resolveStudentUser(student)?.fullName) || "Student"}
+                  {student.rollNumber != null ? ` · Roll ${student.rollNumber}` : ""}
+                  {` · ${resolveBatchName(student) || "—"} / ${resolveYearName(student) || "—"}`}
+                </option>
+              ))}
+            </Select>
+            <span className="text-xs text-slate-500">Pick the batch / year above to narrow the list.</span>
+          </div>
+        ) : null}
+
         {studentsQuery.isLoading ? (
           <LoadingState />
         ) : studentsQuery.isError ? (
@@ -475,8 +578,12 @@ export const BackStudentsPanel = ({
           />
         ) : backStudents.length === 0 ? (
           <EmptyState
-            title="No back students"
-            description="Students with academic status Back will appear here. Set status to Back and enter number of backs when creating or editing a student."
+            title={running ? "No running batch backlogs" : "No back students"}
+            description={
+              running
+                ? "Use “Add student with backlogs” above to record the backlog subjects of a student still studying."
+                : "Students with academic status Back will appear here. Set status to Back and enter number of backs when creating or editing a student."
+            }
           />
         ) : (
           <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -494,11 +601,12 @@ export const BackStudentsPanel = ({
               </TableHead>
               <TableBody>
                 {backStudents.map((student, index) => {
-                  const status = student.academicStatus ?? "PENDING_NOT_PASSED";
-                  const statusLabel =
-                    STUDENT_ACADEMIC_STATUS_LABELS[
-                      status as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
-                    ] ?? "Back";
+                  const status = student.academicStatus ?? (running ? "ACTIVE" : "PENDING_NOT_PASSED");
+                  const statusLabel = running
+                    ? "Studying"
+                    : STUDENT_ACADEMIC_STATUS_LABELS[
+                        status as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
+                      ] ?? "Back";
                   const userRow = resolveStudentUser(student);
                   const phone =
                     asText(userRow?.phone) ||
@@ -508,8 +616,8 @@ export const BackStudentsPanel = ({
                   const batchLabel = resolveBatchName(student) || "—";
                   const yearLabel = resolveYearName(student) || "—";
                   const studentId = asText(student._id);
-                  const backs = resolveBackCount(student);
-                  const papers = resolveBackPapers(student);
+                  const backs = countOf(student);
+                  const papers = papersOf(student);
                   const isEditing = editingId === studentId;
 
                   return (
@@ -537,7 +645,13 @@ export const BackStudentsPanel = ({
                         )}
                       </Td>
                       <Td>
-                        <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-900">
+                        <span
+                          className={
+                            running
+                              ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-900"
+                              : "rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-900"
+                          }
+                        >
                           {statusLabel}
                         </span>
                       </Td>
@@ -552,7 +666,7 @@ export const BackStudentsPanel = ({
                               size="sm"
                               variant="outline"
                               className="h-8 px-2"
-                              title="Edit back subjects"
+                              title={running ? "Edit backlog subjects" : "Edit back subjects"}
                               onClick={() => startEditBacks(student)}
                             >
                               <Pencil className="mr-1 h-3.5 w-3.5" />
@@ -602,7 +716,7 @@ export const BackStudentsPanel = ({
                         <Td colSpan={7} className="bg-amber-50/40">
                           <div className="space-y-3 py-1">
                             <p className="text-sm font-medium text-slate-900">
-                              Back subjects — {asText(userRow?.fullName) || "student"}
+                              {running ? "Backlog subjects" : "Back subjects"} — {asText(userRow?.fullName) || "student"}
                             </p>
                             {editPapers.map((paper, paperIndex) => {
                               const yearSubjects =
@@ -794,7 +908,19 @@ export const BackStudentsPanel = ({
                                 <Plus className="mr-1 h-4 w-4" />
                                 Add subject
                               </Button>
-                              {editPapers.some((p) => p.subjectName.trim()) ? (
+                              {running ? (
+                                <span className="text-sm text-slate-600">
+                                  No. of backlogs:{" "}
+                                  <span className="font-semibold text-slate-900">
+                                    {editPapers.filter((p) => p.subjectName.trim()).length}
+                                  </span>
+                                  {editPapers.every((p) => !p.subjectName.trim()) ? (
+                                    <span className="ml-2 text-xs text-slate-500">
+                                      Saving with no subjects removes the student from this list.
+                                    </span>
+                                  ) : null}
+                                </span>
+                              ) : editPapers.some((p) => p.subjectName.trim()) ? (
                                 <span className="text-sm text-slate-600">
                                   No. of backs:{" "}
                                   <span className="font-semibold text-slate-900">
@@ -857,7 +983,7 @@ export const BackStudentsPanel = ({
         !studentsQuery.isError &&
         backStudents.length > 0 ? (
           <p className="text-sm text-slate-500">
-            Showing {backStudents.length} back student
+            Showing {backStudents.length} {running ? "student" : "back student"}
             {backStudents.length === 1 ? "" : "s"}
           </p>
         ) : null}
@@ -916,7 +1042,7 @@ export const BackStudentsPanel = ({
                   color: "#1e293b",
                 }}
               >
-                Back Students list
+                {running ? "Running Batch Backlogs list" : "Back Students list"}
               </p>
               {printScopeLines.length > 0 ? (
                 <p
@@ -995,11 +1121,11 @@ export const BackStudentsPanel = ({
                       fontWeight: 700,
                     }}
                   >
-                    {resolveBackCount(student)}
+                    {countOf(student)}
                   </td>
                   <td style={printTd}>
-                    {resolveBackPapers(student).length > 0
-                      ? resolveBackPapers(student).map((paper, paperIndex) => (
+                    {papersOf(student).length > 0
+                      ? papersOf(student).map((paper, paperIndex) => (
                           <div key={paperIndex}>{backPaperLabel(paper)}</div>
                         ))
                       : "—"}

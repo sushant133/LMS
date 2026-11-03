@@ -5,6 +5,7 @@ import {
   FileText,
   GraduationCap,
   RotateCcw,
+  History,
   ScrollText,
 } from "lucide-react";
 import {
@@ -15,7 +16,7 @@ import {
   isSystemAdministrator,
   type ModuleAccessMap,
 } from "@phit-erp/shared";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { EmptyState } from "components/shared/EmptyState";
 import { PageContent } from "components/layout/PageContent";
 import { PageHeader } from "components/shared/PageHeader";
@@ -38,7 +39,8 @@ type CtevtSubSection =
   | "registration"
   | "exam"
   | "passed-out"
-  | "back-students";
+  | "back-students"
+  | "running-backlogs";
 
 /**
  * Top-level Examination Management shell:
@@ -124,7 +126,11 @@ export const ExaminationManagementHub = () => {
       canOpenHub &&
       !isTeachingOrPortalRole);
 
-  const [section, setSection] = useState<ExamSection>("college");
+  // ?section=college|ctevt opens that side directly
+  const [searchParams] = useSearchParams();
+  const [section, setSection] = useState<ExamSection>(() =>
+    searchParams.get("section") === "ctevt" ? "ctevt" : "college",
+  );
   const [ctevtSub, setCtevtSub] = useState<CtevtSubSection>("registration");
 
   // Prefer first allowed section when grants change
@@ -299,6 +305,22 @@ export const ExaminationManagementHub = () => {
                 Back Students
               </Button>
             ) : null}
+            {canBackStudents ? (
+              <Button
+                type="button"
+                size="lg"
+                variant={ctevtSub === "running-backlogs" ? "default" : "outline"}
+                className={cn(
+                  "min-w-[10rem] px-6 py-6 text-base font-semibold",
+                  ctevtSub === "running-backlogs" &&
+                    "bg-brand-600 hover:bg-brand-700",
+                )}
+                onClick={() => setCtevtSub("running-backlogs")}
+              >
+                <History className="mr-2 h-5 w-5" />
+                Running Batch Backlogs
+              </Button>
+            ) : null}
           </div>
 
           {ctevtSub === "registration" ? (
@@ -307,6 +329,8 @@ export const ExaminationManagementHub = () => {
             <CtevtStudentListsPanel view="passed-out" />
           ) : ctevtSub === "back-students" && canBackStudents ? (
             <CtevtStudentListsPanel view="back-students" />
+          ) : ctevtSub === "running-backlogs" && canBackStudents ? (
+            <CtevtStudentListsPanel view="running-backlogs" />
           ) : (
             <CtevtExamPanel />
           )}

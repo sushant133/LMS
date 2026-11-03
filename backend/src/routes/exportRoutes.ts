@@ -6,7 +6,8 @@ import {
   exportTeacherMasterCsv,
   exportInfrastructure,
   exportFlashII,
-  exportEnrollmentSummary
+  exportEnrollmentSummary,
+  getReportsAnalytics
 } from "../controllers/exportController.js";
 
 const router = Router();
@@ -20,5 +21,6 @@ router.get("/iemis/teacher-master", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), e
 router.get("/iemis/infrastructure", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), exportInfrastructure);
 router.get("/iemis/flash-ii", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), exportFlashII);
 router.get("/iemis/enrollment-summary", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), exportEnrollmentSummary);
+router.get("/analytics", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), getReportsAnalytics);
 
 export default router;

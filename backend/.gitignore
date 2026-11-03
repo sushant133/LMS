@@ -8,3 +8,5 @@ uploads
 logs
 .turbo
 *.log
+# Data backups written by maintenance scripts (contain student records)
+backups/

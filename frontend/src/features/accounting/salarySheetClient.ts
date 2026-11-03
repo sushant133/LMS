@@ -12,6 +12,7 @@ import type {
 } from "@phit-erp/shared";
 import {
   calculateSalarySheetLine,
+  salaryRoundingNpr,
   formatNrsAmountInWords,
   HOLIDAY_EVENT_TYPES,
   normalizeTeacherPaymentType,
@@ -621,6 +622,7 @@ export const fetchSalarySheetClientFallback = async (
     totalTax1PercentNpr: round2(
       rows.reduce((s, r) => s + r.tax1PercentNpr, 0),
     ),
+    totalRoundingNpr: round2(rows.reduce((s, r) => s + salaryRoundingNpr(r), 0)),
     totalNetSalaryNpr: round2(rows.reduce((s, r) => s + r.netSalaryNpr, 0)),
     totalNetSalaryInWords: formatNrsAmountInWords(
       rows.reduce((s, r) => s + r.netSalaryNpr, 0),

@@ -79,6 +79,10 @@ export const seedStudentYearFeeCharges = async (params: {
     });
 
     if (openDoc) {
+      if (!openDoc.isOpeningCharge) {
+        openDoc.isOpeningCharge = true;
+        await openDoc.save(sessionOpt);
+      }
       // Keep OPEN plan amount aligned with student year fee structure
       if (Number(openDoc.currentChargesNpr) !== row.amount) {
         openDoc.currentChargesNpr = row.amount;
@@ -130,6 +134,7 @@ export const seedStudentYearFeeCharges = async (params: {
             }
           ],
           notes: "Opening tuition charge from student admission fee plan",
+          isOpeningCharge: true,
           accountantName: "System",
           createdBy: params.createdBy,
           isDeleted: false

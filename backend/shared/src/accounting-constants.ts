@@ -59,6 +59,8 @@ export const SYSTEM_ACCOUNT_CODES = {
   HOSTEL_INCOME: "4007",
   TRANSPORT_INCOME: "4008",
   FINE_INCOME: "4009",
+  /** Group (header) for non-fee income — never posted to. */
+  OTHER_INCOME_GROUP: "4099",
   OTHER_INCOME: "4100",
   DONATION_INCOME: "4101",
   CERTIFICATE_INCOME: "4102",
@@ -92,16 +94,43 @@ export const FEE_TYPE_ACCOUNT_MAP: Record<FeeType, string> = {
   LAB: SYSTEM_ACCOUNT_CODES.LAB_INCOME,
   TRANSPORT: SYSTEM_ACCOUNT_CODES.TRANSPORT_INCOME,
   HOSTEL: SYSTEM_ACCOUNT_CODES.HOSTEL_INCOME,
-  OTHER: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
+  // Fee lines without a specific head stay in fee income (4090), never 4100 Other Income
+  OTHER: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
   ANNUAL: SYSTEM_ACCOUNT_CODES.TUITION_INCOME,
   REGISTRATION: SYSTEM_ACCOUNT_CODES.REGISTRATION_INCOME,
   PRACTICAL: SYSTEM_ACCOUNT_CODES.LAB_INCOME,
   FINE: SYSTEM_ACCOUNT_CODES.FINE_INCOME,
-  SCHOLARSHIP: SYSTEM_ACCOUNT_CODES.SCHOLARSHIP_EXPENSE,
-  MISC: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
-  REFUND: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
+  // A fee line is always credited; a scholarship is a debit posted separately (5101)
+  SCHOLARSHIP: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
+  MISC: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
+  REFUND: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
   /** Deposit is a liability, not income */
   SECURITY_DEPOSIT: SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY
+};
+
+/** Spelling variants seen on fee lines. */
+const FEE_TYPE_ALIASES: Record<string, FeeType> = {
+  LATE: "FINE",
+  LATE_FEE: "FINE",
+  LABORATORY: "LAB"
+};
+
+/**
+ * Ledger account a fee line is credited to. Unknown fee types go to 4090 Fee Income
+ * (General) — a student fee is never posted to 4100 Other Income. SECURITY_DEPOSIT maps to
+ * the 2102 liability; callers post it as a liability, never as income.
+ */
+/**
+ * Scholarship type saved on a receipt: a scholarship amount always has a type ("OTHER" when
+ * none was chosen), and no amount means "NONE".
+ */
+export const resolveScholarshipType = <T extends string>(scholarshipNpr: number, type?: T | null): T | "NONE" | "OTHER" =>
+  !(Number(scholarshipNpr) > 0) ? "NONE" : !type || type === "NONE" ? "OTHER" : type;
+
+export const feeIncomeAccountFor = (feeType: string | null | undefined): string => {
+  const key = String(feeType ?? "").trim().toUpperCase();
+  const normalized = (FEE_TYPE_ALIASES[key] ?? key) as FeeType;
+  return FEE_TYPE_ACCOUNT_MAP[normalized] ?? SYSTEM_ACCOUNT_CODES.FEE_INCOME;
 };
 
 export const DEFAULT_CHART_OF_ACCOUNTS: Array<{
@@ -211,8 +240,10 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Array<{
     parentCode: "3000",
     isSystem: true
   },
-  { code: "4000", name: "Income", nameNp: "आम्दानी", accountType: "INCOME", isSystem: true },
+  { code: "4000", name: "Fee Income", nameNp: "शुल्क आम्दानी", accountType: "INCOME", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.FEE_INCOME, name: "Fee Income (General)", accountType: "INCOME", parentCode: "4000", isSystem: true },
+  /** Group for non-fee income (4100–4105), kept apart from 4000 Fee Income. */
+  { code: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP, name: "Other Income", nameNp: "अन्य आम्दानी", accountType: "INCOME", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.ADMISSION_INCOME, name: "Admission Fee", accountType: "INCOME", parentCode: "4000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.REGISTRATION_INCOME, name: "Registration Fee", accountType: "INCOME", parentCode: "4000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.TUITION_INCOME, name: "Tuition Fee", accountType: "INCOME", parentCode: "4000", isSystem: true },
@@ -222,17 +253,17 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Array<{
   { code: SYSTEM_ACCOUNT_CODES.HOSTEL_INCOME, name: "Hostel Fee", accountType: "INCOME", parentCode: "4000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.TRANSPORT_INCOME, name: "Transport Fee", accountType: "INCOME", parentCode: "4000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.FINE_INCOME, name: "Fine", accountType: "INCOME", parentCode: "4000", isSystem: true },
-  { code: SYSTEM_ACCOUNT_CODES.DONATION_INCOME, name: "Donation", accountType: "INCOME", parentCode: "4000", isSystem: true },
-  { code: SYSTEM_ACCOUNT_CODES.CERTIFICATE_INCOME, name: "Certificate Fee", accountType: "INCOME", parentCode: "4000", isSystem: true },
-  { code: SYSTEM_ACCOUNT_CODES.FORM_SALES_INCOME, name: "Form Sales", accountType: "INCOME", parentCode: "4000", isSystem: true },
-  { code: SYSTEM_ACCOUNT_CODES.INTEREST_INCOME, name: "Interest", accountType: "INCOME", parentCode: "4000", isSystem: true },
-  { code: SYSTEM_ACCOUNT_CODES.OTHER_INCOME, name: "Miscellaneous Income", accountType: "INCOME", parentCode: "4000", isSystem: true },
+  { code: SYSTEM_ACCOUNT_CODES.DONATION_INCOME, name: "Donation", accountType: "INCOME", parentCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP, isSystem: true },
+  { code: SYSTEM_ACCOUNT_CODES.CERTIFICATE_INCOME, name: "Certificate Fee", accountType: "INCOME", parentCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP, isSystem: true },
+  { code: SYSTEM_ACCOUNT_CODES.FORM_SALES_INCOME, name: "Form Sales", accountType: "INCOME", parentCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP, isSystem: true },
+  { code: SYSTEM_ACCOUNT_CODES.INTEREST_INCOME, name: "Interest", accountType: "INCOME", parentCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP, isSystem: true },
+  { code: SYSTEM_ACCOUNT_CODES.OTHER_INCOME, name: "Miscellaneous Income", accountType: "INCOME", parentCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP, isSystem: true },
   {
     code: SYSTEM_ACCOUNT_CODES.ASSET_DISPOSAL,
     name: "Gain / (Loss) on Asset Disposal",
     nameNp: "सम्पत्ति बिक्री नाफा/नोक्सान",
     accountType: "INCOME",
-    parentCode: "4000",
+    parentCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP,
     isSystem: true
   },
   { code: "5000", name: "Expenses", nameNp: "खर्च", accountType: "EXPENSE", isSystem: true },
@@ -256,7 +287,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Array<{
     isSystem: true
   },
   { code: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE, name: "General Expenses", accountType: "EXPENSE", parentCode: "5000", isSystem: true },
-  { code: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, name: "Purchase Expenses", accountType: "EXPENSE", parentCode: "5000", isSystem: true },
+  { code: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, name: "Direct Expenses", accountType: "EXPENSE", parentCode: "5000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.REFUND_EXPENSE, name: "Refund Expense", accountType: "EXPENSE", parentCode: "5000", isSystem: true }
 ];
 
@@ -274,27 +305,62 @@ export const EXPENSE_CATEGORY_ACCOUNT_MAP: Record<string, string> = {
   Hospital: SYSTEM_ACCOUNT_CODES.HOSPITAL_EXPENSE,
   Library: SYSTEM_ACCOUNT_CODES.LIBRARY_EXPENSE,
   Laboratory: SYSTEM_ACCOUNT_CODES.LAB_EXPENSE,
-  Furniture: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE,
+  Furniture: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE,
   Sports: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE,
   Transport: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE,
   Events: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE,
   Miscellaneous: SYSTEM_ACCOUNT_CODES.MISC_EXPENSE
 };
 
-export const PURCHASE_CATEGORY_ACCOUNT_MAP: Record<string, string> = {
-  "Laboratory Equipment": SYSTEM_ACCOUNT_CODES.LAB_EXPENSE,
-  Books: SYSTEM_ACCOUNT_CODES.LIBRARY_EXPENSE,
-  Furniture: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE,
-  Stationery: SYSTEM_ACCOUNT_CODES.OFFICE_EXPENSE,
-  "Computer Equipment": SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE,
-  Computers: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE,
-  Chemicals: SYSTEM_ACCOUNT_CODES.LAB_EXPENSE,
-  "Medical Equipment": SYSTEM_ACCOUNT_CODES.HOSPITAL_EXPENSE,
-  "Office Supplies": SYSTEM_ACCOUNT_CODES.OFFICE_EXPENSE,
-  "Sports Equipment": SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE,
-  "Other Assets": SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE,
-  Others: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE
+/** Purchases at or above this (NPR) in an asset category are capitalised by default. */
+export const DEFAULT_CAPITALIZATION_THRESHOLD_NPR = 5000;
+
+/**
+ * Direct Expense (purchase) posting table — the one place the backend looks up where a
+ * purchase goes. Asset categories go to their fixed-asset pool when the bill is at or above
+ * the capitalisation threshold (and the asset is registered in Fixed Assets), otherwise to
+ * the expense account. Consumables always go to the expense account.
+ */
+export const PURCHASE_CATEGORY_POSTING: Record<string, { expenseAccount: string; assetPool?: "B" | "D" }> = {
+  // Assets — Pool B: computers, furniture, office equipment
+  Computers: { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "B" },
+  "Computer Equipment": { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "B" },
+  Furniture: { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "B" },
+  // Assets — Pool D: plant, machinery and other depreciable assets
+  "Laboratory Equipment": { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "D" },
+  "Medical Equipment": { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "D" },
+  "Sports Equipment": { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "D" },
+  "Other Assets": { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE, assetPool: "D" },
+  // Consumables
+  Books: { expenseAccount: SYSTEM_ACCOUNT_CODES.LIBRARY_EXPENSE },
+  Chemicals: { expenseAccount: SYSTEM_ACCOUNT_CODES.LAB_EXPENSE },
+  Stationery: { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE },
+  "Office Supplies": { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE },
+  Others: { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE }
 };
+
+const POOL_ACCOUNT: Record<"B" | "D", string> = {
+  B: SYSTEM_ACCOUNT_CODES.FIXED_ASSET_POOL_B,
+  D: SYSTEM_ACCOUNT_CODES.FIXED_ASSET_POOL_D
+};
+
+/** Account a purchase is debited to, and the asset pool when it is capitalised. */
+export const purchasePostingFor = (
+  category: string,
+  amountNpr: number,
+  capitalizationThresholdNpr: number = DEFAULT_CAPITALIZATION_THRESHOLD_NPR
+): { accountCode: string; assetPool?: "B" | "D" } => {
+  const row = PURCHASE_CATEGORY_POSTING[category] ?? { expenseAccount: SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE };
+  if (row.assetPool && amountNpr >= capitalizationThresholdNpr) {
+    return { accountCode: POOL_ACCOUNT[row.assetPool], assetPool: row.assetPool };
+  }
+  return { accountCode: row.expenseAccount };
+};
+
+/** Expense account per purchase category (below the threshold). */
+export const PURCHASE_CATEGORY_ACCOUNT_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(PURCHASE_CATEGORY_POSTING).map(([category, row]) => [category, row.expenseAccount])
+);
 
 export const INCOME_CATEGORY_ACCOUNT_MAP: Record<string, string> = {
   Donation: SYSTEM_ACCOUNT_CODES.DONATION_INCOME,

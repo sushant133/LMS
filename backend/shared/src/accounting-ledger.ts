@@ -17,8 +17,26 @@ export const journalLineSchema = z.object({
   accountName: z.string().min(1),
   debitNpr: moneySchema.default(0),
   creditNpr: moneySchema.default(0),
-  description: z.string().optional().or(z.literal(""))
+  description: z.string().optional().or(z.literal("")),
+  /** Bank account a Bank (1101) line moves — links it to that bank's balance and reconciliation. */
+  bankAccountId: optionalObjectIdSchema
 });
+
+/**
+ * Group (header) accounts are parents of other accounts (1000 Assets, 4000 Income…).
+ * They only total their children and must never be posted to or budgeted directly.
+ */
+export const headerAccountCodes = (
+  accounts: Array<{ code: string; parentCode?: string | null; isGroup?: boolean | null; isActive?: boolean | null }>
+): Set<string> =>
+  new Set([
+    // Only active ledgers make their parent a group — a deactivated sub-ledger does not
+    ...accounts
+      .filter((a) => a.isActive !== false)
+      .map((a) => a.parentCode)
+      .filter((code): code is string => Boolean(code)),
+    ...accounts.filter((a) => a.isGroup === true).map((a) => a.code)
+  ]);
 
 export const journalEntrySchema = z.object({
   voucherType: z.enum(VOUCHER_TYPES).default("JOURNAL"),
@@ -216,6 +234,8 @@ export interface ChartOfAccountRecord {
   parentCode?: string;
   description?: string;
   isSystem: boolean;
+  /** Group (header) account — has accounts under it; totals only, never posted to. */
+  isGroup?: boolean;
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;

@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
-import { hasInstitutionAccess, type DashboardFeeDueStudent, type DashboardHighlight } from "@phit-erp/shared";
+import {
+  hasInstitutionAccess,
+  STUDENT_ACADEMIC_STATUSES,
+  type DashboardFeeDueStudent,
+  type DashboardHighlight
+} from "@phit-erp/shared";
 import { AccountingSettings } from "../models/AccountingSettings.js";
 import { Attendance } from "../models/Attendance.js";
 import { Batch } from "../models/Batch.js";
@@ -22,6 +27,7 @@ import { getTeacherScope } from "../utils/teacherScope.js";
 import { sendNotification, notifyParentsOfStudent } from "../utils/notificationService.js";
 import { ApiError } from "../utils/apiError.js";
 import { sendSuccess } from "../utils/response.js";
+import { REAL_RECEIPT_FILTER } from "../utils/accountingCalculations.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
 const resolvePaymentStatus = (
@@ -157,7 +163,8 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   const teacherScope = role === "TEACHER" ? await getTeacherScope(req) : null;
   const linkedStudentIds = isParent ? await getLinkedStudentIds(req) : [];
   const attendanceFilter: Record<string, unknown> = { schoolId };
-  const feeFilter: Record<string, unknown> = { schoolId };
+  // Real fee receipts only (no deleted receipts or OPEN- plan charges)
+  const feeFilter: Record<string, unknown> = { schoolId, isDeleted: false, ...REAL_RECEIPT_FILTER };
   const includeAttendanceChart = Boolean(studentProfile || teacherScope);
 
   if (teacherScope) {
@@ -275,7 +282,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
 
   const adminLike = institutionAccess;
 
-  let collegeYearStats: Array<{ label: string; value: number }> = [];
+  let collegeYearStats: Array<{ label: string; value: number; href?: string; change?: string }> = [];
   /** Male/Female pie for currently enrolled (ACTIVE) students in running years. */
   let genderChart: Array<{ name: string; value: number }> = [];
   let genderChartScope = "";
@@ -358,16 +365,14 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     };
 
     if (college) {
-      const [years, batches, allStudents, passedOutCount, alumniCount] =
+      const [years, batches, allStudents] =
         await Promise.all([
           Year.find({ schoolId }).select("_id name level isActive batchId").lean(),
           Batch.find({ schoolId }).select("_id name").sort({ name: 1 }).lean(),
           // Every student: a chosen batch shows all of its students, not only active ones
           Student.find({ schoolId })
             .select("batchId yearId academicStatus gender ethnicityCategory religion caste")
-            .lean(),
-          Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
-          Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
+            .lean()
         ]);
 
       const yearNameById = new Map(years.map((year) => [year._id.toString(), year.name]));
@@ -378,6 +383,10 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       for (const year of years) {
         countsByYearName.set(year.name, 0);
       }
+      // Every student lands on exactly one card, so the cards add up to the Students total:
+      // ACTIVE students by year, every other status on its own card.
+      const countsByStatus = new Map<string, number>();
+      let activeWithoutYear = 0;
 
       const hasActiveYearFilter = activeYearIds.size > 0;
       const scopedForCharts: Array<{
@@ -392,8 +401,12 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         const batchId = student.batchId ? student.batchId.toString() : "";
         const academicStatus = student.academicStatus || "ACTIVE";
         const yearName = yearId ? yearNameById.get(yearId) : undefined;
-        if (yearName && academicStatus === "ACTIVE") {
+        if (academicStatus !== "ACTIVE") {
+          countsByStatus.set(academicStatus, (countsByStatus.get(academicStatus) ?? 0) + 1);
+        } else if (yearName) {
           countsByYearName.set(yearName, (countsByYearName.get(yearName) ?? 0) + 1);
+        } else {
+          activeWithoutYear += 1;
         }
         // Full demographics for client batch/year filters (every student, any status)
         studentDemographics.push({
@@ -414,12 +427,31 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         scopedForCharts.push(student);
       }
 
+      const statusCard = (status: (typeof STUDENT_ACADEMIC_STATUSES)[number], label: string, always = false) => {
+        const value = countsByStatus.get(status) ?? 0;
+        return value > 0 || always ? [{ label, value, href: `/students/list?status=${status}` }] : [];
+      };
       collegeYearStats = [
         ...[...countsByYearName.entries()]
           .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([label, value]) => ({ label, value })),
-        { label: "Passed Out", value: passedOutCount },
-        { label: "Alumni", value: alumniCount }
+          .map(([label, value]) => ({
+            label,
+            value,
+            href: `/students/list?yearName=${encodeURIComponent(label)}&status=ACTIVE`
+          })),
+        ...(activeWithoutYear > 0
+          ? [{ label: "Active — No Year Set", value: activeWithoutYear, href: "/students/list?status=ACTIVE&yearName=__none__" }]
+          : []),
+        ...statusCard("PASSED_OUT", "Passed Out", true),
+        ...statusCard("ALUMNI", "Alumni", true),
+        ...statusCard("PENDING_NOT_PASSED", "Back (Not Passed)"),
+        ...statusCard("WITHDRAWN", "Dropped Out (Withdrawn)"),
+        ...statusCard("CANCELLED", "Cancelled"),
+        ...statusCard("SUSPENDED", "Suspended"),
+        // Any status not listed above (older data) still counts toward the total
+        ...[...countsByStatus.entries()]
+          .filter(([status]) => !(STUDENT_ACADEMIC_STATUSES as readonly string[]).includes(status))
+          .map(([status, value]) => ({ label: status.replace(/_/g, " "), value, href: `/students/list?status=${status}` }))
       ];
 
       const tallied = tallyDemographics(scopedForCharts);

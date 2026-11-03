@@ -33,6 +33,7 @@ import {
 } from "../utils/teacherScope.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import { expandCurriculumSubjectIds } from "../utils/academicManagementService.js";
 
 type ObjectIdLike = { toString(): string };
 
@@ -145,7 +146,12 @@ const buildAssignmentFilter = async (req: Request): Promise<Record<string, unkno
   if (typeof req.query.sectionId === "string") filter.sectionId = req.query.sectionId;
   if (typeof req.query.batchId === "string") filter.batchId = req.query.batchId;
   if (typeof req.query.yearId === "string") filter.yearId = req.query.yearId;
-  if (typeof req.query.subjectId === "string") filter.subjectId = req.query.subjectId;
+  if (typeof req.query.subjectId === "string") {
+    // A subject is one per course year: match its copy in every batch (teachers and
+    // students are narrowed to their own subjects below)
+    const ids = await expandCurriculumSubjectIds(tenantObjectId(req), req.query.subjectId);
+    filter.subjectId = ids.length === 1 ? ids[0] : { $in: ids };
+  }
   if (typeof req.query.type === "string") filter.type = req.query.type;
   if (typeof req.query.topic === "string" && req.query.topic.trim()) {
     filter.topic = req.query.topic.trim();

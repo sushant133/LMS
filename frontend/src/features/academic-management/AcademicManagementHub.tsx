@@ -24,6 +24,7 @@ import {
   LayoutDashboard,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
@@ -122,7 +123,12 @@ export const AcademicManagementHub = () => {
   const canSyllabusOversight = isAdminWorkspace && isAdmin;
   const tabs = allTabs.filter((tab) => !tab.adminOnly || canSyllabusOversight);
 
-  const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  // ?tab=reports (e.g. from Reports & Analytics) opens that tab directly
+  const [searchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    tabs.some((tab) => tab.id === tabFromUrl) ? (tabFromUrl as Tab) : "dashboard",
+  );
   /**
    * Performance: each panel loads its own (heavy) data as soon as it mounts.
    * Mounting every tab up front made opening the Dashboard also load Syllabus,
@@ -131,7 +137,7 @@ export const AcademicManagementHub = () => {
    * unsaved form state survives tab switches.
    */
   const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(
-    () => new Set<Tab>(["dashboard"]),
+    () => new Set<Tab>(["dashboard", activeTab]),
   );
   useEffect(() => {
     setVisitedTabs((current) =>

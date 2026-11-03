@@ -6,8 +6,24 @@ import {
   generateTeacherMasterExport,
   generateInfrastructureExport,
   generateFlashIIPerformance,
+  generateReportsAnalytics,
   toCsv
 } from "../utils/iemisExport.js";
+
+const STUDENT_MASTER_HEADERS = [
+  "admissionNumber", "fullName", "gender", "dateOfBirthBs", "className", "sectionName", "rollNumber",
+  "disabilityCategory", "ethnicityCategory", "religion", "caste", "fatherPhone", "motherPhone",
+  "guardianName", "guardianPhone", "address", "feesDueNpr", "academicStatus"
+];
+const TEACHER_MASTER_HEADERS = [
+  "teacherCode", "fullName", "qualification", "joinedDateBs", "subjects", "paymentType",
+  "basicSalaryNpr", "periodRateNpr", "tenderAmountNpr"
+];
+
+/** Reports & Analytics dashboard data (JSON). */
+export const getReportsAnalytics = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, "Reports analytics", await generateReportsAnalytics(req));
+});
 import { recordAudit } from "../utils/audit.js";
 
 /**
@@ -25,7 +41,7 @@ export const exportStudentMasterCsv = asyncHandler(async (req: Request, res: Res
     after: { count: rows.length }
   });
 
-  const csv = toCsv(rows);
+  const csv = toCsv(rows, STUDENT_MASTER_HEADERS);
   const filename = `iemis_student_master_${Date.now()}.csv`;
 
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -43,7 +59,7 @@ export const exportTeacherMasterCsv = asyncHandler(async (req: Request, res: Res
     after: { count: rows.length }
   });
 
-  const csv = toCsv(rows);
+  const csv = toCsv(rows, TEACHER_MASTER_HEADERS);
   const filename = `iemis_teacher_master_${Date.now()}.csv`;
 
   res.setHeader("Content-Type", "text/csv; charset=utf-8");

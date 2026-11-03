@@ -1,6 +1,19 @@
 import type { DashboardResponse, NotificationRecord } from "@phit-erp/shared";
 import { queryClient } from "lib/queryClient";
 
+/** One page of the Notifications page feed (useInfiniteQuery). */
+export interface NotificationFeedPage {
+  rows: NotificationRecord[];
+  total: number;
+}
+/** Cached notification lists are either a plain array or the paged feed. */
+type CachedNotifications =
+  | NotificationRecord[]
+  | { pages: NotificationFeedPage[]; pageParams: unknown[] }
+  | undefined;
+const cachedRows = (data: CachedNotifications): NotificationRecord[] =>
+  !data ? [] : Array.isArray(data) ? data : data.pages.flatMap((page) => page.rows);
+
 type NotificationChange =
   | { kind: "read"; id?: string }
   | { kind: "remove"; id?: string };
@@ -11,9 +24,9 @@ const unreadAffected = (change: NotificationChange): number | "all" => {
     // Mark-all-read and clear-all both leave nothing unread.
     return "all";
   }
-  const lists = queryClient.getQueriesData<NotificationRecord[]>({ queryKey: ["notifications"] });
+  const lists = queryClient.getQueriesData<CachedNotifications>({ queryKey: ["notifications"] });
   for (const [, list] of lists) {
-    const match = list?.find((item) => item._id === change.id);
+    const match = cachedRows(list).find((item) => item._id === change.id);
     if (match) return match.read ? 0 : 1;
   }
   const dashboards = queryClient.getQueriesData<DashboardResponse>({ queryKey: ["dashboard"] });
@@ -76,16 +89,36 @@ const applyNotificationChangeLocally = (change: NotificationChange): void => {
     patchDashboardNotifications(old, change, delta),
   );
 
-  queryClient.setQueriesData<NotificationRecord[]>(
-    { queryKey: ["notifications"] },
+  const patchRows = (rows: NotificationRecord[]): NotificationRecord[] => {
+    if (change.kind === "remove") {
+      return change.id ? rows.filter((item) => item._id !== change.id) : [];
+    }
+    return rows.map((item) =>
+      !change.id || item._id === change.id ? { ...item, read: true } : item,
+    );
+  };
+  queryClient.setQueriesData<CachedNotifications>({ queryKey: ["notifications"] }, (old) => {
+    if (!old) return old;
+    if (Array.isArray(old)) return patchRows(old);
+    const removed = change.kind === "remove" ? (change.id ? 1 : Infinity) : 0;
+    return {
+      ...old,
+      pages: old.pages.map((page) => ({
+        rows: patchRows(page.rows),
+        total: Math.max(0, page.total - removed),
+      })),
+    };
+  });
+
+  // True totals shown on the Notifications page
+  queryClient.setQueriesData<{ count: number; total: number }>(
+    { queryKey: ["notification-totals"] },
     (old) => {
       if (!old) return old;
-      if (change.kind === "remove") {
-        return change.id ? old.filter((item) => item._id !== change.id) : [];
-      }
-      return old.map((item) =>
-        !change.id || item._id === change.id ? { ...item, read: true } : item,
-      );
+      const count = delta === "all" ? 0 : Math.max(0, old.count - delta);
+      const total =
+        change.kind === "remove" ? (change.id ? Math.max(0, old.total - 1) : 0) : old.total;
+      return { count, total };
     },
   );
 };
@@ -108,6 +141,7 @@ export const invalidateNotificationQueries = async (): Promise<void> => {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ["notifications"] }),
     queryClient.invalidateQueries({ queryKey: ["notification-count"] }),
+    queryClient.invalidateQueries({ queryKey: ["notification-totals"] }),
     queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
   ]);
 };

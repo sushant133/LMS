@@ -18,7 +18,8 @@ import {
   type CollegeStaffReportResponse,
   type HrDocument,
 } from "@phit-erp/shared";
-import { Eye, Printer, Upload } from "lucide-react";
+import { Barcode, Eye, Printer, Upload } from "lucide-react";
+import { downloadCodeBarcodeListPdf } from "lib/barcodeListPdf";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
@@ -120,6 +121,7 @@ export const CollegeStaffManager = ({
       availableSchools[0]?.address ?? user?.school?.address,
     );
   const [printing, setPrinting] = useState(false);
+  const [downloadingBarcodes, setDownloadingBarcodes] = useState(false);
   const [form, setForm] = useState<CollegeStaffInput>(() =>
     createDefaultStaff(listCategory ?? "OFFICE_ASSISTANT"),
   );
@@ -466,6 +468,51 @@ export const CollegeStaffManager = ({
     statusFilter,
     title,
   ]);
+
+  /** PDF of the listed staff with a barcode of each Employee ID. */
+  const handleDownloadBarcodes = async () => {
+    if (staffList.length === 0) {
+      toast.error("No staff to download");
+      return;
+    }
+    setDownloadingBarcodes(true);
+    try {
+      await downloadCodeBarcodeListPdf(
+        staffList.map((staff) => ({
+          cells: [
+            staff.fullName || "Unknown",
+            staff.designation?.trim() ||
+              (staff.category ? COLLEGE_STAFF_CATEGORY_LABELS[staff.category] : "") ||
+              "",
+            staff.department?.trim() || "",
+          ],
+          code: String(staff.staffId ?? "").trim(),
+        })),
+        {
+          title: `${title} — Employee ID barcodes`,
+          institutionName: institutionName || printBranding.name || "Institution",
+          institutionAddress: institutionAddress || undefined,
+          filename: `staff-barcodes-${new Date().toISOString().slice(0, 10)}`,
+          columns: [
+            { label: "Name", width: 44, bold: true },
+            { label: "Designation", width: 34 },
+            { label: "Department", width: 26 },
+          ],
+          codeLabel: "Employee ID",
+          codeWidth: 29,
+          barcodeWidth: 43,
+          noun: "staff member",
+        },
+      );
+      toast.success(
+        `Barcode list downloaded — ${staffList.length} staff member${staffList.length === 1 ? "" : "s"}`,
+      );
+    } catch (e) {
+      toast.error(parseErrorMessage(e));
+    } finally {
+      setDownloadingBarcodes(false);
+    }
+  };
 
   const handlePrintList = async () => {
     if (printableStaff.length === 0) {
@@ -1056,15 +1103,27 @@ export const CollegeStaffManager = ({
               {staffList.length === 1 ? "" : "s"}
             </p>
           </div>
-          <Button
-            variant="outline"
-            className="w-full shrink-0 sm:w-auto"
-            disabled={printableStaff.length === 0 || printing}
-            onClick={() => void handlePrintList()}
-          >
-            <Printer className="mr-2 h-4 w-4" />
-            {printing ? "Preparing…" : "Print list"}
-          </Button>
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button
+              variant="outline"
+              className="w-full shrink-0 sm:w-auto"
+              disabled={printableStaff.length === 0 || printing}
+              onClick={() => void handlePrintList()}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              {printing ? "Preparing…" : "Print list"}
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full shrink-0 sm:w-auto"
+              title="PDF of the listed staff: name, designation, department, Employee ID and its barcode"
+              disabled={staffList.length === 0 || downloadingBarcodes}
+              onClick={() => void handleDownloadBarcodes()}
+            >
+              <Barcode className="mr-2 h-4 w-4" />
+              {downloadingBarcodes ? "Preparing…" : "Download barcodes"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="min-w-0 space-y-4">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">

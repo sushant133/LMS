@@ -51,7 +51,14 @@ import {
   bsDateToAdString,
   formatDualDateCell,
   downloadRecordsExcel,
+  labelYearsWithBatch,
 } from "./accountingUtils";
+import {
+  BankAccountField,
+  bankAccountForMethod,
+  missingBankAccountError,
+  useActiveBankAccounts,
+} from "./BankAccountField";
 import { invalidateAccountingQueries } from "./invalidateAccountingQueries";
 import { printHtmlViaIframe } from "./voucherPrint";
 
@@ -155,6 +162,8 @@ const emptyRecordForm = () => ({
   paidDateBs: "",
   paidDateAd: "",
   paymentMethod: "CASH" as (typeof PAYMENT_METHODS)[number],
+  /** Bank account the deposit went into (bank / wallet payments). */
+  bankAccountId: "",
   receivedByName: "",
   paidByName: "",
   notes: "",
@@ -185,6 +194,8 @@ export const SecurityDepositRecordsPanel = () => {
   const [editDateAd, setEditDateAd] = useState("");
   const [editMethod, setEditMethod] =
     useState<(typeof PAYMENT_METHODS)[number]>("CASH");
+  const [editBankId, setEditBankId] = useState("");
+  const activeBankAccounts = useActiveBankAccounts();
   const [editNotes, setEditNotes] = useState("");
   const [editFeePaid, setEditFeePaid] = useState("");
 
@@ -224,7 +235,10 @@ export const SecurityDepositRecordsPanel = () => {
   });
 
   const batches = batchesQuery.data ?? [];
-  const years = yearsQuery.data ?? [];
+  const years = useMemo(
+    () => labelYearsWithBatch(yearsQuery.data ?? [], batches),
+    [yearsQuery.data, batches],
+  );
 
   const yearsFor = (batchId: string) =>
     batchId ? years.filter((y) => asId(y.batchId) === batchId) : years;
@@ -456,6 +470,7 @@ export const SecurityDepositRecordsPanel = () => {
     setEditMethod(
       (row.paymentMethod as (typeof PAYMENT_METHODS)[number]) || "CASH",
     );
+    setEditBankId(row.bankAccountId ?? "");
     setEditNotes(row.notes ?? "");
     scrollToForm("deposit-receipt-edit");
   };
@@ -476,6 +491,11 @@ export const SecurityDepositRecordsPanel = () => {
       toast.error("Enter payment date");
       return;
     }
+    const editBankError = missingBankAccountError(editMethod, editBankId, activeBankAccounts);
+    if (editBankError) {
+      toast.error(editBankError);
+      return;
+    }
     updateMutation.mutate({
       id: editingRow._id,
       body: {
@@ -484,6 +504,7 @@ export const SecurityDepositRecordsPanel = () => {
         paidDateBs,
         paidDateAd: paidDateAd || undefined,
         paymentMethod: editMethod,
+        bankAccountId: editBankId || undefined,
         notes: editNotes.trim() || undefined,
       },
     });
@@ -589,6 +610,15 @@ export const SecurityDepositRecordsPanel = () => {
       toast.error("Enter receipt number");
       return;
     }
+    const bankError = missingBankAccountError(
+      recordForm.paymentMethod,
+      recordForm.bankAccountId,
+      activeBankAccounts,
+    );
+    if (bankError) {
+      toast.error(bankError);
+      return;
+    }
     if (selectedRecordStudent?.securityDepositWaived) {
       toast.error(
         "Security deposit was marked not taken for this student — clear that on the student profile first",
@@ -608,6 +638,7 @@ export const SecurityDepositRecordsPanel = () => {
       scholarshipNpr: 0,
       lateFeeNpr: 0,
       paymentMethod: recordForm.paymentMethod,
+      bankAccountId: recordForm.bankAccountId || undefined,
       // Always the person recording this entry (same as Student Fee Records).
       receivedByName: currentUserName || undefined,
       paidByName: recordForm.paidByName.trim() || undefined,
@@ -1130,11 +1161,11 @@ export const SecurityDepositRecordsPanel = () => {
                   <FormField label="Payment method">
                     <Select
                       value={editMethod}
-                      onChange={(e) =>
-                        setEditMethod(
-                          e.target.value as (typeof PAYMENT_METHODS)[number],
-                        )
-                      }
+                      onChange={(e) => {
+                        const method = e.target.value as (typeof PAYMENT_METHODS)[number];
+                        setEditMethod(method);
+                        setEditBankId((current) => bankAccountForMethod(method, current, activeBankAccounts));
+                      }}
                     >
                       {PAYMENT_METHODS.map((m) => (
                         <option key={m} value={m}>
@@ -1143,6 +1174,12 @@ export const SecurityDepositRecordsPanel = () => {
                       ))}
                     </Select>
                   </FormField>
+                  <BankAccountField
+                    paymentMethod={editMethod}
+                    value={editBankId}
+                    banks={activeBankAccounts}
+                    onChange={setEditBankId}
+                  />
                   <FormField label="Date (BS)">
                     <NepaliDateField
                       value={editDateBs}
@@ -1746,11 +1783,15 @@ export const SecurityDepositRecordsPanel = () => {
                 <Select
                   value={recordForm.paymentMethod}
                   onChange={(e) =>
-                    setRecordForm((f) => ({
-                      ...f,
-                      paymentMethod: e.target
-                        .value as (typeof PAYMENT_METHODS)[number],
-                    }))
+                    setRecordForm((f) => {
+                      const paymentMethod = e.target
+                        .value as (typeof PAYMENT_METHODS)[number];
+                      return {
+                        ...f,
+                        paymentMethod,
+                        bankAccountId: bankAccountForMethod(paymentMethod, f.bankAccountId, activeBankAccounts),
+                      };
+                    })
                   }
                 >
                   {PAYMENT_METHODS.map((m) => (
@@ -1760,6 +1801,12 @@ export const SecurityDepositRecordsPanel = () => {
                   ))}
                 </Select>
               </FormField>
+              <BankAccountField
+                paymentMethod={recordForm.paymentMethod}
+                value={recordForm.bankAccountId}
+                banks={activeBankAccounts}
+                onChange={(bankAccountId) => setRecordForm((f) => ({ ...f, bankAccountId }))}
+              />
               <FormField label="Date (BS)">
                 <NepaliDateField
                   value={recordForm.paidDateBs}

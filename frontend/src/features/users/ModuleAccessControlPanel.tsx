@@ -1,3 +1,4 @@
+import { isModuleKeyHidden } from "lib/hiddenModules";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ERP_MODULES,
@@ -712,7 +713,7 @@ export const ModuleAccessControlPanel = ({
                 ) : null}
               </div>
               <ul className="divide-y divide-slate-100">
-                {group.keys.map((key) => {
+                {group.keys.filter((key) => !isModuleKeyHidden(key)).map((key) => {
                   const mode = (draftAccess[key] ?? "NONE") as ModuleAccessMode;
                   const isFieldDuty = key === "field-duty";
                   return (

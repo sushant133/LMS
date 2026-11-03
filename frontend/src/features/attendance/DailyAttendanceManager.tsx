@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -48,10 +49,10 @@ import {
   type AttendancePeriodSelection,
 } from "lib/attendancePeriodUtils";
 import {
-  downloadClassSummaryExcel,
+  downloadAttendanceReportExcel,
   downloadDailyAttendanceExcel,
   downloadOverallAttendanceWorkbook,
-  downloadStudentAttendanceExcel,
+  formatReportValue,
 } from "./attendanceUtils";
 import { AttendancePeriodFilter } from "./AttendancePeriodFilter";
 import { DailyAttendanceHistoryPanel } from "./DailyAttendanceHistoryPanel";
@@ -59,14 +60,37 @@ import { DailyAttendanceHistoryPanel } from "./DailyAttendanceHistoryPanel";
 /** Only this part of the Reports tab goes to the printer. */
 const DAILY_REPORT_PRINT_ID = "daily-attendance-report-print";
 
+/** Report menu, in this order. */
 const DAILY_REPORT_TYPE_LABELS: Record<DailyAttendanceReportType, string> = {
   summary: "Summary Report",
   class: "Class-wise Report",
   student: "Student-wise Report",
   defaulter: "Low Attendance Defaulters",
-  leave: "Leave Report",
+  absent: "Absentee Report",
+  leave: "Leave Report (incl. medical)",
   late: "Late Arrival Report",
+  "early-leave": "Early Leave Report",
 };
+
+type ReportColumn = { key: string; label: string };
+interface DailyReportResponse {
+  type: string;
+  columns?: ReportColumn[];
+  rows?: Array<Record<string, unknown>>;
+  threshold?: number;
+  records?: number;
+  attendancePercentage?: number;
+  totals?: {
+    present?: number;
+    absent?: number;
+    late?: number;
+    leave?: number;
+    medicalLeave?: number;
+    earlyLeave?: number;
+  };
+  teacherWise?: Array<Record<string, unknown>>;
+  teacherColumns?: ReportColumn[];
+}
 
 const statuses: DailyAttendanceStatus[] = [
   "PRESENT",
@@ -130,9 +154,17 @@ export const DailyAttendanceManager = ({
   const isSuperAdmin = useIsSystemAdministrator();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
+  // ?view=reports (e.g. from Reports & Analytics) opens the Reports tab directly
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState<
     "mark" | "history" | "dashboard" | "reports"
-  >(isTeacher ? "mark" : "dashboard");
+  >(() =>
+    searchParams.get("view") === "reports" && hasInstitutionRead
+      ? "reports"
+      : isTeacher
+        ? "mark"
+        : "dashboard",
+  );
   const [dateBs, setDateBs] = useState(formatTodayBs);
   const [selectedAssignment, setSelectedAssignment] =
     useState<DailyAttendanceAssignment | null>(null);
@@ -147,6 +179,10 @@ export const DailyAttendanceManager = ({
     useState<AttendancePeriodSelection>(createDefaultAttendancePeriod);
   const [reportType, setReportType] =
     useState<DailyAttendanceReportType>("summary");
+  /** Reports: Batch/Class and Year/Section filter, defaulter threshold. */
+  const [reportPrimaryId, setReportPrimaryId] = useState("");
+  const [reportSecondaryId, setReportSecondaryId] = useState("");
+  const [defaulterThreshold, setDefaulterThreshold] = useState("75");
   const [isExporting, setIsExporting] = useState(false);
   const [assignedTeacherId, setAssignedTeacherId] = useState("");
 
@@ -248,29 +284,66 @@ export const DailyAttendanceManager = ({
     enabled: view === "dashboard" && hasInstitutionRead,
   });
 
-  const reportsQuery = useQuery({
-    queryKey: ["daily-attendance-reports", reportType, attendancePeriodParams],
+  const reportPrimaryQuery = useQuery({
+    queryKey: ["daily-attendance-report-groups", isCollege ? "batches" : "classes"],
     queryFn: () =>
-      unwrap<{
-        type: string;
-        rows?:
-          | DailyAttendanceStudentReportRow[]
-          | Array<{
-              label: string;
-              present: number;
-              absent: number;
-              percentage: number;
-            }>;
-      }>(
+      unwrap<Array<{ _id: string; name: string }>>(
+        api.get(isCollege ? "/academics/batches" : "/academics/classes"),
+      ),
+    enabled: view === "reports" && hasInstitutionRead,
+  });
+  const reportSecondaryQuery = useQuery({
+    queryKey: ["daily-attendance-report-subgroups", isCollege, reportPrimaryId],
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string }>>(
+        api.get(isCollege ? "/academics/years" : "/academics/sections", {
+          params: isCollege
+            ? { batchId: reportPrimaryId }
+            : { classId: reportPrimaryId },
+        }),
+      ),
+    enabled: view === "reports" && hasInstitutionRead && Boolean(reportPrimaryId),
+  });
+  const reportGroupParams: Record<string, string> = {
+    ...(reportPrimaryId
+      ? { [isCollege ? "batchId" : "classId"]: reportPrimaryId }
+      : {}),
+    ...(reportSecondaryId
+      ? { [isCollege ? "yearId" : "sectionId"]: reportSecondaryId }
+      : {}),
+  };
+  const reportScopeLabel = [
+    (reportPrimaryQuery.data ?? []).find((item) => item._id === reportPrimaryId)?.name,
+    (reportSecondaryQuery.data ?? []).find((item) => item._id === reportSecondaryId)?.name,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const reportsQuery = useQuery({
+    queryKey: [
+      "daily-attendance-reports",
+      reportType,
+      attendancePeriodParams,
+      reportGroupParams,
+      reportType === "defaulter" ? defaulterThreshold : "",
+    ],
+    queryFn: () =>
+      unwrap<DailyReportResponse>(
         api.get("/daily-attendance/reports", {
           params: {
             type: reportType,
             ...attendancePeriodParams,
+            ...reportGroupParams,
+            ...(reportType === "defaulter"
+              ? { threshold: Number(defaulterThreshold) || 75 }
+              : {}),
           },
         }),
       ),
     enabled: view === "reports" && hasInstitutionRead,
   });
+  const reportColumns = reportsQuery.data?.columns ?? [];
+  const reportRows = reportsQuery.data?.rows ?? [];
 
   const exportAttendanceWorkbook = async () => {
     setIsExporting(true);
@@ -1257,7 +1330,7 @@ export const DailyAttendanceManager = ({
             <CardTitle>Reports & Export</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
                   Report Type
@@ -1270,14 +1343,65 @@ export const DailyAttendanceManager = ({
                     )
                   }
                 >
-                  <option value="summary">Summary Report</option>
-                  <option value="class">Class-wise Report</option>
-                  <option value="student">Student-wise Report</option>
-                  <option value="defaulter">Low Attendance Defaulters</option>
-                  <option value="leave">Leave Report</option>
-                  <option value="late">Late Arrival Report</option>
+                  {(
+                    Object.keys(DAILY_REPORT_TYPE_LABELS) as DailyAttendanceReportType[]
+                  ).map((type) => (
+                    <option key={type} value={type}>
+                      {DAILY_REPORT_TYPE_LABELS[type]}
+                    </option>
+                  ))}
                 </Select>
               </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  {labels.primary}
+                </label>
+                <Select
+                  value={reportPrimaryId}
+                  onChange={(event) => {
+                    setReportPrimaryId(event.target.value);
+                    setReportSecondaryId("");
+                  }}
+                >
+                  <option value="">All</option>
+                  {(reportPrimaryQuery.data ?? []).map((item) => (
+                    <option key={item._id} value={item._id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  {labels.secondary}
+                </label>
+                <Select
+                  value={reportSecondaryId}
+                  onChange={(event) => setReportSecondaryId(event.target.value)}
+                  disabled={!reportPrimaryId}
+                >
+                  <option value="">All</option>
+                  {(reportSecondaryQuery.data ?? []).map((item) => (
+                    <option key={item._id} value={item._id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {reportType === "defaulter" ? (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Defaulter below (%)
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={defaulterThreshold}
+                    onChange={(event) => setDefaulterThreshold(event.target.value)}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <AttendancePeriodFilter
@@ -1286,95 +1410,71 @@ export const DailyAttendanceManager = ({
               error={periodCheck.error}
             />
 
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={periodInvalid}
+                onClick={() => {
+                  if (!historyQuery.data?.length) {
+                    toast.error("No records available to export.");
+                    return;
+                  }
+                  downloadDailyAttendanceExcel(
+                    historyQuery.data,
+                    `daily-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`,
+                  );
+                  toast.success("Daily attendance Excel downloaded");
+                }}
+              >
+                Export Daily Summary Excel
+              </Button>
+              <Button
+                variant="outline"
+                disabled={isExporting || periodInvalid}
+                onClick={() => void exportAttendanceWorkbook()}
+              >
+                {isExporting ? "Exporting..." : "Export Overall Attendance Excel"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={periodInvalid || reportRows.length === 0}
+                onClick={() => {
+                  downloadAttendanceReportExcel(
+                    reportColumns,
+                    reportRows,
+                    DAILY_REPORT_TYPE_LABELS[reportType],
+                    `${reportType}-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`,
+                  );
+                  toast.success("Report Excel downloaded");
+                }}
+              >
+                Export Report Excel
+              </Button>
+              <Button
+                variant="outline"
+                disabled={periodInvalid || !reportsQuery.data}
+                onClick={() => {
+                  // Print only the report below — not the whole screen
+                  void printElementById(
+                    DAILY_REPORT_PRINT_ID,
+                    "daily-attendance-report",
+                    reportColumns.length > 8 ? "a4-landscape" : "a4-portrait",
+                  ).catch((error) => toast.error(parseErrorMessage(error)));
+                }}
+              >
+                Print
+              </Button>
+            </div>
+
             {reportsQuery.isLoading ? (
               <LoadingState />
+            ) : reportsQuery.isError ? (
+              <EmptyState
+                title="Could not load report"
+                description={parseErrorMessage(reportsQuery.error)}
+              />
             ) : (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    disabled={periodInvalid}
-                    onClick={() => {
-                      if (!historyQuery.data?.length) {
-                        toast.error("No records available to export.");
-                        return;
-                      }
-                      downloadDailyAttendanceExcel(
-                        historyQuery.data,
-                        `daily-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`,
-                      );
-                      toast.success("Daily attendance Excel downloaded");
-                    }}
-                  >
-                    Export Daily Summary Excel
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={isExporting || periodInvalid}
-                    onClick={() => void exportAttendanceWorkbook()}
-                  >
-                    {isExporting
-                      ? "Exporting..."
-                      : "Export Overall Attendance Excel"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={periodInvalid}
-                    onClick={() => {
-                      const rows = reportsQuery.data?.rows;
-                      if (!rows?.length) {
-                        toast.error("No report rows available to export.");
-                        return;
-                      }
-                      const periodLabel =
-                        getAttendancePeriodLabel(periodSelection);
-                      if (reportType === "class") {
-                        downloadClassSummaryExcel(
-                          rows as Array<{
-                            label: string;
-                            present: number;
-                            absent: number;
-                            percentage: number;
-                          }>,
-                          `class-attendance_${periodLabel}.xlsx`,
-                        );
-                      } else if (
-                        reportType === "student" ||
-                        reportType === "defaulter"
-                      ) {
-                        downloadStudentAttendanceExcel(
-                          rows as DailyAttendanceStudentReportRow[],
-                          `student-attendance_${periodLabel}.xlsx`,
-                        );
-                      } else {
-                        toast.error(
-                          "Use overall attendance export for this report type.",
-                        );
-                        return;
-                      }
-                      toast.success("Report Excel downloaded");
-                    }}
-                  >
-                    Export Report Excel
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={periodInvalid}
-                    onClick={() => {
-                      // Print only the report below — not the whole screen
-                      // (tabs, filters and buttons used to print with it)
-                      void printElementById(
-                        DAILY_REPORT_PRINT_ID,
-                        "daily-attendance-report",
-                        "a4-portrait",
-                      ).catch((error) => toast.error(parseErrorMessage(error)));
-                    }}
-                  >
-                    Print
-                  </Button>
-                </div>
-
-                <div id={DAILY_REPORT_PRINT_ID} className="space-y-4">
+              <div id={DAILY_REPORT_PRINT_ID} className="space-y-4">
                 {(() => {
                   const branding = getPrintInstitutionBranding();
                   return (
@@ -1388,218 +1488,79 @@ export const DailyAttendanceManager = ({
                         </p>
                       ) : null}
                       <p className="mt-1 text-sm font-semibold text-slate-800">
-                        Daily Attendance Report —{" "}
+                        Student Daily Attendance —{" "}
                         {DAILY_REPORT_TYPE_LABELS[reportType] ?? "Report"}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-600">
                         Period: {getAttendancePeriodLabel(periodSelection)}
+                        {reportScopeLabel ? ` · ${reportScopeLabel}` : ""}
+                        {reportType === "defaulter"
+                          ? ` · Below ${reportsQuery.data?.threshold ?? defaulterThreshold}%`
+                          : ""}
                       </p>
                     </div>
                   );
                 })()}
 
                 {reportType === "summary" && reportsQuery.data ? (
-                  <div className="space-y-4">
-                    {/* Paper: a plain summary row instead of the screen cards */}
-                    <table className="hidden w-full border-collapse text-sm print:table">
-                      <tbody>
-                        <tr>
-                          <td className="border border-slate-400 px-2 py-1 font-semibold">Records</td>
-                          <td className="border border-slate-400 px-2 py-1">
-                            {(reportsQuery.data as { records?: number }).records ?? 0}
-                          </td>
-                          <td className="border border-slate-400 px-2 py-1 font-semibold">Attendance %</td>
-                          <td className="border border-slate-400 px-2 py-1">
-                            {(reportsQuery.data as { attendancePercentage?: number })
-                              .attendancePercentage ?? 0}
-                            %
-                          </td>
-                          <td className="border border-slate-400 px-2 py-1 font-semibold">Present</td>
-                          <td className="border border-slate-400 px-2 py-1">
-                            {(reportsQuery.data as { totals?: { present?: number } })
-                              .totals?.present ?? 0}
-                          </td>
-                          <td className="border border-slate-400 px-2 py-1 font-semibold">Absent</td>
-                          <td className="border border-slate-400 px-2 py-1">
-                            {(reportsQuery.data as { totals?: { absent?: number } })
-                              .totals?.absent ?? 0}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <div className="no-print grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <Card>
-                        <CardContent className="pt-4">
-                          <p className="text-xs text-slate-500">Records</p>
-                          <p className="text-2xl font-semibold">
-                            {(reportsQuery.data as { records?: number })
-                              .records ?? 0}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="pt-4">
-                          <p className="text-xs text-slate-500">Attendance %</p>
-                          <p className="text-2xl font-semibold">
-                            {(
-                              reportsQuery.data as {
-                                attendancePercentage?: number;
-                              }
-                            ).attendancePercentage ?? 0}
-                            %
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="pt-4">
-                          <p className="text-xs text-slate-500">Present</p>
-                          <p className="text-2xl font-semibold text-emerald-700">
-                            {(
-                              reportsQuery.data as {
-                                totals?: { present?: number };
-                              }
-                            ).totals?.present ?? 0}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="pt-4">
-                          <p className="text-xs text-slate-500">Absent</p>
-                          <p className="text-2xl font-semibold text-rose-700">
-                            {(
-                              reportsQuery.data as {
-                                totals?: { absent?: number };
-                              }
-                            ).totals?.absent ?? 0}
-                          </p>
-                        </CardContent>
-                      </Card>
-                    </div>
-                    {reportsQuery.data.rows &&
-                    reportsQuery.data.rows.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHead>
-                            <tr>
-                              <Th>Class / Group</Th>
-                              <Th>Present</Th>
-                              <Th>Absent</Th>
-                              <Th>Percentage</Th>
-                            </tr>
-                          </TableHead>
-                          <TableBody>
-                            {(
-                              reportsQuery.data.rows as Array<{
-                                label: string;
-                                present: number;
-                                absent: number;
-                                percentage: number;
-                              }>
-                            ).map((row) => (
-                              <tr key={row.label}>
-                                <Td>{row.label}</Td>
-                                <Td>{row.present}</Td>
-                                <Td>{row.absent}</Td>
-                                <Td>{row.percentage}%</Td>
-                              </tr>
-                            ))}
-                          </TableBody>
-                        </Table>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-7">
+                    {[
+                      { label: "Sheets", value: reportsQuery.data.records ?? 0 },
+                      {
+                        label: "Attendance %",
+                        value: `${reportsQuery.data.attendancePercentage ?? 0}%`,
+                      },
+                      { label: "Present", value: reportsQuery.data.totals?.present ?? 0, tone: "text-emerald-700" },
+                      { label: "Absent", value: reportsQuery.data.totals?.absent ?? 0, tone: "text-rose-700" },
+                      { label: "Late", value: reportsQuery.data.totals?.late ?? 0, tone: "text-amber-700" },
+                      {
+                        label: "Leave",
+                        value:
+                          (reportsQuery.data.totals?.leave ?? 0) +
+                          (reportsQuery.data.totals?.medicalLeave ?? 0),
+                      },
+                      { label: "Early leave", value: reportsQuery.data.totals?.earlyLeave ?? 0 },
+                    ].map((card) => (
+                      <div
+                        key={card.label}
+                        className="rounded-lg border border-slate-300 p-3"
+                      >
+                        <p className="text-xs text-slate-500">{card.label}</p>
+                        <p className={`text-xl font-semibold ${card.tone ?? ""}`}>
+                          {card.value}
+                        </p>
                       </div>
-                    ) : (
-                      <EmptyState
-                        title="No class breakdown"
-                        description="No class-wise rows for this period."
-                      />
-                    )}
+                    ))}
                   </div>
-                ) : reportsQuery.data?.rows &&
-                  reportsQuery.data.rows.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHead>
-                        <tr>
-                          {reportType === "class" ? (
-                            <>
-                              <Th>Class</Th>
-                              <Th>Present</Th>
-                              <Th>Absent</Th>
-                              <Th>Percentage</Th>
-                            </>
-                          ) : reportType === "student" ||
-                            reportType === "defaulter" ? (
-                            <>
-                              <Th>Student</Th>
-                              <Th>Roll</Th>
-                              <Th>Present</Th>
-                              <Th>Absent</Th>
-                              <Th>Percentage</Th>
-                            </>
-                          ) : (
-                            <>
-                              <Th>Date</Th>
-                              <Th>Student</Th>
-                              <Th>Status</Th>
-                            </>
-                          )}
-                        </tr>
-                      </TableHead>
-                      <TableBody>
-                        {reportType === "class"
-                          ? (
-                              reportsQuery.data.rows as Array<{
-                                label: string;
-                                present: number;
-                                absent: number;
-                                percentage: number;
-                              }>
-                            ).map((row) => (
-                              <tr key={row.label}>
-                                <Td>{row.label}</Td>
-                                <Td>{row.present}</Td>
-                                <Td>{row.absent}</Td>
-                                <Td>{row.percentage}%</Td>
-                              </tr>
-                            ))
-                          : reportType === "student" ||
-                              reportType === "defaulter"
-                            ? (
-                                reportsQuery.data
-                                  .rows as DailyAttendanceStudentReportRow[]
-                              ).map((row) => (
-                                <tr key={row.studentId}>
-                                  <Td>{row.fullName}</Td>
-                                  <Td>{row.rollNumber}</Td>
-                                  <Td>{row.present}</Td>
-                                  <Td>{row.absent}</Td>
-                                  <Td>{row.percentage}%</Td>
-                                </tr>
-                              ))
-                            : (
-                                reportsQuery.data.rows as unknown as Array<{
-                                  dateBs: string;
-                                  studentId: string;
-                                  studentName?: string;
-                                  status: string;
-                                }>
-                              ).map((row) => (
-                                <tr key={`${row.dateBs}-${row.studentId}`}>
-                                  <Td>{row.dateBs}</Td>
-                                  <Td>{row.studentName ?? row.studentId}</Td>
-                                  <Td>{row.status}</Td>
-                                </tr>
-                              ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                ) : null}
+
+                {reportType === "summary" ? (
+                  <p className="text-sm font-semibold text-slate-700">
+                    {labels.primary}-wise summary
+                  </p>
+                ) : null}
+                {reportRows.length > 0 ? (
+                  <ReportTable columns={reportColumns} rows={reportRows} />
                 ) : (
                   <EmptyState
                     title="No report data"
-                    description="Adjust filters or record attendance to generate reports."
+                    description="No attendance matches this report, period and filter."
                   />
                 )}
-                </div>
-              </>
+
+                {reportType === "summary" &&
+                (reportsQuery.data?.teacherWise?.length ?? 0) > 0 ? (
+                  <>
+                    <p className="text-sm font-semibold text-slate-700">
+                      Teacher-wise summary
+                    </p>
+                    <ReportTable
+                      columns={reportsQuery.data?.teacherColumns ?? []}
+                      rows={reportsQuery.data?.teacherWise ?? []}
+                    />
+                  </>
+                ) : null}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1607,3 +1568,37 @@ export const DailyAttendanceManager = ({
     </div>
   );
 };
+
+/** S.N. + labelled columns; "%" columns show the sign. */
+const ReportTable = ({
+  columns,
+  rows,
+}: {
+  columns: Array<{ key: string; label: string }>;
+  rows: Array<Record<string, unknown>>;
+}) => (
+  <div className="overflow-x-auto">
+    <Table>
+      <TableHead>
+        <tr>
+          <Th className="w-12">S.N.</Th>
+          {columns.map((column) => (
+            <Th key={column.key} className="whitespace-nowrap">
+              {column.label}
+            </Th>
+          ))}
+        </tr>
+      </TableHead>
+      <TableBody>
+        {rows.map((row, index) => (
+          <tr key={index}>
+            <Td>{index + 1}</Td>
+            {columns.map((column) => (
+              <Td key={column.key}>{formatReportValue(column, row[column.key])}</Td>
+            ))}
+          </tr>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
+);

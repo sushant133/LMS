@@ -28,23 +28,34 @@ export const listNotifications = asyncHandler(async (req: Request, res: Response
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
   const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 100;
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 100;
+  // Paging: ?skip= loads the next page ("Load more"); meta.total is the full count.
+  const skipRaw = typeof req.query.skip === "string" ? Number(req.query.skip) : 0;
+  const skip = Number.isFinite(skipRaw) ? Math.max(0, Math.trunc(skipRaw)) : 0;
 
   const filter = buildPersonalNotificationFilter(req, {
     ...(unreadOnly ? { read: false } : {}),
     ...(type ? { type } : {})
   });
 
-  const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(limit).lean();
+  const [notifications, total] = await Promise.all([
+    Notification.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+    Notification.countDocuments(filter)
+  ]);
   return sendSuccess(
     res,
     "Notifications fetched",
-    notifications.map((n) => serializeNotification(n as Parameters<typeof serializeNotification>[0]))
+    notifications.map((n) => serializeNotification(n as Parameters<typeof serializeNotification>[0])),
+    200,
+    { skip, limit, total }
   );
 });
 
 export const getUnreadNotificationCount = asyncHandler(async (req: Request, res: Response) => {
-  const count = await Notification.countDocuments(buildPersonalNotificationFilter(req, { read: false }));
-  return sendSuccess(res, "Unread notification count fetched", { count });
+  const [count, total] = await Promise.all([
+    Notification.countDocuments(buildPersonalNotificationFilter(req, { read: false })),
+    Notification.countDocuments(buildPersonalNotificationFilter(req, {}))
+  ]);
+  return sendSuccess(res, "Unread notification count fetched", { count, total });
 });
 
 /**

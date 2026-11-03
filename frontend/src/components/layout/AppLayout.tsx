@@ -1,3 +1,4 @@
+import { isPathHidden } from "lib/hiddenModules";
 import { LogOut, Menu, PanelLeftClose, X } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
@@ -909,6 +910,8 @@ export const AppLayout = () => {
    */
   const filteredItems = useMemo(() => {
     const roleMatched = navItems
+      // Modules switched off for now (see lib/hiddenModules)
+      .filter((item) => !isPathHidden(item.path))
       .filter((item) => {
         // Role match OR explicit admin-department grant unlocks Administration
         if (hasAnyRole(item.roles)) return true;

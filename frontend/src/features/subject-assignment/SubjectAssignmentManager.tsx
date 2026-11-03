@@ -37,6 +37,7 @@ import {
   getAcademicLabels,
 } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
+import { groupSubjectsByCourseYear } from "lib/subjectOptions";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 
@@ -695,6 +696,11 @@ export const SubjectAssignmentManager = () => {
   const years = yearsQuery.data ?? [];
   const classes = classesQuery.data ?? [];
   const sections = sectionsQuery.data ?? [];
+  // Subject filter: one entry per subject and year (the server matches every batch's copy)
+  const filterSubjectGroups = groupSubjectsByCourseYear(subjects, {
+    years: isCollege ? years : [],
+    batches,
+  });
 
   const groupLabel = (row: SubjectAssignmentRecord): string => {
     if (isCollege) {
@@ -1383,13 +1389,13 @@ export const SubjectAssignmentManager = () => {
                 </FormField>
                 <FormField label="Subject">
                   <Select
-                    value={filterSubjectId}
+                    value={filterSubjectId ? filterSubjectGroups.optionFor(filterSubjectId) : ""}
                     onChange={(e) => setFilterSubjectId(e.target.value)}
                   >
                     <option value="">All subjects</option>
-                    {subjects.map((s) => (
-                      <option key={s._id} value={s._id}>
-                        {s.name}
+                    {filterSubjectGroups.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </Select>

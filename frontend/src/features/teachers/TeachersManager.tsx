@@ -9,7 +9,8 @@ import {
   type TeacherPaymentType,
   type TeacherRecord,
 } from "@phit-erp/shared";
-import { Printer } from "lucide-react";
+import { Barcode, Printer } from "lucide-react";
+import { downloadCodeBarcodeListPdf } from "lib/barcodeListPdf";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -153,6 +154,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       availableSchools[0]?.address ?? user?.school?.address,
     );
   const [printing, setPrinting] = useState(false);
+  const [downloadingBarcodes, setDownloadingBarcodes] = useState(false);
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
@@ -296,6 +298,47 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     }
   };
 
+  /** PDF of the listed teachers with a barcode of each teacher's code. */
+  const handleDownloadBarcodes = async () => {
+    if (teachers.length === 0) {
+      toast.error("No teachers to download");
+      return;
+    }
+    setDownloadingBarcodes(true);
+    try {
+      await downloadCodeBarcodeListPdf(
+        teachers.map((teacher) => ({
+          cells: [
+            teacher.user?.fullName ?? "Unknown teacher",
+            teacher.user?.designation?.trim() || DEFAULT_TEACHER_DESIGNATION,
+          ],
+          code: String(teacher.teacherCode ?? "").trim(),
+        })),
+        {
+          title: "Teacher list — teacher code barcodes",
+          institutionName: institutionName || printBranding.name || "Institution",
+          institutionAddress: institutionAddress || undefined,
+          filename: `teacher-barcodes-${new Date().toISOString().slice(0, 10)}`,
+          columns: [
+            { label: "Teacher name", width: 52, bold: true },
+            { label: "Designation", width: 40 },
+          ],
+          codeLabel: "Teacher code",
+          codeWidth: 33,
+          barcodeWidth: 51,
+          noun: "teacher",
+        },
+      );
+      toast.success(
+        `Barcode list downloaded — ${teachers.length} teacher${teachers.length === 1 ? "" : "s"}`,
+      );
+    } catch (e) {
+      toast.error(parseErrorMessage(e));
+    } finally {
+      setDownloadingBarcodes(false);
+    }
+  };
+
   const tableMinWidthClass = canManage ? "min-w-[1760px]" : "min-w-[1280px]";
   const tableClassName = cn("w-full table-fixed", tableMinWidthClass);
   const thClass = "bg-slate-50 whitespace-nowrap";
@@ -435,15 +478,27 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
               Showing {teachers.length} teacher{teachers.length === 1 ? "" : "s"}
             </p>
           </div>
-          <Button
-            variant="outline"
-            className="w-full shrink-0 sm:w-auto"
-            disabled={printableTeachers.length === 0 || printing}
-            onClick={() => void handlePrintList()}
-          >
-            <Printer className="mr-2 h-4 w-4" />
-            {printing ? "Preparing…" : "Print list"}
-          </Button>
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button
+              variant="outline"
+              className="w-full shrink-0 sm:w-auto"
+              disabled={printableTeachers.length === 0 || printing}
+              onClick={() => void handlePrintList()}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              {printing ? "Preparing…" : "Print list"}
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full shrink-0 sm:w-auto"
+              title="PDF of the listed teachers: name, designation, teacher code and its barcode"
+              disabled={teachers.length === 0 || downloadingBarcodes}
+              onClick={() => void handleDownloadBarcodes()}
+            >
+              <Barcode className="mr-2 h-4 w-4" />
+              {downloadingBarcodes ? "Preparing…" : "Download barcodes"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="min-w-0">
           {teachers.length === 0 ? (

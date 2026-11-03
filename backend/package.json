@@ -24,7 +24,22 @@
     "syllabus:taught-dates:report": "tsx src/scripts/backfillSyllabusTaughtDates.ts",
     "syllabus:taught-dates:apply": "tsx src/scripts/backfillSyllabusTaughtDates.ts --apply",
     "syllabus:completion:report": "tsx src/scripts/resyncSyllabusCompletion.ts",
-    "syllabus:completion:reset": "tsx src/scripts/resyncSyllabusCompletion.ts --apply"
+    "syllabus:completion:reset": "tsx src/scripts/resyncSyllabusCompletion.ts --apply",
+    "attendance:holiday:report": "tsx src/scripts/fixHolidayStudentAttendance.ts",
+    "attendance:holiday:fix": "tsx src/scripts/fixHolidayStudentAttendance.ts --apply",
+    "attendance:holiday:restore": "tsx src/scripts/fixHolidayStudentAttendance.ts --restore",
+    "accounting:backfill-journals:dry-run": "tsx src/scripts/backfillMissingJournals.ts --dry-run",
+    "accounting:backfill-journals": "tsx src/scripts/backfillMissingJournals.ts --apply",
+    "accounting:group-accounts:dry-run": "tsx src/scripts/markGroupAccounts.ts --dry-run",
+    "accounting:group-accounts": "tsx src/scripts/markGroupAccounts.ts --apply",
+    "fees:recalc:dry-run": "tsx src/scripts/recalcStudentFees.ts --dry-run",
+    "fees:recalc": "tsx src/scripts/recalcStudentFees.ts --apply",
+    "fees:backfill-breakdown:dry-run": "tsx src/scripts/backfillFeeBreakdown.ts --dry-run",
+    "fees:backfill-breakdown": "tsx src/scripts/backfillFeeBreakdown.ts --apply",
+    "fees:mark-opening:dry-run": "tsx src/scripts/markOpeningCharges.ts --dry-run",
+    "fees:mark-opening": "tsx src/scripts/markOpeningCharges.ts --apply",
+    "fees:scholarship-types:dry-run": "tsx src/scripts/fixScholarshipTypes.ts --dry-run",
+    "fees:scholarship-types": "tsx src/scripts/fixScholarshipTypes.ts --apply"
   },
   "dependencies": {
     "@phit-erp/shared": "file:./shared",

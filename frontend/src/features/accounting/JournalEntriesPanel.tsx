@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   VOUCHER_TYPES,
-  amountToWordsNepali,
+  amountToWordsEnglish,
   type ChartOfAccountRecord,
   type GoshwaraVoucherInput,
   type GoshwaraVoucherRecord,
@@ -15,10 +15,14 @@ import { getTodayBs } from "@munatech/nepali-datepicker";
 import {
   BookOpen,
   FileText,
+  NotebookPen,
   Plus,
   Printer,
+  Receipt,
   Search,
+  ShoppingCart,
   Trash2,
+  TrendingDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -27,7 +31,7 @@ import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { Card, CardContent, CardHeader } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { ensureUnicodeNepali } from "lib/preetiToUnicode";
@@ -38,6 +42,9 @@ import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { formatDualDateCell } from "./accountingUtils";
+import { BankCashSectionTitle } from "./BankCashSectionTitle";
+import { useActiveBankAccounts } from "./BankAccountField";
+import { headerAccountCodes, SYSTEM_ACCOUNT_CODES } from "@phit-erp/shared";
 
 type JournalPanelTab = "ledger" | "create" | "vouchers";
 
@@ -57,7 +64,7 @@ const withHtmlFormat = (apiPath: string): string => {
  * Uses HTML (not PDF download) so the browser print dialog opens directly —
  * same pattern as purchase/expense voucher print.
  */
-const printAuthenticatedDocument = async (apiPath: string): Promise<void> => {
+export const printAuthenticatedDocument = async (apiPath: string): Promise<void> => {
   const htmlPath = withHtmlFormat(apiPath);
   const response = await api.get(htmlPath, {
     responseType: "blob",
@@ -231,7 +238,7 @@ const printPdfBlobUrl = (url: string): Promise<void> =>
     iframe.src = url;
   });
 
-const messageFromPdfError = async (error: unknown): Promise<string> => {
+export const messageFromPdfError = async (error: unknown): Promise<string> => {
   if (typeof error === "object" && error && "response" in error) {
     const data = (error as { response?: { data?: unknown } }).response?.data;
     if (data instanceof Blob) {
@@ -281,22 +288,20 @@ const emptyPrintLine = (): PrintLine => ({
   credit: 0,
 });
 
-// Journal Entries tab = गोश्वारा भौचर (manual + auto-posted from fees/salary/refunds)
+// Journal Entries tab = Journal Vouchers (manual + Direct / Indirect Expense vouchers)
 
-/** Voucher type labels in Nepali for the form */
-const VOUCHER_TYPE_NP: Record<VoucherType, string> = {
-  JOURNAL: "जर्नल",
-  RECEIPT: "रसिद",
-  PAYMENT: "भुक्तानी",
-  CONTRA: "कन्ट्रा",
-  SALES: "बिक्री",
-  PURCHASE: "खरिद",
+/** Voucher type labels for the form */
+const VOUCHER_TYPE_LABEL: Record<VoucherType, string> = {
+  JOURNAL: "Journal",
+  RECEIPT: "Receipt",
+  PAYMENT: "Payment",
+  CONTRA: "Contra",
+  SALES: "Sales",
+  PURCHASE: "Purchase",
 };
 
 /** Inputs accept Nepali typing (Devanagari keyboard / OS IME).
  *  Kanchan / Preeti Unicode display if installed; legacy Preeti ASCII converts on blur/save. */
-const npInputClass =
-  "font-nepali lang-ne [font-family:'Kanchan','Preeti_Unicode','Noto_Sans_Devanagari','Nirmala_UI',Mangal,sans-serif]";
 
 const npText = (value: string): string => ensureUnicodeNepali(value).trim();
 
@@ -319,7 +324,6 @@ export const JournalEntriesPanel = ({
   const [printingKey, setPrintingKey] = useState<string | null>(null);
 
   // —— Manual header fields (printed as written) ——
-  const [voucherNo, setVoucherNo] = useState("");
   const [voucherType, setVoucherType] = useState<VoucherType>("JOURNAL");
   const [dateBs, setDateBs] = useState(formatTodayBs);
   const [particulars, setParticulars] = useState("");
@@ -346,9 +350,13 @@ export const JournalEntriesPanel = ({
   const [lines, setLines] = useState<JournalLineInput[]>([emptyLine(), emptyLine()]);
 
   const entriesQuery = useQuery({
-    queryKey: ["journal-entries"],
+    queryKey: ["journal-entries", "journal-view"],
     queryFn: () =>
-      unwrap<JournalEntryRecord[]>(api.get("/accounting/journal-entries")),
+      unwrap<JournalEntryRecord[]>(
+        // Only Direct / Indirect Expense vouchers and journals made here — fee receipts,
+        // security deposits and other money entries are listed in their own sections.
+        api.get("/accounting/journal-entries", { params: { view: "journal" } }),
+      ),
   });
 
   const vouchersQuery = useQuery({
@@ -358,13 +366,15 @@ export const JournalEntriesPanel = ({
   });
 
   /**
-   * Nepal Government document header (नेपाल सरकार / {college} कार्यालय / address).
+   * College header for the printed Journal Voucher (English name / address).
    * Both Nepali values come from Institution Settings — never hardcoded here.
    */
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
   });
+  const collegeName = settingsQuery.data?.schoolName?.trim() ?? "";
+  // Older vouchers stored the Nepali header; new ones are printed in English
   const collegeNameNp = settingsQuery.data?.schoolNameNp?.trim() ?? "";
   const collegeAddressNp = settingsQuery.data?.schoolAddressNp?.trim() ?? "";
 
@@ -379,6 +389,19 @@ export const JournalEntriesPanel = ({
     () => (accountsQuery.data ?? []).filter((a) => a.isActive),
     [accountsQuery.data],
   );
+  /**
+   * Accounts a journal can post to: no group (header) accounts, and no Student Security
+   * Deposit (deposits come from fee receipts so the deposit register matches the ledger).
+   */
+  const postableAccounts = useMemo(() => {
+    const headers = headerAccountCodes(accountsQuery.data ?? []);
+    return activeAccounts.filter(
+      (a) =>
+        !headers.has(a.code) &&
+        a.code !== SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY,
+    );
+  }, [accountsQuery.data, activeAccounts]);
+  const bankAccounts = useActiveBankAccounts();
 
   const totals = useMemo(() => {
     const debit = lines.reduce((s, l) => s + (Number(l.debitNpr) || 0), 0);
@@ -395,7 +418,6 @@ export const JournalEntriesPanel = ({
   }, [vouchersQuery.data]);
 
   const resetForm = () => {
-    setVoucherNo("");
     setVoucherType("JOURNAL");
     setDateBs(formatTodayBs());
     setParticulars("");
@@ -430,7 +452,7 @@ export const JournalEntriesPanel = ({
     mutationFn: (id: string) =>
       unwrap(api.delete(`/accounting/goshwara-vouchers/${id}`)),
     onSuccess: async () => {
-      toast.success("Goshwara voucher deleted (journal reversed)");
+      toast.success("Journal voucher deleted (journal reversed)");
       const { invalidateAccountingQueries } = await import(
         "./invalidateAccountingQueries"
       );
@@ -442,7 +464,7 @@ export const JournalEntriesPanel = ({
   const confirmDeleteJournal = (entry: JournalEntryRecord) => {
     if (
       !window.confirm(
-        `Delete journal ${entry.voucherNumber}?\n\nThis posts a reversing entry so the ledger stays correct. Linked fee/expense items must be deleted from their own module.`,
+        `Reverse journal ${entry.voucherNumber}?\n\nThis will post a reversal entry. The original stays for audit.`,
       )
     ) {
       return;
@@ -453,7 +475,7 @@ export const JournalEntriesPanel = ({
   const confirmDeleteGoshwara = (voucher: GoshwaraVoucherRecord) => {
     if (
       !window.confirm(
-        `Delete Goshwara voucher ${voucher.voucherNo}?\n\nThis soft-deletes the voucher and posts a reversing journal entry so the ledger stays correct.`,
+        `Reverse journal voucher ${voucher.voucherNo}?\n\nThis will post a reversal entry. The original stays for audit.`,
       )
     ) {
       return;
@@ -543,6 +565,12 @@ export const JournalEntriesPanel = ({
         if (patch.accountCode != null) {
           const acc = activeAccounts.find((a) => a.code === patch.accountCode);
           if (acc) next.accountName = acc.name;
+          // A Bank line names its bank; default to the only bank when there is one.
+          next.bankAccountId =
+            patch.accountCode === SYSTEM_ACCOUNT_CODES.BANK
+              ? line.bankAccountId ||
+                (bankAccounts.length === 1 ? bankAccounts[0]!._id : undefined)
+              : undefined;
         }
         if (patch.debitNpr != null && Number(patch.debitNpr) > 0) next.creditNpr = 0;
         if (patch.creditNpr != null && Number(patch.creditNpr) > 0) next.debitNpr = 0;
@@ -584,9 +612,9 @@ export const JournalEntriesPanel = ({
       toast.error("Enter journal amounts first");
       return;
     }
-    setAmountInWords(amountToWordsNepali(totals.debit));
+    setAmountInWords(`${amountToWordsEnglish(totals.debit)} Only`);
     if (!receivedAmount.trim()) {
-      setReceivedAmount(`रु. ${totals.debit.toLocaleString("en-IN")}`);
+      setReceivedAmount(`Rs. ${totals.debit.toLocaleString("en-IN")}`);
     }
   };
 
@@ -617,11 +645,19 @@ export const JournalEntriesPanel = ({
         );
         return;
       }
+      if (
+        line.accountCode === SYSTEM_ACCOUNT_CODES.BANK &&
+        bankAccounts.length > 0 &&
+        !line.bankAccountId
+      ) {
+        toast.error(`Line ${i + 1}: select the bank account for this Bank line`);
+        return;
+      }
     }
 
     const words =
       npText(amountInWords) ||
-      (totals.debit > 0 ? amountToWordsNepali(totals.debit) : undefined);
+      (totals.debit > 0 ? `${amountToWordsEnglish(totals.debit)} Only` : undefined);
 
     const resolvedPrintLines = (
       printLines.some(
@@ -663,7 +699,7 @@ export const JournalEntriesPanel = ({
     const payload: GoshwaraVoucherInput = {
       voucherType,
       dateBs,
-      voucherNo: npText(voucherNo) || undefined,
+
       // Government header comes from Institution Settings (server re-resolves it too)
       govOfficeName: collegeNameNp || undefined,
       addressLine: collegeAddressNp || undefined,
@@ -685,6 +721,10 @@ export const JournalEntriesPanel = ({
         debitNpr: Number(l.debitNpr) || 0,
         creditNpr: Number(l.creditNpr) || 0,
         description: npText(l.description ?? ""),
+        bankAccountId:
+          l.accountCode === SYSTEM_ACCOUNT_CODES.BANK
+            ? l.bankAccountId || undefined
+            : undefined,
       })),
     };
     createVoucher.mutate(payload);
@@ -714,61 +754,120 @@ export const JournalEntriesPanel = ({
   const tabs: Array<{
     id: JournalPanelTab;
     label: string;
+    hint: string;
     icon: typeof BookOpen;
     hidden?: boolean;
   }> = [
-    { id: "ledger", label: "Journal ledger", icon: BookOpen },
-    { id: "create", label: "New voucher", icon: Plus, hidden: !canWrite },
-    { id: "vouchers", label: "Goshwara list", icon: FileText },
+    { id: "ledger", label: "Journal ledger", hint: "Every posted voucher", icon: BookOpen },
+    { id: "create", label: "New voucher", hint: "Write a journal voucher", icon: Plus, hidden: !canWrite },
+    { id: "vouchers", label: "Journal vouchers", hint: "Saved vouchers to print", icon: FileText },
+  ];
+
+  // Summary of the vouchers listed here (reversals and voided ones left out)
+  const activeEntries = (entriesQuery.data ?? []).filter((entry) => !entry.isReversal && !entry.isReversed);
+  const sumOf = (list: typeof activeEntries) => list.reduce((sum, entry) => sum + (entry.totalDebitNpr ?? 0), 0);
+  const directEntries = activeEntries.filter((entry) => entry.referenceType === "AccountingPurchase");
+  const indirectEntries = activeEntries.filter((entry) => entry.referenceType === "AccountingExpense");
+  const manualEntries = activeEntries.filter(
+    (entry) => !entry.referenceType || entry.referenceType === "Manual" || entry.referenceType === "GoshwaraVoucher",
+  );
+  const stats = [
+    { label: "Direct Expense", count: directEntries.length, value: sumOf(directEntries), icon: ShoppingCart, tone: "text-rose-700", ring: "border-rose-200" },
+    { label: "Indirect Expenses", count: indirectEntries.length, value: sumOf(indirectEntries), icon: TrendingDown, tone: "text-amber-700", ring: "border-amber-200" },
+    { label: "Journal vouchers", count: manualEntries.length, value: sumOf(manualEntries), icon: NotebookPen, tone: "text-brand-700", ring: "border-brand-200" },
+    { label: "All vouchers", count: activeEntries.length, value: sumOf(activeEntries), icon: Receipt, tone: "text-slate-900", ring: "border-slate-200" },
   ];
 
   return (
     <div className="min-w-0 max-w-full space-y-4">
-      <Card className="overflow-hidden">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <BookOpen className="h-5 w-5 shrink-0 text-brand-600" />
-              Journal Entries
-            </CardTitle>
-            <p className="mt-0.5 text-sm text-slate-500">
-              Ledger · गोश्वारा भौचर (म.ले.प.फा.नं. १०)
-            </p>
+      {/* Header */}
+      <div className="overflow-hidden rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-amber-50 p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-sm">
+              <BookOpen className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-slate-900">Journal Entries</h2>
+              <p className="mt-0.5 max-w-2xl text-sm text-slate-600">
+                Direct and Indirect Expense vouchers are created here automatically. Write any other adjustment as a
+                journal voucher — Debit always equals Credit.
+              </p>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {tabs
-              .filter((t) => !t.hidden)
-              .map(({ id, label, icon: Icon }) => (
-                <Button
-                  key={id}
-                  type="button"
-                  size="sm"
-                  variant={tab === id ? "default" : "outline"}
-                  onClick={() => setTab(id)}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="bg-white"
+            disabled={printingKey !== null}
+            onClick={() => void openBlankForm()}
+          >
+            <Printer className="mr-1.5 h-4 w-4" />
+            {printingKey === "blank-form" ? "Opening…" : "Print blank voucher"}
+          </Button>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {stats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className={cn("rounded-2xl border bg-white p-4", stat.ring)}>
+                <p className="flex items-center gap-2 text-sm text-slate-500">
+                  <Icon className={cn("h-4 w-4", stat.tone)} /> {stat.label}
+                </p>
+                <p className={cn("mt-1 text-xl font-semibold tabular-nums", stat.tone)}>{formatCurrencyNpr(stat.value)}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {stat.count} voucher{stat.count === 1 ? "" : "s"}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Sections */}
+      <div className="grid gap-2 sm:grid-cols-3" role="tablist">
+        {tabs
+          .filter((t) => !t.hidden)
+          .map(({ id, label, hint, icon: Icon }) => {
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(id)}
+                className={cn(
+                  "flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition",
+                  active
+                    ? "border-brand-500 bg-brand-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50/40",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                    active ? "bg-white/15" : "bg-slate-100 text-slate-500",
+                  )}
                 >
-                  <Icon className="mr-1.5 h-4 w-4" />
-                  {label}
-                </Button>
-              ))}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={printingKey !== null}
-              onClick={() => void openBlankForm()}
-            >
-              <Printer className="mr-1 h-4 w-4" />
-              {printingKey === "blank-form" ? "Opening…" : "Blank form"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
+                  <Icon className="h-[18px] w-[18px]" />
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold">{label}</span>
+                  <span className={cn("block text-xs", active ? "text-white/80" : "text-slate-500")}>{hint}</span>
+                </span>
+              </button>
+            );
+          })}
+      </div>
 
       {/* ─── Journal ledger ─── */}
       {tab === "ledger" ? (
         <Card className="min-w-0 overflow-hidden">
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">Journal ledger</CardTitle>
+            <BankCashSectionTitle icon={BookOpen} title="Journal ledger" subtitle="Click Print on any voucher for its Journal Voucher." />
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -787,7 +886,7 @@ export const JournalEntriesPanel = ({
                   description={
                     ledgerSearch.trim()
                       ? "No entries match your search."
-                      : "Create a Goshwara voucher or post fees/expenses to see entries here."
+                      : "Create a journal voucher or record a Direct / Indirect Expense to see entries here."
                   }
                 />
               </div>
@@ -833,7 +932,7 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td>
                             <Badge className="bg-slate-100 font-normal text-slate-700">
-                              {VOUCHER_TYPE_NP[entry.voucherType as VoucherType] ??
+                              {VOUCHER_TYPE_LABEL[entry.voucherType as VoucherType] ??
                                 entry.voucherType}
                             </Badge>
                           </Td>
@@ -869,7 +968,7 @@ export const JournalEntriesPanel = ({
                               <Button
                                 size="sm"
                                 variant="outline"
-                                title="Print Goshwara voucher"
+                                title="Print journal voucher"
                                 disabled={printingKey !== null}
                                 onClick={() =>
                                   void (linked
@@ -901,12 +1000,12 @@ export const JournalEntriesPanel = ({
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  title="Delete (reverse) — Super Admin / College Admin only"
+                                  title="Reverse — posts a reversing entry"
                                   onClick={() => confirmDeleteJournal(entry)}
                                   disabled={reverse.isPending}
                                 >
                                   <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                  Delete
+                                  Reverse
                                 </Button>
                               ) : null}
                             </div>
@@ -922,52 +1021,28 @@ export const JournalEntriesPanel = ({
         </Card>
       ) : null}
 
-      {/* ─── Create Goshwara voucher ─── */}
+      {/* ─── Create journal voucher ─── */}
       {tab === "create" && canWrite ? (
         <Card className="min-w-0 overflow-hidden">
           <CardHeader>
-            <CardTitle className="text-base">
-              New Goshwara voucher · गोश्वारा भौचर
-            </CardTitle>
+            <BankCashSectionTitle icon={NotebookPen} title="New journal voucher" subtitle="Debit and Credit must be equal before saving." tone="emerald" />
           </CardHeader>
           <CardContent>
-            <form
-              className="space-y-5"
-              lang="ne"
-              onSubmit={submitVoucher}
-            >
-              {/*
-                Header identity — official Nepal Government format, read-only.
-                Both Nepali lines are pulled from Institution Settings so every
-                government-format document prints the same header.
-              */}
-              <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <div className={cn(npInputClass, "text-center leading-relaxed")}>
-                  <p className="text-[15px] font-bold text-slate-900">नेपाल सरकार</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-800">
-                    {collegeNameNp ? `${collegeNameNp} कार्यालय` : "…………………… कार्यालय"}
-                  </p>
-                  <p className="text-sm font-semibold text-slate-800">
-                    {collegeAddressNp || "……………………"}
-                  </p>
-                </div>
-                <p className="text-center text-xs text-slate-500">
-                  {collegeNameNp && collegeAddressNp
-                    ? "From Institution Settings → College Name (Nepali) / College Address (Nepali)."
-                    : "Set College Name (Nepali) and College Address (Nepali) under Institution Settings to complete this header."}
+            <form className="space-y-5" onSubmit={submitVoucher}>
+              {/* Printed header: the college's English name and address (Institution Settings) */}
+              <section className="space-y-1 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-center">
+                <p className="text-[15px] font-bold uppercase tracking-wide text-slate-900">
+                  {collegeName || "College name"}
+                </p>
+                <p className="text-sm font-semibold text-slate-700">Journal Voucher</p>
+                <p className="text-xs text-slate-500">
+                  The college name and address are printed from Institution Settings.
                 </p>
               </section>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <FormField label="Voucher no. (गो. भी. नं.)">
-                  <Input
-                    nepali
-                    lang="ne"
-                    className={npInputClass}
-                    value={voucherNo}
-                    onChange={(e) => setVoucherNo(e.target.value)}
-                    placeholder="Auto if empty"
-                  />
+                <FormField label="Voucher no.">
+                  <Input value="" disabled placeholder="Issued on save (JV-<fiscal year>-00001)" />
                 </FormField>
                 <FormField label="Date (BS)">
                   <NepaliDateField value={dateBs} onChange={setDateBs} />
@@ -981,17 +1056,15 @@ export const JournalEntriesPanel = ({
                   >
                     {VOUCHER_TYPES.map((t) => (
                       <option key={t} value={t}>
-                        {VOUCHER_TYPE_NP[t]} ({t})
+                        {VOUCHER_TYPE_LABEL[t]}
                       </option>
                     ))}
                   </Select>
                 </FormField>
-                <FormField label="Amount in words (अक्षरेपी)">
+                <FormField label="Amount in words">
                   <div className="flex gap-1">
                     <Input
-                      nepali
-                      lang="ne"
-                      className={cn(npInputClass, "min-w-0")}
+                      className="min-w-0"
                       value={amountInWords}
                       onChange={(e) => setAmountInWords(e.target.value)}
                       placeholder="Auto from total"
@@ -1011,9 +1084,6 @@ export const JournalEntriesPanel = ({
 
               <FormField label="Narration / particulars *">
                 <Textarea
-                  nepali
-                  lang="ne"
-                  className={npInputClass}
                   value={particulars}
                   onChange={(e) => setParticulars(e.target.value)}
                   rows={2}
@@ -1057,20 +1127,28 @@ export const JournalEntriesPanel = ({
                   </div>
                 </div>
                 <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <Table className="min-w-[720px]">
+                  {/* Full width: fixed column shares so the lines never shrink to their content */}
+                  <Table className="w-full min-w-[720px] table-fixed" scrollClassName="w-full">
+                    <colgroup>
+                      <col style={{ width: "30%" }} />
+                      <col style={{ width: "40%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "6%" }} />
+                    </colgroup>
                     <TableHead>
                       <tr>
                         <Th>Account</Th>
                         <Th>Particular / reason *</Th>
-                        <Th className="w-32">Debit</Th>
-                        <Th className="w-32">Credit</Th>
-                        <Th className="w-12" />
+                        <Th>Debit</Th>
+                        <Th>Credit</Th>
+                        <Th />
                       </tr>
                     </TableHead>
                     <TableBody>
                       {lines.map((line, index) => (
                         <tr key={index}>
-                          <Td className="min-w-[180px]">
+                          <Td>
                             <Select
                               value={line.accountCode}
                               onChange={(e) =>
@@ -1081,18 +1159,35 @@ export const JournalEntriesPanel = ({
                               required
                             >
                               <option value="">Select account</option>
-                              {activeAccounts.map((a) => (
+                              {postableAccounts.map((a) => (
                                 <option key={a._id} value={a.code}>
-                                  {a.code} — {a.nameNp || a.name}
+                                  {a.code} — {a.name}
                                 </option>
                               ))}
                             </Select>
+                            {line.accountCode === SYSTEM_ACCOUNT_CODES.BANK &&
+                            bankAccounts.length > 0 ? (
+                              <Select
+                                className="mt-1.5"
+                                value={line.bankAccountId ?? ""}
+                                onChange={(e) =>
+                                  updateLine(index, {
+                                    bankAccountId: e.target.value || undefined,
+                                  })
+                                }
+                                required
+                              >
+                                <option value="">Select bank account</option>
+                                {bankAccounts.map((b) => (
+                                  <option key={b._id} value={b._id}>
+                                    {b.bankName} — {b.accountNumber}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : null}
                           </Td>
-                          <Td className="min-w-[200px]">
+                          <Td>
                             <Input
-                              nepali
-                              lang="ne"
-                              className={npInputClass}
                               value={line.description ?? ""}
                               onChange={(e) =>
                                 updateLine(index, {
@@ -1196,7 +1291,7 @@ export const JournalEntriesPanel = ({
                   </div>
                 </div>
                 <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <Table className="min-w-[800px]">
+                  <Table className="w-full min-w-[800px]" scrollClassName="w-full">
                     <TableHead>
                       <tr>
                         <Th className="w-14">S.N.</Th>
@@ -1213,9 +1308,6 @@ export const JournalEntriesPanel = ({
                         <tr key={index}>
                           <Td>
                             <Input
-                              nepali
-                              lang="ne"
-                              className={npInputClass}
                               value={row.sn}
                               onChange={(e) =>
                                 updatePrintLine(index, { sn: e.target.value })
@@ -1225,9 +1317,6 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td className="min-w-[160px]">
                             <Input
-                              nepali
-                              lang="ne"
-                              className={npInputClass}
                               value={row.particulars}
                               onChange={(e) =>
                                 updatePrintLine(index, {
@@ -1239,9 +1328,6 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td className="min-w-[120px]">
                             <Input
-                              nepali
-                              lang="ne"
-                              className={npInputClass}
                               value={row.account}
                               onChange={(e) =>
                                 updatePrintLine(index, {
@@ -1253,9 +1339,6 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td>
                             <Input
-                              nepali
-                              lang="ne"
-                              className={npInputClass}
                               value={row.ledgerNo}
                               onChange={(e) =>
                                 updatePrintLine(index, {
@@ -1318,36 +1401,24 @@ export const JournalEntriesPanel = ({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="Receipt no.">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={receiptNo}
                         onChange={(e) => setReceiptNo(e.target.value)}
                       />
                     </FormField>
                     <FormField label="Amount received">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={receivedAmount}
                         onChange={(e) => setReceivedAmount(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="Presented by">
+                    <FormField label="Submitted by">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={presenterName}
                         onChange={(e) => setPresenterName(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="Rank">
+                    <FormField label="Designation">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={presenterRank}
                         onChange={(e) => setPresenterRank(e.target.value)}
                       />
@@ -1359,45 +1430,32 @@ export const JournalEntriesPanel = ({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="Cheque no.">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={chequeNo}
                         onChange={(e) => setChequeNo(e.target.value)}
                       />
                     </FormField>
                     <FormField label="Cheque amount">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={chequeAmount}
                         onChange={(e) => setChequeAmount(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="Presented by">
+                    <FormField label="Submitted by">
                       <Input
-                        nepali
-                        lang="ne"
-                        className={npInputClass}
                         value={chequePresenter}
                         onChange={(e) => setChequePresenter(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="Date / rank">
+                    <FormField label="Date / designation">
                       <div className="flex gap-2">
                         <Input
-                          nepali
-                          lang="ne"
-                          className={cn(npInputClass, "min-w-0")}
+                          className="min-w-0"
                           value={chequeDate}
                           onChange={(e) => setChequeDate(e.target.value)}
                           placeholder="Date"
                         />
                         <Input
-                          nepali
-                          lang="ne"
-                          className={cn(npInputClass, "min-w-0")}
+                          className="min-w-0"
                           value={chequeRank}
                           onChange={(e) => setChequeRank(e.target.value)}
                           placeholder="Rank"
@@ -1438,17 +1496,17 @@ export const JournalEntriesPanel = ({
         </Card>
       ) : null}
 
-      {/* ─── Goshwara vouchers list ─── */}
+      {/* ─── Journal vouchers list ─── */}
       {tab === "vouchers" ? (
         <Card className="min-w-0 overflow-hidden">
           <CardHeader>
-            <CardTitle className="text-base">Goshwara vouchers</CardTitle>
+            <BankCashSectionTitle icon={FileText} title="Journal vouchers" subtitle="Saved journal vouchers — print or delete." tone="amber" />
           </CardHeader>
           <CardContent className="min-w-0 p-0 sm:p-6 sm:pt-0">
             {vouchers.length === 0 ? (
               <div className="px-6 pb-6">
                 <EmptyState
-                  title="No Goshwara vouchers yet"
+                  title="No journal vouchers yet"
                   description="Create a voucher from the New voucher tab."
                 />
               </div>
@@ -1484,7 +1542,7 @@ export const JournalEntriesPanel = ({
                             ) : null}
                           </Td>
                           <Td className="max-w-[160px] truncate text-sm">
-                            {collegeNameNp ||
+                            {collegeName ||
                               v.govOfficeName ||
                               v.instituteName ||
                               v.officeName ||
@@ -1552,7 +1610,7 @@ export const JournalEntriesPanel = ({
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  title="Delete voucher — Super Admin / College Admin only"
+                                  title="Reverse voucher — posts a reversing entry"
                                   disabled={
                                     deleteGoshwara.isPending ||
                                     printingKey !== null
@@ -1560,7 +1618,7 @@ export const JournalEntriesPanel = ({
                                   onClick={() => confirmDeleteGoshwara(v)}
                                 >
                                   <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                  {deleteGoshwara.isPending ? "…" : "Delete"}
+                                  {deleteGoshwara.isPending ? "…" : "Reverse"}
                                 </Button>
                               ) : null}
                             </div>

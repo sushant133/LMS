@@ -1271,9 +1271,14 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
   const reportType = typeof req.query.type === "string" ? req.query.type : "summary";
-  const threshold = Number(req.query.threshold ?? 75);
+  const requestedThreshold = Number(req.query.threshold ?? 75);
+  const threshold =
+    Number.isFinite(requestedThreshold) && requestedThreshold > 0 && requestedThreshold <= 100
+      ? requestedThreshold
+      : 75;
 
-  const filter: Record<string, unknown> = { schoolId };
+  // Draft sheets are not final attendance and are left out of reports.
+  const filter: Record<string, unknown> = { schoolId, status: { $ne: "DRAFT" } };
   Object.assign(filter, buildAcademicFilter(req.query, college));
 
   if (typeof req.query.dateBs === "string") {
@@ -1298,32 +1303,74 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
 
   const records = await loadDailyReportRecords(filter);
   const reportRecords = records as never;
+  const groupLabel = college ? "Batch · Year" : "Class · Section";
+  const col = (key: string, label: string) => ({ key, label });
+  const classColumns = [
+    col("label", groupLabel),
+    col("days", "Days marked"),
+    col("total", "Total marks"),
+    col("present", "Present"),
+    col("absent", "Absent"),
+    col("late", "Late"),
+    col("leave", "Leave"),
+    col("earlyLeave", "Early leave"),
+    col("percentage", "Attendance %")
+  ];
 
   if (reportType === "student" || reportType === "defaulter") {
-    const rows = await buildStudentWiseReport(reportRecords, schoolId.toString(), threshold);
+    const rows = await buildStudentWiseReport(reportRecords, schoolId.toString(), threshold, college);
     return sendSuccess(res, "Student attendance report generated", {
       type: reportType,
-      rows: reportType === "defaulter" ? rows.filter((row) => row.isDefaulter) : rows
+      threshold,
+      columns: [
+        col("groupLabel", groupLabel),
+        col("rollNumber", "Roll no."),
+        col("fullName", "Student"),
+        col("admissionNumber", "Admission no."),
+        col("totalDays", "Days"),
+        col("present", "Present"),
+        col("absent", "Absent"),
+        col("late", "Late"),
+        col("leave", "Leave"),
+        col("medicalLeave", "Medical leave"),
+        col("earlyLeave", "Early leave"),
+        col("percentage", "Attendance %")
+      ],
+      // Defaulters: lowest attendance first
+      rows:
+        reportType === "defaulter"
+          ? rows.filter((row) => row.isDefaulter).sort((a, b) => a.percentage - b.percentage)
+          : rows
     });
   }
 
-  if (reportType === "leave") {
-    return sendSuccess(res, "Leave report generated", {
+  const statusReports: Record<string, { statuses: Array<"ABSENT" | "LEAVE" | "MEDICAL_LEAVE" | "LATE" | "EARLY_LEAVE">; message: string }> = {
+    absent: { statuses: ["ABSENT"], message: "Absentee report generated" },
+    leave: { statuses: ["LEAVE", "MEDICAL_LEAVE"], message: "Leave report generated" },
+    late: { statuses: ["LATE"], message: "Late arrival report generated" },
+    "early-leave": { statuses: ["EARLY_LEAVE"], message: "Early leave report generated" }
+  };
+  const statusReport = statusReports[reportType];
+  if (statusReport) {
+    return sendSuccess(res, statusReport.message, {
       type: reportType,
-      rows: await buildStatusReport(reportRecords, "LEAVE")
-    });
-  }
-
-  if (reportType === "late") {
-    return sendSuccess(res, "Late arrival report generated", {
-      type: reportType,
-      rows: await buildStatusReport(reportRecords, "LATE")
+      columns: [
+        col("dateBs", "Date (BS)"),
+        col("groupLabel", groupLabel),
+        col("rollNumber", "Roll no."),
+        col("studentName", "Student"),
+        col("admissionNumber", "Admission no."),
+        col("statusLabel", "Status"),
+        col("remarks", "Remarks")
+      ],
+      rows: await buildStatusReport(reportRecords, statusReport.statuses, college)
     });
   }
 
   if (reportType === "class") {
     return sendSuccess(res, "Class-wise report generated", {
       type: reportType,
+      columns: classColumns,
       rows: await buildClassWiseSummary(reportRecords, college)
     });
   }
@@ -1338,6 +1385,12 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
     records: records.length,
     classWise,
     teacherWise,
+    teacherColumns: [
+      col("teacherName", "Teacher"),
+      col("classesMarked", "Sheets marked"),
+      col("percentage", "Attendance %")
+    ],
+    columns: classColumns,
     // FE tables expect `rows`; expose class-wise summary as default tabular view
     rows: classWise
   });

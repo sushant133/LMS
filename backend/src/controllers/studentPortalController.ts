@@ -15,7 +15,7 @@ import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import {
-  buildProgramYearFeeSummary,
+  buildStudentFeePosition,
   filterOutOpeningTuitionCharges,
   ensureActiveScholarshipAwardsApplied,
   PROGRAM_YEAR_LABELS
@@ -431,12 +431,13 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
     2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
     3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
   };
-  const yearWise = buildProgramYearFeeSummary(
+  const position = buildStudentFeePosition(
     feeCollections as unknown as Array<Record<string, unknown>>,
-    activeAwards,
+    activeAwards as unknown as Array<Record<string, unknown>>,
     plannedFees
   );
-  const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
+  const yearWise = position.years;
+  const yearWiseRemaining = position.totals.outstandingNpr;
   const scholarshipStatus =
     activeAwards.length > 0
       ? activeAwards
@@ -459,9 +460,9 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
     totalScholarshipNpr: totalScholarship,
-    totalPayableNpr: yearWise.reduce((s, y) => s + Number(y.chargedNpr || 0), 0),
+    totalPayableNpr: position.totals.payableNpr,
     totalFineNpr: feeCollections.reduce((s, c) => s + (c.lateFeeNpr ?? 0), 0),
-    advanceBalanceNpr: feeCollections.reduce((s, c) => s + (c.advancePaymentNpr ?? 0), 0),
+    advanceBalanceNpr: position.totals.advanceNpr,
     totalRefundsNpr: 0,
     scholarshipStatus,
     collections: filterOutOpeningTuitionCharges(

@@ -90,8 +90,11 @@ import {
   reverseJournalEntryHandler,
   seedChartOfAccounts,
   updateChartOfAccount,
+  deleteChartOfAccount,
   updateVendor,
-  verifyReceipt
+  verifyReceipt,
+  downloadDirectExpenseJournalVoucher,
+  downloadIndirectExpenseJournalVoucher
 } from "../controllers/accountingLedgerController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { requireAccountingPermission } from "../middleware/accountingAuth.js";
@@ -112,6 +115,16 @@ import {
   updateFixedAsset,
   upsertBudget
 } from "../controllers/accountingAssetController.js";
+import {
+  createBankCashTransfer,
+  getBankCashBook,
+  getBankCashIntegrity,
+  listUnlinkedBankLines,
+  getBankCashRegister,
+  getBankCashSummary,
+  listBankCashTransfers,
+  voidBankCashTransfer
+} from "../controllers/accountingBankCashController.js";
 import { tenantGuard } from "../middleware/tenant.js";
 import { notifyAccountingActivity } from "../middleware/accountingActivityNotifier.js";
 
@@ -238,11 +251,13 @@ router.get("/expenses", readers, requireAccountingPermission("read"), listExpens
 router.post("/expenses", managers, requireAccountingPermission("manage_expenses"), createExpense);
 router.put("/expenses/:id", managers, requireAccountingPermission("manage_expenses"), updateExpense);
 router.delete("/expenses/:id", admins, requireAccountingPermission("reverse_transaction"), deleteExpense);
+router.get("/expenses/:id/journal-voucher", readers, requireAccountingPermission("read"), downloadIndirectExpenseJournalVoucher);
 
 router.get("/purchases", readers, requireAccountingPermission("read"), listPurchases);
 router.post("/purchases", managers, requireAccountingPermission("manage_purchases"), createPurchase);
 router.put("/purchases/:id", managers, requireAccountingPermission("manage_purchases"), updatePurchase);
 router.delete("/purchases/:id", admins, requireAccountingPermission("reverse_transaction"), deletePurchase);
+router.get("/purchases/:id/journal-voucher", readers, requireAccountingPermission("read"), downloadDirectExpenseJournalVoucher);
 
 // Combined fee + non-fee income view. Declared before "/income" has no id route,
 // but keep it above the register routes so it can never be shadowed later.
@@ -311,6 +326,21 @@ router.post("/bank-accounts", admins, requireAccountingPermission("manage_settin
 router.put("/bank-accounts/:id", admins, requireAccountingPermission("manage_settings"), updateBankAccount);
 router.delete("/bank-accounts/:id", admins, requireAccountingPermission("manage_settings"), deleteBankAccount);
 
+// Bank / Cash tab: balances, contra transfers, Cash Book / Bank Book
+router.get("/bank-cash/summary", readers, requireAccountingPermission("read"), getBankCashSummary);
+router.get("/bank-cash/register", readers, requireAccountingPermission("read"), getBankCashRegister);
+router.get("/bank-cash/integrity", readers, requireAccountingPermission("read"), getBankCashIntegrity);
+router.get("/bank-cash/unlinked", readers, requireAccountingPermission("read"), listUnlinkedBankLines);
+router.get("/bank-cash/book", readers, requireAccountingPermission("read"), getBankCashBook);
+router.get("/bank-cash/transfers", readers, requireAccountingPermission("read"), listBankCashTransfers);
+router.post("/bank-cash/transfers", managers, requireAccountingPermission("manage_journal"), createBankCashTransfer);
+router.post(
+  "/bank-cash/transfers/:id/void",
+  admins,
+  requireAccountingPermission("reverse_transaction"),
+  voidBankCashTransfer
+);
+
 router.get("/cash-book", readers, requireAccountingPermission("read"), listCashBook);
 router.post("/cash-book", managers, requireAccountingPermission("manage_expenses"), createCashBookEntry);
 
@@ -319,6 +349,7 @@ router.get("/chart-of-accounts", readers, requireAccountingPermission("read"), l
 router.post("/chart-of-accounts", admins, requireAccountingPermission("manage_coa"), createChartOfAccount);
 router.post("/chart-of-accounts/seed", admins, requireAccountingPermission("manage_coa"), seedChartOfAccounts);
 router.put("/chart-of-accounts/:id", admins, requireAccountingPermission("manage_coa"), updateChartOfAccount);
+router.delete("/chart-of-accounts/:id", admins, requireAccountingPermission("manage_coa"), deleteChartOfAccount);
 
 router.get("/journal-entries", readers, requireAccountingPermission("read"), listJournalEntries);
 router.post("/journal-entries", managers, requireAccountingPermission("manage_journal"), createJournalEntry);

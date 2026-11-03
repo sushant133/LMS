@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SearchSelect, type SearchSelectOption } from "components/ui/search-select";
 import { scrollToForm } from "lib/scrollToForm";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -64,6 +65,7 @@ import {
   Printer,
   RotateCcw,
   Receipt,
+  Search,
   Shield,
   ShoppingCart,
   Target,
@@ -91,6 +93,9 @@ import {
   bsDateToAdString,
   getReportCellValue,
   downloadFinancialSummaryExcel,
+  downloadReportCsv,
+  exportRegister,
+  type RegisterColumn,
   downloadReportExcel,
   getReportRows,
   matchesStudentAccountSearch,
@@ -101,9 +106,23 @@ import {
   emptyIdsToUndefined,
   getSalaryEmployeeLabel,
 } from "./accountingFormUtils";
+import {
+  BankAccountField,
+  bankAccountForMethod,
+  missingBankAccountError,
+  useActiveBankAccounts,
+} from "./BankAccountField";
+import { BankCashPanel } from "./BankCashPanel";
+import { messageFromPdfError, printAuthenticatedDocument } from "./JournalEntriesPanel";
+import { JournalVoucherDetailsFields } from "./JournalVoucherDetailsFields";
+import { ExpenseRegisterHeader } from "./ExpenseRegisterHeader";
+import { BankCashSectionTitle } from "./BankCashSectionTitle";
+import { isBankPaymentMethod } from "./bankCashShared";
 import { BankReconciliationPanel } from "./BankReconciliationPanel";
 import { BudgetPanel } from "./BudgetPanel";
 import { ChartOfAccountsPanel } from "./ChartOfAccountsPanel";
+import { headerAccountCodes, type ChartOfAccountRecord } from "@phit-erp/shared";
+import type { CSSProperties } from "react";
 import { FixedAssetsPanel } from "./FixedAssetsPanel";
 import { JournalEntriesPanel } from "./JournalEntriesPanel";
 import { LedgerPanel } from "./LedgerPanel";
@@ -136,6 +155,7 @@ type Tab =
   | "purchases"
   | "expenses"
   | "income"
+  | "bank-cash"
   | "ledger"
   | "chart-of-accounts"
   | "fixed-assets"
@@ -153,6 +173,7 @@ const accountingTabs: Tab[] = [
   "purchases",
   "expenses",
   "income",
+  "bank-cash",
   "ledger",
   "chart-of-accounts",
   "fixed-assets",
@@ -173,9 +194,10 @@ const tabs: Array<{
   { id: "deposit-records", label: "Security Deposits", icon: Shield },
   { id: "salary-records", label: "Salary Sheet / Payroll", icon: Banknote },
   { id: "refund-records", label: "Refund Records", icon: RotateCcw },
-  { id: "purchases", label: "Purchases", icon: ShoppingCart },
-  { id: "expenses", label: "Expenses", icon: TrendingDown },
-  { id: "income", label: "Income", icon: TrendingUp },
+  { id: "purchases", label: "Direct Expense", icon: ShoppingCart },
+  { id: "expenses", label: "Indirect Expenses", icon: TrendingDown },
+  { id: "income", label: "Other Income", icon: TrendingUp },
+  { id: "bank-cash", label: "Bank / Cash", icon: Wallet },
   { id: "ledger", label: "Ledger", icon: BookMarked },
   { id: "chart-of-accounts", label: "Chart of Accounts", icon: Landmark },
   { id: "fixed-assets", label: "Fixed Assets & Depreciation", icon: Building2 },
@@ -183,7 +205,7 @@ const tabs: Array<{
   { id: "budget", label: "Budget vs Actual", icon: Target },
   {
     id: "journal-entries",
-    label: "Journal Entries (गोश्वारा भौचर)",
+    label: "Journal Entries",
     icon: FileText,
   },
   { id: "reports", label: "Reports", icon: BarChart3 },
@@ -191,7 +213,7 @@ const tabs: Array<{
 
 /** Practical college reports — one Reports module (filters + export) */
 const reportTypes = [
-  { id: "ledger", label: "Ledger Report" },
+  { id: "ledger", label: "General Ledger" },
   // Statutory statements — served by /accounting/ledger-reports/:reportType
   { id: "trial-balance", label: "Trial Balance", ledger: true },
   { id: "balance-sheet", label: "Balance Sheet", ledger: true },
@@ -202,12 +224,13 @@ const reportTypes = [
   { id: "monthly-fee-collection", label: "Student Fee Report (Monthly)" },
   { id: "salary-payments", label: "Salary Report" },
   { id: "refunds", label: "Refund Report" },
-  { id: "purchases", label: "Purchase Report" },
-  { id: "expenses", label: "Expense Report" },
-  { id: "income", label: "Income Report" },
+  { id: "purchases", label: "Direct Expense Report" },
+  { id: "expenses", label: "Indirect Expense Report" },
+  { id: "income", label: "Other Income Report" },
   { id: "journal", label: "Journal Report" },
-  { id: "financial-summary", label: "Monthly Financial Summary" },
+  { id: "financial-summary", label: "Financial Summary" },
   { id: "student-ledger", label: "Student Ledger", ledger: true },
+  { id: "student-due", label: "Student Fee Summary (Dues)", ledger: true },
   { id: "day-book", label: "Day Book", ledger: true },
   {
     id: "fee-collection-summary",
@@ -216,6 +239,37 @@ const reportTypes = [
   },
   { id: "scholarship-report", label: "Scholarship Report", ledger: true },
 ] as const;
+
+/** Whether a register record is in the ledger (has an active journal voucher). */
+const JournalPostedBadge = ({ posted }: { posted: boolean }) =>
+  posted ? (
+    <Badge className="mt-1 bg-emerald-50 text-emerald-700" title="Journal voucher posted">
+      POSTED
+    </Badge>
+  ) : (
+    <Badge
+      className="mt-1 bg-red-100 font-semibold text-red-700"
+      title="No journal voucher — not in the ledger or reports yet"
+    >
+      NOT POSTED
+    </Badge>
+  );
+
+/** Bold section headings and total lines in statements (inline so it survives printing). */
+const reportRowStyle = (
+  row: Record<string, unknown>,
+): CSSProperties | undefined => {
+  if (row.rowKind === "heading") {
+    return { fontWeight: 700, background: "#f1f5f9" };
+  }
+  if (row.rowKind === "subtotal") {
+    return { fontWeight: 600, borderTop: "1px solid #cbd5e1" };
+  }
+  if (row.rowKind === "total") {
+    return { fontWeight: 700, borderTop: "2px solid #94a3b8" };
+  }
+  return undefined;
+};
 
 const defaultStructure: ExtendedFeeStructureInput = {
   title: "",
@@ -363,6 +417,7 @@ const defaultSettings: AccountingSettingsInput = {
   defaultPaymentMethod: "CASH",
   voucherPrefix: "JV",
   approvalThresholdNpr: 25000,
+  capitalizationThresholdNpr: 5000,
   tdsEnabled: false,
 };
 
@@ -458,6 +513,11 @@ export const AccountingManager = () => {
   /** Same gate as canDelete — reverse is a form of delete for posted books */
   const canReverse = isAdmin;
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [expenseSearch, setExpenseSearch] = useState("");
+  const [purchaseSearch, setPurchaseSearch] = useState("");
+  const activeBankAccounts = useActiveBankAccounts();
+  /** Bank to open in Bank Reconciliation (set from Bank / Cash). */
+  const [reconcileBankId, setReconcileBankId] = useState<string | undefined>();
   /** Hand off payroll month (+ optional employee) when opening Salary Sheet from dashboard */
   const [salarySheetFocus, setSalarySheetFocus] = useState<{
     monthBs: string;
@@ -506,6 +566,11 @@ export const AccountingManager = () => {
   /** From–To date range (BS stored; AD mirrors via DualBsAdDateField). */
   const [reportFromBs, setReportFromBs] = useState("");
   const [reportToBs, setReportToBs] = useState("");
+  /** General Ledger: one account, or every account when empty. */
+  const [reportAccountCode, setReportAccountCode] = useState("");
+  const [reportJournalView, setReportJournalView] = useState<"detailed" | "summary">("detailed");
+  /** Student Ledger: empty = all students (one line each); a student = their transactions. */
+  const [reportStudentId, setReportStudentId] = useState("");
   const [summarySection, setSummarySection] =
     useState<(typeof FINANCIAL_SUMMARY_SECTIONS)[number]["key"]>("fees");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(
@@ -667,6 +732,69 @@ export const AccountingManager = () => {
     });
   }, [incomeOverview, incomeKind, incomeSearch]);
 
+  const visibleExpenses = useMemo(() => {
+    const q = expenseSearch.trim().toLowerCase().replace(/,/g, "");
+    return (expensesQuery.data ?? []).filter(
+      (row) =>
+        !q ||
+        [row.category, row.vendor, row.voucherNumber, row.description, row.dateBs, String(row.amountNpr)]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
+    );
+  }, [expensesQuery.data, expenseSearch]);
+
+  const visiblePurchases = useMemo(() => {
+    const q = purchaseSearch.trim().toLowerCase().replace(/,/g, "");
+    return (purchasesQuery.data ?? []).filter(
+      (row) =>
+        !q ||
+        [row.vendor, row.item, row.category, row.invoiceNumber, row.voucherNumber, row.purchaseDateBs, String(row.totalAmountNpr)]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
+    );
+  }, [purchasesQuery.data, purchaseSearch]);
+
+  /** Print or Excel of a register list exactly as filtered on screen. */
+  const outputRegister = <T,>(
+    format: "print" | "xlsx",
+    title: string,
+    columns: Array<RegisterColumn<T>>,
+    rows: T[],
+  ) => {
+    if (rows.length === 0) {
+      toast.error("Nothing to export — the list is empty");
+      return;
+    }
+    if (format === "xlsx") {
+      exportRegister({ title, columns, rows, format: "xlsx" });
+      return;
+    }
+    const html = exportRegister({ title, columns, rows, format: "html" });
+    printSimpleDocument({ title, landscape: true, bodyHtml: html ?? "" });
+  };
+
+  const expenseRegisterColumns: Array<RegisterColumn<AccountingExpenseRecord>> = [
+    { label: "Date (BS)", value: (r) => r.dateBs },
+    { label: "Voucher No.", value: (r) => r.voucherNumber },
+    { label: "Category", value: (r) => r.category },
+    { label: "Vendor / Payee", value: (r) => r.vendor },
+    { label: "Description", value: (r) => r.description },
+    { label: "Paid by", value: (r) => String(r.paymentMethod ?? "").replace(/_/g, " ") },
+    { label: "Amount", value: (r) => r.amountNpr, amount: true },
+  ];
+  const purchaseRegisterColumns: Array<RegisterColumn<AccountingPurchaseRecord>> = [
+    { label: "Date (BS)", value: (r) => r.purchaseDateBs },
+    { label: "Voucher No.", value: (r) => r.voucherNumber },
+    { label: "Vendor", value: (r) => r.vendor },
+    { label: "Bill No.", value: (r) => r.invoiceNumber },
+    { label: "Item / Category", value: (r) => r.item || r.category },
+    { label: "Qty", value: (r) => r.quantity },
+    { label: "Status", value: (r) => r.paymentStatus },
+    { label: "Total", value: (r) => r.totalAmountNpr, amount: true },
+  ];
+
   /** Non-fee register rows keyed by id — edit/void needs the original record. */
   const incomeRecordsById = useMemo(
     () => new Map((incomeQuery.data ?? []).map((row) => [row._id, row])),
@@ -730,13 +858,81 @@ export const AccountingManager = () => {
 
   /** Month derived from From date for reports that still key on YYYY-MM. */
   const reportMonthFromRange = reportFromBs.trim().slice(0, 7);
+  /** Statements of position are "as at" one date — only the To date applies. */
+  const reportIsAsAt =
+    selectedReport === "balance-sheet" ||
+    selectedReport === "receivables-aging" ||
+    selectedReport === "student-due" ||
+    selectedReport === "student-ledger";
   const reportUsesDateRange =
+    reportIsAsAt ||
     reportUsesMonthFilter(selectedReport) ||
     selectedReport === "daily-fee-collection" ||
     selectedReport === "day-book" ||
-    selectedReport === "student-ledger" ||
     selectedReport === "fee-collection-summary" ||
-    selectedReport === "scholarship-report";
+    selectedReport === "scholarship-report" ||
+    selectedReport === "trial-balance" ||
+    selectedReport === "income-expenditure" ||
+    selectedReport === "cash-flow";
+
+  const reportAccountsQuery = useQuery({
+    queryKey: ["chart-of-accounts"],
+    queryFn: () =>
+      unwrap<ChartOfAccountRecord[]>(api.get("/accounting/chart-of-accounts")),
+    enabled: tab === "reports" && selectedReport === "ledger",
+  });
+
+  /** Endpoint and filters of the selected report (shared by the table and Export CSV). */
+  const reportRequest = () => {
+    const reportMeta = reportTypes.find((item) => item.id === selectedReport);
+    const isLedgerReport =
+      reportMeta && "ledger" in reportMeta && Boolean(reportMeta.ledger);
+    const path = isLedgerReport
+      ? `/accounting/ledger-reports/${selectedReport}`
+      : `/accounting/reports/${selectedReport}`;
+    const from = reportIsAsAt ? undefined : reportFromBs.trim() || undefined;
+    const to = reportToBs.trim() || undefined;
+    return {
+      path,
+      params: {
+        fromDateBs: from,
+        toDateBs: to,
+        accountCode:
+          selectedReport === "ledger" && reportAccountCode
+            ? reportAccountCode
+            : undefined,
+        view: selectedReport === "journal" ? reportJournalView : undefined,
+        studentId:
+          selectedReport === "student-ledger" && reportStudentId
+            ? reportStudentId
+            : undefined,
+        // The From–To range is the filter. Only a lone date on the daily
+        // report means "that one day".
+        dateBs:
+          selectedReport === "daily-fee-collection" &&
+          Boolean(from) !== Boolean(to)
+            ? from || to
+            : undefined,
+      },
+    };
+  };
+
+  const ledgerStudentsQuery = useQuery({
+    queryKey: ["students", "student-ledger-picker"],
+    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    enabled: tab === "reports" && selectedReport === "student-ledger",
+  });
+  const ledgerStudentOptions = useMemo<SearchSelectOption[]>(
+    () => [
+      { value: "", label: "All students (one line each)" },
+      ...(ledgerStudentsQuery.data ?? []).map((student) => ({
+        value: String(student._id),
+        label: student.user?.fullName || student.admissionNumber || "Student",
+        hint: `Adm ${student.admissionNumber ?? "—"}`,
+      })),
+    ],
+    [ledgerStudentsQuery.data],
+  );
 
   const reportQuery = useQuery({
     queryKey: [
@@ -745,33 +941,16 @@ export const AccountingManager = () => {
       reportFromBs,
       reportToBs,
       reportMonthFromRange,
+      selectedReport === "ledger" ? reportAccountCode : "",
+      selectedReport === "journal" ? reportJournalView : "",
+      selectedReport === "student-ledger" ? reportStudentId : "",
     ],
     queryFn: () => {
-      const reportMeta = reportTypes.find((item) => item.id === selectedReport);
-      const isLedgerReport =
-        reportMeta && "ledger" in reportMeta && Boolean(reportMeta.ledger);
-      const path = isLedgerReport
-        ? `/accounting/ledger-reports/${selectedReport}`
-        : `/accounting/reports/${selectedReport}`;
-      const from = reportFromBs.trim() || undefined;
-      const to = reportToBs.trim() || undefined;
-      return unwrap<FinancialSummaryReport | { data: unknown[] }>(
-        api.get(path, {
-          params: {
-            fromDateBs: from,
-            toDateBs: to,
-            // Compatibility for APIs that still expect month/day
-            monthBs:
-              reportUsesMonthFilter(selectedReport) && reportMonthFromRange
-                ? reportMonthFromRange
-                : undefined,
-            dateBs:
-              selectedReport === "daily-fee-collection"
-                ? from || to
-                : undefined,
-          },
-        }),
-      );
+      const { path, params } = reportRequest();
+      return unwrap<
+        | FinancialSummaryReport
+        | { data: unknown[]; summary?: Record<string, unknown> }
+      >(api.get(path, { params }));
     },
     enabled: tab === "reports",
   });
@@ -782,6 +961,32 @@ export const AccountingManager = () => {
     "sections" in reportQuery.data
       ? reportQuery.data
       : null;
+  /** Control check shown above the trial balance / balance sheet. */
+  const reportBalanceCheck = (() => {
+    const data = reportQuery.data as
+      | { summary?: Record<string, unknown> }
+      | undefined;
+    const summary = data?.summary;
+    if (!summary || typeof summary.isBalanced !== "boolean") return null;
+    if (selectedReport !== "trial-balance" && selectedReport !== "balance-sheet") {
+      return null;
+    }
+    const diff = Number(summary.differenceNpr ?? 0);
+    if (summary.isBalanced) {
+      return {
+        ok: true,
+        text:
+          selectedReport === "trial-balance"
+            ? "Balanced — total Debit equals total Credit"
+            : "Balanced — Assets equal Liabilities + Equity",
+      };
+    }
+    return {
+      ok: false,
+      text: `Out of balance by ${formatCurrencyNpr(Math.abs(diff))} — check the journal entries`,
+    };
+  })();
+
   const standardReportRows =
     selectedReport !== "financial-summary" &&
     reportQuery.data &&
@@ -850,7 +1055,7 @@ export const AccountingManager = () => {
     mutationFn: (payload: AccountingExpenseInput) =>
       unwrap(api.post("/accounting/expenses", payload)),
     onSuccess: async () => {
-      toast.success("Expense recorded");
+      toast.success("Indirect expense recorded");
       setExpenseForm(freshExpenseForm());
       await invalidateAccounting();
     },
@@ -861,7 +1066,7 @@ export const AccountingManager = () => {
     mutationFn: (payload: AccountingPurchaseInput) =>
       unwrap(api.post("/accounting/purchases", payload)),
     onSuccess: async () => {
-      toast.success("Purchase recorded");
+      toast.success("Direct expense recorded");
       setPurchaseForm(defaultPurchase);
       await invalidateAccounting();
     },
@@ -961,7 +1166,7 @@ export const AccountingManager = () => {
     mutationFn: (id: string) =>
       unwrap(api.delete(`/accounting/expenses/${id}`)),
     onSuccess: async () => {
-      toast.success("Expense deleted");
+      toast.success("Indirect expense deleted");
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -971,7 +1176,7 @@ export const AccountingManager = () => {
     mutationFn: (id: string) =>
       unwrap(api.delete(`/accounting/purchases/${id}`)),
     onSuccess: async () => {
-      toast.success("Purchase deleted");
+      toast.success("Direct expense deleted");
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -1059,7 +1264,7 @@ export const AccountingManager = () => {
       payload: AccountingExpenseInput;
     }) => unwrap(api.put(`/accounting/expenses/${id}`, payload)),
     onSuccess: async () => {
-      toast.success("Expense updated");
+      toast.success("Indirect expense updated");
       setEditingExpense(null);
       setExpenseForm(freshExpenseForm());
       await invalidateAccounting();
@@ -1076,7 +1281,7 @@ export const AccountingManager = () => {
       payload: Partial<AccountingPurchaseInput>;
     }) => unwrap(api.put(`/accounting/purchases/${id}`, payload)),
     onSuccess: async () => {
-      toast.success("Purchase updated");
+      toast.success("Direct expense updated");
       setEditingPurchase(null);
       setPurchaseForm(defaultPurchase);
       await invalidateAccounting();
@@ -1131,6 +1336,8 @@ export const AccountingManager = () => {
         currentFiscalYearBs: settingsQuery.data.currentFiscalYearBs,
         auditLockDateBs: settingsQuery.data.auditLockDateBs ?? "",
         approvalThresholdNpr: settingsQuery.data.approvalThresholdNpr ?? 25000,
+        capitalizationThresholdNpr:
+          (settingsQuery.data as { capitalizationThresholdNpr?: number }).capitalizationThresholdNpr ?? 5000,
         panNumber: settingsQuery.data.panNumber ?? "",
         vatNumber: settingsQuery.data.vatNumber ?? "",
         tdsEnabled: settingsQuery.data.tdsEnabled ?? false,
@@ -1198,6 +1405,13 @@ export const AccountingManager = () => {
   };
 
   const exportReport = (format: "csv" | "xlsx") => {
+    if (format === "csv") {
+      const { path, params } = reportRequest();
+      downloadReportCsv(selectedReport, path, params)
+        .then(() => toast.success("CSV downloaded"))
+        .catch(() => toast.error("Could not export the CSV. Please try again."));
+      return;
+    }
     if (format === "xlsx") {
       if (financialSummary) {
         downloadFinancialSummaryExcel(financialSummary);
@@ -1219,32 +1433,13 @@ export const AccountingManager = () => {
       return;
     }
 
-    const params = new URLSearchParams({ format });
-    if (reportFromBs.trim()) params.set("fromDateBs", reportFromBs.trim());
-    if (reportToBs.trim()) params.set("toDateBs", reportToBs.trim());
-    if (reportUsesMonthFilter(selectedReport) && reportMonthFromRange) {
-      params.set("monthBs", reportMonthFromRange);
-    }
-    if (selectedReport === "daily-fee-collection") {
-      const day = reportFromBs.trim() || reportToBs.trim();
-      if (day) params.set("dateBs", day);
-    }
-    const reportMeta = reportTypes.find((item) => item.id === selectedReport);
-    const basePath =
-      reportMeta && "ledger" in reportMeta && reportMeta.ledger
-        ? `/accounting/ledger-reports/${selectedReport}`
-        : `/accounting/reports/${selectedReport}`;
-    window.open(
-      `${api.defaults.baseURL}${basePath}?${params.toString()}`,
-      "_blank",
-    );
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Accounting & Finance"
-        description="Nepal college accounting — fee, salary, refunds, purchases, expenses, income, ledger, and गोश्वारा भौचर. Transactions post to the ledger automatically."
+        description="Nepal college accounting — fee, salary, refunds, purchases, expenses, income, ledger, and journal vouchers. Transactions post to the ledger automatically."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -1272,7 +1467,7 @@ export const AccountingManager = () => {
           <LoadingState />
         ) : (
           <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {(
                 dashboardQuery.data?.stats ?? [
                   {
@@ -1314,12 +1509,15 @@ export const AccountingManager = () => {
                       "min-w-0 overflow-hidden break-words text-lg font-semibold tabular-nums leading-snug sm:text-xl xl:text-2xl",
                       stat.label.includes("Expense") && "text-rose-700",
                       stat.label.includes("Income") && "text-emerald-700",
-                      stat.label.includes("Cash") && "text-brand-700",
+                      (stat.label.includes("Cash") || stat.label.includes("Bank")) && "text-brand-700",
                       stat.label.includes("Collection") && "text-brand-800",
                     )}
                     title={formatCurrencyNpr(stat.value)}
                   >
                     {formatCurrencyNpr(stat.value)}
+                    {"change" in stat && stat.change ? (
+                      <p className="mt-1 text-xs font-normal text-slate-500">{stat.change}</p>
+                    ) : null}
                   </CardContent>
                 </Card>
               ))}
@@ -1348,13 +1546,13 @@ export const AccountingManager = () => {
                   },
                   {
                     key: "purchases",
-                    title: "Recent Purchases",
+                    title: "Recent Direct Expenses",
                     items: dashboardQuery.data?.recentPurchases ?? [],
                     amountClass: "text-indigo-800",
                   },
                   {
                     key: "expenses",
-                    title: "Recent Expenses",
+                    title: "Recent Indirect Expenses",
                     items: dashboardQuery.data?.recentExpenseItems ?? [],
                     amountClass: "text-rose-700",
                   },
@@ -1468,7 +1666,16 @@ export const AccountingManager = () => {
                                 <div className="truncate text-xs text-slate-500">
                                   {item.dateBs} · {item.voucherNo}
                                   {item.status ? (
-                                    <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
+                                    <span
+                                      className={cn(
+                                        "ml-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                                        item.status === "NOT POSTED"
+                                          ? "bg-red-100 font-semibold text-red-700"
+                                          : item.status === "POSTED"
+                                            ? "bg-emerald-50 text-emerald-700"
+                                            : "bg-slate-100 text-slate-600",
+                                      )}
+                                    >
                                       {String(item.status).replace(/_/g, " ")}
                                     </span>
                                   ) : null}
@@ -2541,16 +2748,39 @@ export const AccountingManager = () => {
       ) : null}
 
       {tab === "expenses" ? (
+        <div className="space-y-5">
+        <ExpenseRegisterHeader
+          title="Indirect Expenses"
+          subtitle="Electricity, water, internet, office and other running costs. Each entry posts its Journal Voucher (Dr expense · Cr cash/bank) automatically."
+          icon={TrendingDown}
+          tone="amber"
+          records={(expensesQuery.data ?? []).map((row) => ({
+            dateBs: row.dateBs,
+            amountNpr: row.amountNpr,
+            paymentMethod: row.paymentMethod,
+          }))}
+          newLabel="New indirect expense"
+          onPrint={() =>
+            outputRegister("print", "Indirect Expenses Register", expenseRegisterColumns, visibleExpenses)
+          }
+          onExport={() =>
+            outputRegister("xlsx", "Indirect Expenses Register", expenseRegisterColumns, visibleExpenses)
+          }
+          onNew={() => {
+            setEditingExpense(null);
+            setExpenseForm(freshExpenseForm());
+            scrollToForm("expense-form");
+          }}
+        />
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card id="expense-form">
+          <Card id="expense-form" className={editingExpense ? "border-amber-300 ring-2 ring-amber-100" : undefined}>
             <CardHeader>
-              <CardTitle>
-                {editingExpense ? "Edit Expense" : "Daily Expense Register"}
-              </CardTitle>
-              <p className="text-sm text-slate-500">
-                Posts journal (Dr expense · Cr cash/bank) and updates ledger
-                automatically.
-              </p>
+              <BankCashSectionTitle
+                icon={TrendingDown}
+                tone="amber"
+                title={editingExpense ? "Edit Indirect Expense" : "Indirect Expense Register"}
+                subtitle="Posts journal (Dr expense · Cr cash/bank) and updates the ledger automatically."
+              />
             </CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Date">
@@ -2602,12 +2832,17 @@ export const AccountingManager = () => {
               <FormField label="Payment Method">
                 <Select
                   value={expenseForm.paymentMethod}
+                  disabled={Boolean(editingExpense)}
                   onChange={(e) =>
-                    setExpenseForm((c) => ({
-                      ...c,
-                      paymentMethod: e.target
-                        .value as AccountingExpenseInput["paymentMethod"],
-                    }))
+                    setExpenseForm((c) => {
+                      const paymentMethod = e.target
+                        .value as AccountingExpenseInput["paymentMethod"];
+                      return {
+                        ...c,
+                        paymentMethod,
+                        bankAccountId: bankAccountForMethod(paymentMethod, c.bankAccountId, activeBankAccounts),
+                      };
+                    })
                   }
                 >
                   {PAYMENT_METHODS.map((m) => (
@@ -2617,6 +2852,13 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
+              <BankAccountField
+                paymentMethod={expenseForm.paymentMethod}
+                value={expenseForm.bankAccountId}
+                banks={activeBankAccounts}
+                locked={Boolean(editingExpense)}
+                onChange={(bankAccountId) => setExpenseForm((c) => ({ ...c, bankAccountId }))}
+              />
               <FormField label="Voucher Number (optional)">
                 <Input
                   value={expenseForm.voucherNumber ?? ""}
@@ -2650,6 +2892,12 @@ export const AccountingManager = () => {
                   }
                 />
               </FormField>
+              <JournalVoucherDetailsFields
+                key={editingExpense?._id ?? "new-expense"}
+                value={expenseForm.voucherDetails}
+                defaultOpen={Boolean(editingExpense)}
+                onChange={(voucherDetails) => setExpenseForm((c) => ({ ...c, voucherDetails }))}
+              />
               <FormField label="Attachment">
                 <Input
                   type="file"
@@ -2702,11 +2950,21 @@ export const AccountingManager = () => {
                       ...expenseForm,
                       approvedBy:
                         expenseForm.approvedBy?.trim() || currentUserName,
+                      voucherDetails: {
+                        ...expenseForm.voucherDetails,
+                        // The person entering the expense prepares its voucher
+                        preparedByName:
+                          expenseForm.voucherDetails?.preparedByName?.trim() || currentUserName,
+                      },
                     });
                     if (!parsed.success)
                       return toast.error(
                         parsed.error.issues[0]?.message ?? "Invalid expense",
                       );
+                    const bankError = editingExpense
+                      ? null
+                      : missingBankAccountError(expenseForm.paymentMethod, expenseForm.bankAccountId, activeBankAccounts);
+                    if (bankError) return toast.error(bankError);
                     if (editingExpense) {
                       void updateExpense.mutateAsync({
                         id: editingExpense._id,
@@ -2717,16 +2975,30 @@ export const AccountingManager = () => {
                     }
                   }}
                 >
-                  {editingExpense ? "Update Expense" : "Save Expense"}
+                  {editingExpense ? "Update Indirect Expense" : "Save Indirect Expense"}
                 </Button>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Expense Records</CardTitle>
+              <BankCashSectionTitle
+                icon={Receipt}
+                title="Indirect Expense Records"
+                subtitle={`${(expensesQuery.data ?? []).length} entr${(expensesQuery.data ?? []).length === 1 ? "y" : "ies"} · print any as a Journal Voucher`}
+              />
+              <div className="relative mt-3">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="pl-9"
+                  value={expenseSearch}
+                  onChange={(e) => setExpenseSearch(e.target.value)}
+                  placeholder="Search category, vendor, voucher, description or amount"
+                  aria-label="Search indirect expenses"
+                />
+              </div>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
+            <CardContent className="max-h-[720px] overflow-auto">
               <Table>
                 <TableHead>
                   <tr>
@@ -2734,43 +3006,53 @@ export const AccountingManager = () => {
                     <Th>Voucher</Th>
                     <Th>Category</Th>
                     <Th>Amount</Th>
+                    <Th>Paid by</Th>
                     <Th />
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {(expensesQuery.data ?? []).map((row) => (
-                    <tr key={row._id}>
-                      <Td>{row.dateBs}</Td>
+                  {visibleExpenses
+                    .map((row) => (
+                    <tr key={row._id} className={editingExpense?._id === row._id ? "bg-amber-50/70" : undefined}>
+                      <Td className="whitespace-nowrap">{row.dateBs}</Td>
                       <Td className="font-mono text-xs">
                         {row.voucherNumber ?? "—"}
+                        {row.journalPosted !== undefined ? (
+                          <div>
+                            <JournalPostedBadge posted={row.journalPosted} />
+                          </div>
+                        ) : null}
                       </Td>
-                      <Td>{row.category}</Td>
-                      <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
+                      <Td>
+                        <div className="font-medium">{row.category}</div>
+                        {row.vendor || row.description ? (
+                          <div className="max-w-[220px] truncate text-xs text-slate-500" title={row.description}>
+                            {[row.vendor, row.description].filter(Boolean).join(" · ")}
+                          </div>
+                        ) : null}
+                      </Td>
+                      <Td className="whitespace-nowrap font-semibold tabular-nums">{formatCurrencyNpr(row.amountNpr)}</Td>
+                      <Td>
+                        <Badge
+                          className={
+                            isBankPaymentMethod(row.paymentMethod)
+                              ? "bg-brand-50 text-brand-700"
+                              : "bg-emerald-50 text-emerald-700"
+                          }
+                        >
+                          {isBankPaymentMethod(row.paymentMethod) ? "Bank" : "Cash"}
+                        </Badge>
+                      </Td>
                       <Td>
                         <div className="flex flex-wrap gap-1">
                           <Button
                             size="sm"
                             variant="outline"
+                            title="Print Journal Voucher (AGF No. 10)"
                             onClick={() =>
-                              printRegisterVoucher({
-                                kind: "Expense",
-                                voucherNumber: row.voucherNumber,
-                                dateBs: row.dateBs,
-                                amountNpr: row.amountNpr,
-                                narration: row.description,
-                                fields: [
-                                  { label: "Category", value: row.category },
-                                  { label: "Vendor", value: row.vendor || "—" },
-                                  {
-                                    label: "Payment",
-                                    value: row.paymentMethod.replace(/_/g, " "),
-                                  },
-                                  {
-                                    label: "Approved By",
-                                    value: row.approvedBy || "—",
-                                  },
-                                ],
-                              })
+                              void printAuthenticatedDocument(`/accounting/expenses/${row._id}/journal-voucher`).catch(async (e) =>
+                                toast.error(await messageFromPdfError(e)),
+                              )
                             }
                           >
                             <Printer className="h-3.5 w-3.5" />
@@ -2788,10 +3070,12 @@ export const AccountingManager = () => {
                                 dateBs: row.dateBs,
                                 amountNpr: row.amountNpr,
                                 paymentMethod: row.paymentMethod,
+                                bankAccountId: row.bankAccountId ?? "",
                                 description: row.description,
                                 voucherNumber: row.voucherNumber ?? "",
                                 approvedBy: row.approvedBy ?? "",
                                 attachmentUrl: row.attachmentUrl ?? "",
+                                voucherDetails: row.voucherDetails ?? {},
                               });
                             }}
                           >
@@ -2817,19 +3101,45 @@ export const AccountingManager = () => {
             </CardContent>
           </Card>
         </div>
+        </div>
       ) : null}
 
       {tab === "purchases" ? (
+        <div className="space-y-5">
+        <ExpenseRegisterHeader
+          title="Direct Expense"
+          subtitle="Books, lab equipment, stationery and other purchases. Each bill posts its Journal Voucher automatically; unpaid bills wait in Accounts Payable until marked paid."
+          icon={ShoppingCart}
+          tone="rose"
+          showUnpaid
+          records={(purchasesQuery.data ?? []).map((row) => ({
+            dateBs: row.purchaseDateBs,
+            amountNpr: row.totalAmountNpr,
+            paymentMethod: row.paymentMethod,
+            paymentStatus: row.paymentStatus,
+          }))}
+          newLabel="New direct expense"
+          onPrint={() =>
+            outputRegister("print", "Direct Expense Register", purchaseRegisterColumns, visiblePurchases)
+          }
+          onExport={() =>
+            outputRegister("xlsx", "Direct Expense Register", purchaseRegisterColumns, visiblePurchases)
+          }
+          onNew={() => {
+            setEditingPurchase(null);
+            setPurchaseForm(defaultPurchase);
+            scrollToForm("purchase-form");
+          }}
+        />
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card id="purchase-form">
+          <Card id="purchase-form" className={editingPurchase ? "border-rose-300 ring-2 ring-rose-100" : undefined}>
             <CardHeader>
-              <CardTitle>
-                {editingPurchase ? "Edit Purchase" : "Purchase Register"}
-              </CardTitle>
-              <p className="text-sm text-slate-500">
-                Auto journal + ledger. Printable purchase voucher available on
-                each row.
-              </p>
+              <BankCashSectionTitle
+                icon={ShoppingCart}
+                tone="brand"
+                title={editingPurchase ? "Edit Direct Expense" : "Direct Expense Register"}
+                subtitle="Auto journal + ledger. Print the Journal Voucher from each row."
+              />
             </CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Purchase Date">
@@ -2922,11 +3232,15 @@ export const AccountingManager = () => {
                 <Select
                   value={purchaseForm.paymentMethod}
                   onChange={(e) =>
-                    setPurchaseForm((c) => ({
-                      ...c,
-                      paymentMethod: e.target
-                        .value as AccountingPurchaseInput["paymentMethod"],
-                    }))
+                    setPurchaseForm((c) => {
+                      const paymentMethod = e.target
+                        .value as AccountingPurchaseInput["paymentMethod"];
+                      return {
+                        ...c,
+                        paymentMethod,
+                        bankAccountId: bankAccountForMethod(paymentMethod, c.bankAccountId, activeBankAccounts),
+                      };
+                    })
                   }
                 >
                   {PAYMENT_METHODS.map((m) => (
@@ -2936,6 +3250,13 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
+              <BankAccountField
+                paymentMethod={purchaseForm.paymentMethod}
+                value={purchaseForm.bankAccountId}
+                banks={activeBankAccounts}
+                locked={editingPurchase?.paymentStatus === "PAID"}
+                onChange={(bankAccountId) => setPurchaseForm((c) => ({ ...c, bankAccountId }))}
+              />
               <FormField label="Payment Status">
                 <Select
                   value={purchaseForm.paymentStatus}
@@ -2965,6 +3286,13 @@ export const AccountingManager = () => {
                   }
                 />
               </FormField>
+              <JournalVoucherDetailsFields
+                key={editingPurchase?._id ?? "new-purchase"}
+                value={purchaseForm.voucherDetails}
+                receiptLabel="Bill / Invoice No. (if different)"
+                defaultOpen={Boolean(editingPurchase)}
+                onChange={(voucherDetails) => setPurchaseForm((c) => ({ ...c, voucherDetails }))}
+              />
               <FormField label="Attachment (Bill PDF/Image)">
                 <Input
                   type="file"
@@ -3016,11 +3344,24 @@ export const AccountingManager = () => {
                 <Button
                   onClick={() => {
                     const parsed =
-                      accountingPurchaseSchema.safeParse(purchaseForm);
+                      accountingPurchaseSchema.safeParse({
+                        ...purchaseForm,
+                        voucherDetails: {
+                          ...purchaseForm.voucherDetails,
+                          // The person entering the expense prepares its voucher
+                          preparedByName:
+                            purchaseForm.voucherDetails?.preparedByName?.trim() || currentUserName,
+                        },
+                      });
                     if (!parsed.success)
                       return toast.error(
                         parsed.error.issues[0]?.message ?? "Invalid purchase",
                       );
+                    const bankError =
+                      editingPurchase?.paymentStatus === "PAID" || purchaseForm.paymentStatus !== "PAID"
+                        ? null
+                        : missingBankAccountError(purchaseForm.paymentMethod, purchaseForm.bankAccountId, activeBankAccounts);
+                    if (bankError) return toast.error(bankError);
                     if (editingPurchase) {
                       void updatePurchase.mutateAsync({
                         id: editingPurchase._id,
@@ -3031,14 +3372,28 @@ export const AccountingManager = () => {
                     }
                   }}
                 >
-                  {editingPurchase ? "Update Purchase" : "Save Purchase"}
+                  {editingPurchase ? "Update Direct Expense" : "Save Direct Expense"}
                 </Button>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Purchase Records</CardTitle>
+              <BankCashSectionTitle
+                icon={Receipt}
+                title="Direct Expense Records"
+                subtitle={`${(purchasesQuery.data ?? []).length} bill${(purchasesQuery.data ?? []).length === 1 ? "" : "s"} · print any as a Journal Voucher`}
+              />
+              <div className="relative mt-3">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="pl-9"
+                  value={purchaseSearch}
+                  onChange={(e) => setPurchaseSearch(e.target.value)}
+                  placeholder="Search vendor, item, bill no., voucher or amount"
+                  aria-label="Search direct expenses"
+                />
+              </div>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
@@ -3053,11 +3408,17 @@ export const AccountingManager = () => {
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {(purchasesQuery.data ?? []).map((row) => (
-                    <tr key={row._id}>
-                      <Td>{row.purchaseDateBs}</Td>
+                  {visiblePurchases
+                    .map((row) => (
+                    <tr key={row._id} className={editingPurchase?._id === row._id ? "bg-rose-50/70" : undefined}>
+                      <Td className="whitespace-nowrap">{row.purchaseDateBs}</Td>
                       <Td className="font-mono text-xs">
                         {row.voucherNumber ?? "—"}
+                        {row.journalPosted !== undefined ? (
+                          <div>
+                            <JournalPostedBadge posted={row.journalPosted} />
+                          </div>
+                        ) : null}
                       </Td>
                       <Td>
                         <div className="font-medium">{row.vendor}</div>
@@ -3065,40 +3426,35 @@ export const AccountingManager = () => {
                           {row.item || row.category} · Bill {row.invoiceNumber}
                         </div>
                       </Td>
-                      <Td>{formatCurrencyNpr(row.totalAmountNpr)}</Td>
+                      <Td className="whitespace-nowrap font-semibold tabular-nums">{formatCurrencyNpr(row.totalAmountNpr)}</Td>
                       <Td>
-                        <Badge>{row.paymentStatus}</Badge>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge
+                            className={
+                              row.paymentStatus === "PAID"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-amber-50 text-amber-700"
+                            }
+                          >
+                            {row.paymentStatus === "PAID" ? "Paid" : row.paymentStatus === "PARTIAL" ? "Part paid" : "Unpaid"}
+                          </Badge>
+                          {row.paymentStatus === "PAID" ? (
+                            <Badge className="bg-slate-100 text-slate-600">
+                              {isBankPaymentMethod(row.paymentMethod) ? "Bank" : "Cash"}
+                            </Badge>
+                          ) : null}
+                        </div>
                       </Td>
                       <Td>
                         <div className="flex flex-wrap gap-1">
                           <Button
                             size="sm"
                             variant="outline"
+                            title="Print Journal Voucher (AGF No. 10)"
                             onClick={() =>
-                              printRegisterVoucher({
-                                kind: "Purchase",
-                                voucherNumber: row.voucherNumber,
-                                dateBs: row.purchaseDateBs,
-                                amountNpr: row.totalAmountNpr,
-                                narration: row.description,
-                                fields: [
-                                  { label: "Vendor", value: row.vendor },
-                                  {
-                                    label: "Bill Number",
-                                    value: row.invoiceNumber,
-                                  },
-                                  { label: "Category", value: row.category },
-                                  { label: "Item", value: row.item || "—" },
-                                  {
-                                    label: "Qty × Price",
-                                    value: `${row.quantity} × ${row.unitPriceNpr}`,
-                                  },
-                                  {
-                                    label: "Payment",
-                                    value: `${row.paymentMethod.replace(/_/g, " ")} (${row.paymentStatus})`,
-                                  },
-                                ],
-                              })
+                              void printAuthenticatedDocument(`/accounting/purchases/${row._id}/journal-voucher`).catch(async (e) =>
+                                toast.error(await messageFromPdfError(e)),
+                              )
                             }
                           >
                             <Printer className="h-3.5 w-3.5" />
@@ -3120,9 +3476,11 @@ export const AccountingManager = () => {
                                 unitPriceNpr: row.unitPriceNpr,
                                 paymentStatus: row.paymentStatus,
                                 paymentMethod: row.paymentMethod,
+                                bankAccountId: row.bankAccountId ?? "",
                                 description: row.description ?? "",
                                 voucherNumber: row.voucherNumber ?? "",
                                 attachmentUrl: row.attachmentUrl ?? "",
+                                voucherDetails: row.voucherDetails ?? {},
                               });
                             }}
                           >
@@ -3134,7 +3492,11 @@ export const AccountingManager = () => {
                               onClick={() =>
                                 void updatePurchase.mutateAsync({
                                   id: row._id,
-                                  payload: { paymentStatus: "PAID" },
+                                  payload: {
+                                    paymentStatus: "PAID",
+                                    paymentMethod: row.paymentMethod,
+                                    bankAccountId: row.bankAccountId || undefined,
+                                  },
                                 })
                               }
                             >
@@ -3160,6 +3522,7 @@ export const AccountingManager = () => {
               </Table>
             </CardContent>
           </Card>
+        </div>
         </div>
       ) : null}
 
@@ -3220,7 +3583,7 @@ export const AccountingManager = () => {
           <Card>
             <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <CardTitle className="text-base">Income</CardTitle>
+                <CardTitle className="text-base">Other Income</CardTitle>
                 <p className="mt-1 text-sm text-slate-500">
                   Every rupee earned: student fees (posted automatically from
                   Student Fee Records) plus non-fee income you record here.
@@ -3382,12 +3745,17 @@ export const AccountingManager = () => {
               <FormField label="Payment Mode">
                 <Select
                   value={incomeForm.paymentMethod}
+                  disabled={Boolean(editingIncome)}
                   onChange={(e) =>
-                    setIncomeForm((c) => ({
-                      ...c,
-                      paymentMethod: e.target
-                        .value as AccountingIncomeInput["paymentMethod"],
-                    }))
+                    setIncomeForm((c) => {
+                      const paymentMethod = e.target
+                        .value as AccountingIncomeInput["paymentMethod"];
+                      return {
+                        ...c,
+                        paymentMethod,
+                        bankAccountId: bankAccountForMethod(paymentMethod, c.bankAccountId, activeBankAccounts),
+                      };
+                    })
                   }
                 >
                   {PAYMENT_METHODS.map((m) => (
@@ -3397,9 +3765,17 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Receipt no.">
+              <BankAccountField
+                paymentMethod={incomeForm.paymentMethod}
+                value={incomeForm.bankAccountId}
+                banks={activeBankAccounts}
+                locked={Boolean(editingIncome)}
+                onChange={(bankAccountId) => setIncomeForm((c) => ({ ...c, bankAccountId }))}
+              />
+              <FormField label="Receipt no. * (required)">
                 <Input
                   value={incomeForm.receiptNumber ?? ""}
+                  required
                   placeholder="As printed on the receipt book"
                   autoComplete="off"
                   onChange={(e) =>
@@ -3427,13 +3803,17 @@ export const AccountingManager = () => {
                 <Button
                   onClick={() => {
                     if (!(incomeForm.receiptNumber ?? "").trim()) {
-                      return toast.error("Enter receipt number");
+                      return toast.error("Receipt no. is required — enter the number printed on the receipt book");
                     }
                     const parsed = accountingIncomeSchema.safeParse(incomeForm);
                     if (!parsed.success)
                       return toast.error(
                         parsed.error.issues[0]?.message ?? "Invalid income",
                       );
+                    const bankError = editingIncome
+                      ? null
+                      : missingBankAccountError(incomeForm.paymentMethod, incomeForm.bankAccountId, activeBankAccounts);
+                    if (bankError) return toast.error(bankError);
                     if (editingIncome) {
                       void updateIncome.mutateAsync({
                         id: editingIncome._id,
@@ -3453,7 +3833,35 @@ export const AccountingManager = () => {
 
           <Card className="xl:col-span-2">
             <CardHeader>
-              <CardTitle className="text-base">Income records</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-base">Receipt records</CardTitle>
+                <div className="flex gap-2">
+                  {(["print", "xlsx"] as const).map((format) => (
+                    <Button
+                      key={format}
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        outputRegister(
+                          format,
+                          "Other Income Register",
+                          [
+                            { label: "Date (BS)", value: (r) => r.dateBs },
+                            { label: "Receipt", value: (r) => r.receiptNumber },
+                            { label: "Source of income", value: (r) => r.category },
+                            { label: "From", value: (r) => r.source },
+                            { label: "Mode", value: (r) => String(r.paymentMethod ?? "").replace(/_/g, " ") },
+                            { label: "Amount", value: (r) => r.amountNpr, amount: true },
+                          ] as Array<RegisterColumn<(typeof incomeRows)[number]>>,
+                          incomeRows,
+                        )
+                      }
+                    >
+                      {format === "print" ? "Print / PDF" : "Excel"}
+                    </Button>
+                  ))}
+                </div>
+              </div>
               <p className="mt-1 text-sm text-slate-500">
                 {incomeRows.length} of {incomeOverview?.rowCount ?? 0} entries
                 {(incomeOverview?.rowCount ?? 0) > (incomeOverview?.rows.length ?? 0)
@@ -3575,6 +3983,7 @@ export const AccountingManager = () => {
                                         dateBs: record.dateBs,
                                         amountNpr: record.amountNpr,
                                         paymentMethod: record.paymentMethod,
+                                        bankAccountId: record.bankAccountId ?? "",
                                         description: record.description ?? "",
                                         receiptNumber: record.receiptNumber ?? "",
                                         voucherNumber: record.voucherNumber ?? "",
@@ -3632,8 +4041,9 @@ export const AccountingManager = () => {
                     }))
                   }
                 >
-                  <option value="CREDIT">Credit (In)</option>
-                  <option value="DEBIT">Debit (Out)</option>
+                  {/* Cash book: money received is the debit side, money paid the credit side */}
+                  <option value="CREDIT">Receipt — money in (Dr)</option>
+                  <option value="DEBIT">Payment — money out (Cr)</option>
                 </Select>
               </FormField>
               <FormField label="Category">
@@ -3696,12 +4106,12 @@ export const AccountingManager = () => {
                       <Td>
                         <Badge
                           className={
-                            row.entryType === "CREDIT"
+                            row.entryType === "DEBIT"
                               ? undefined
                               : "bg-rose-100 text-rose-800"
                           }
                         >
-                          {row.entryType}
+                          {row.entryType === "DEBIT" ? "Receipt (Dr)" : "Payment (Cr)"}
                         </Badge>
                       </Td>
                       <Td className="cell-wrap">{row.description}</Td>
@@ -3760,21 +4170,27 @@ export const AccountingManager = () => {
                       return;
                     }
                     try {
-                      const periodLabel =
-                        reportFromBs || reportToBs
+                      const periodLabel = reportIsAsAt
+                        ? `As at ${reportToBs || "today"}`
+                        : reportFromBs || reportToBs
                           ? `From ${reportFromBs || "…"} to ${reportToBs || "…"}${
                               reportFromBs
                                 ? ` (AD ${bsDateToAdString(reportFromBs) || "—"})`
                                 : ""
                             }`
                           : undefined;
+                      // Screen-only parts (Actions / Delete) must not print.
+                      const printable = printRoot.cloneNode(true) as HTMLElement;
+                      printable
+                        .querySelectorAll('[class*="print:hidden"]')
+                        .forEach((el) => el.remove());
                       printSimpleDocument({
                         landscape: true,
                         title:
                           reportTypes.find((r) => r.id === selectedReport)
                             ?.label ?? "Report",
                         subtitle: periodLabel,
-                        bodyHtml: printRoot.innerHTML,
+                        bodyHtml: printable.innerHTML,
                       });
                       toast.success(
                         "Print dialog opening — choose printer or Save as PDF",
@@ -3800,20 +4216,23 @@ export const AccountingManager = () => {
               {reportUsesDateRange ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                   <p className="mb-3 text-sm font-medium text-slate-700">
-                    Date range (BS and AD — enter either side, the other fills
-                    automatically)
+                    {reportIsAsAt
+                      ? "As at date (BS and AD — leave empty for today's position)"
+                      : "Date range (BS and AD — enter either side, the other fills automatically)"}
                   </p>
                   <div className="grid gap-4 lg:grid-cols-2">
-                    <FormField label="From date">
-                      <DualBsAdDateField
-                        valueBs={reportFromBs}
-                        onChangeBs={(bs) => {
-                          setReportFromBs(bs);
-                        }}
-                        bsPlaceholder="From date (BS)"
-                      />
-                    </FormField>
-                    <FormField label="To date">
+                    {reportIsAsAt ? null : (
+                      <FormField label="From date">
+                        <DualBsAdDateField
+                          valueBs={reportFromBs}
+                          onChangeBs={(bs) => {
+                            setReportFromBs(bs);
+                          }}
+                          bsPlaceholder="From date (BS)"
+                        />
+                      </FormField>
+                    )}
+                    <FormField label={reportIsAsAt ? "As at date" : "To date"}>
                       <DualBsAdDateField
                         valueBs={reportToBs}
                         onChangeBs={(bs) => {
@@ -3822,6 +4241,55 @@ export const AccountingManager = () => {
                         bsPlaceholder="To date (BS)"
                       />
                     </FormField>
+                    {selectedReport === "student-ledger" ? (
+                      <FormField label="Student">
+                        <SearchSelect
+                          options={ledgerStudentOptions}
+                          value={reportStudentId}
+                          onChange={setReportStudentId}
+                          placeholder="All students — or search a student for their transactions"
+                        />
+                      </FormField>
+                    ) : null}
+                    {selectedReport === "journal" ? (
+                      <FormField label="View">
+                        <Select
+                          value={reportJournalView}
+                          onChange={(e) =>
+                            setReportJournalView(e.target.value === "summary" ? "summary" : "detailed")
+                          }
+                        >
+                          <option value="detailed">Detailed (account lines)</option>
+                          <option value="summary">Summary (one line per voucher)</option>
+                        </Select>
+                      </FormField>
+                    ) : null}
+                    {selectedReport === "ledger" ? (
+                      <FormField label="Account">
+                        <Select
+                          value={reportAccountCode}
+                          onChange={(e) => setReportAccountCode(e.target.value)}
+                        >
+                          <option value="">All accounts</option>
+                          {(reportAccountsQuery.data ?? [])
+                            .slice()
+                            .sort((a, b) => a.code.localeCompare(b.code))
+                            .map((account) => {
+                              const isGroup = headerAccountCodes(reportAccountsQuery.data ?? []).has(account.code);
+                              return (
+                                <option
+                                  key={account.code}
+                                  value={account.code}
+                                  style={isGroup ? { fontWeight: 700 } : undefined}
+                                >
+                                  {account.code} · {account.name}
+                                  {isGroup ? " (group)" : ""}
+                                </option>
+                              );
+                            })}
+                        </Select>
+                      </FormField>
+                    ) : null}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Button
@@ -3876,27 +4344,31 @@ export const AccountingManager = () => {
               />
             ) : financialSummary ? (
               <div id="accounting-report-print" className="space-y-6">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
                   {[
                     {
                       label: "Fee Collections",
                       value: financialSummary.totals.feeCollectionNpr,
                     },
                     {
-                      label: "Income",
+                      label: "Other Income",
                       value: financialSummary.totals.incomeNpr,
                     },
                     {
-                      label: "Expenses",
+                      label: "Indirect Expenses",
                       value: financialSummary.totals.expenseNpr,
                     },
                     {
-                      label: "Purchases",
+                      label: "Direct Expense",
                       value: financialSummary.totals.purchaseNpr,
                     },
                     {
                       label: "Salaries",
                       value: financialSummary.totals.salaryNpr,
+                    },
+                    {
+                      label: "Refunds",
+                      value: financialSummary.totals.refundNpr ?? 0,
                     },
                     {
                       label: "Net Surplus",
@@ -3930,7 +4402,7 @@ export const AccountingManager = () => {
                         "financial-summary",
                         financialSummary.data,
                       ).map((row, index) => (
-                        <tr key={index}>
+                        <tr key={index} style={reportRowStyle(row)}>
                           {REPORT_COLUMNS["financial-summary"].map((column) => (
                             <Td key={column.key}>
                               {getReportCellValue(row, column)}
@@ -3993,13 +4465,13 @@ export const AccountingManager = () => {
                                   No{" "}
                                   {activeSection?.label.toLowerCase() ??
                                     "records"}{" "}
-                                  for the selected month.
+                                  for the selected period.
                                 </Td>
                               </tr>
                             ) : (
                               getReportRows(sectionReportType, sectionRows).map(
                                 (row, index) => (
-                                  <tr key={index}>
+                                  <tr key={index} style={reportRowStyle(row)}>
                                     {REPORT_COLUMNS[sectionReportType].map(
                                       (column) => (
                                         <Td key={column.key}>
@@ -4020,6 +4492,21 @@ export const AccountingManager = () => {
               </div>
             ) : (
               <div id="accounting-report-print" className="overflow-x-auto">
+                {reportBalanceCheck ? (
+                  <p
+                    style={{
+                      margin: "0 0 8px",
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      background: reportBalanceCheck.ok ? "#ecfdf5" : "#fef2f2",
+                      color: reportBalanceCheck.ok ? "#047857" : "#b91c1c",
+                    }}
+                  >
+                    {reportBalanceCheck.text}
+                  </p>
+                ) : null}
                 <Table>
                   <TableHead>
                     <tr>
@@ -4062,7 +4549,7 @@ export const AccountingManager = () => {
                             ((selectedReport === "day-book" && !isRev) ||
                               selectedReport === "scholarship-report");
                           return (
-                            <tr key={index}>
+                            <tr key={index} style={reportRowStyle(raw)}>
                               {REPORT_COLUMNS[selectedReport].map((column) => (
                                 <Td key={column.key}>
                                   {getReportCellValue(row, column)}
@@ -4082,7 +4569,7 @@ export const AccountingManager = () => {
                                         if (
                                           !window.confirm(
                                             selectedReport === "day-book"
-                                              ? "Delete this day-book voucher (reverse journal)?"
+                                              ? "Reverse this voucher?\n\nThis will post a reversal entry. The original stays for audit."
                                               : "Delete this scholarship fee payment?",
                                           )
                                         ) {
@@ -4098,7 +4585,7 @@ export const AccountingManager = () => {
                                       }}
                                     >
                                       <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                      Delete
+                                      {selectedReport === "day-book" ? "Reverse" : "Delete"}
                                     </Button>
                                   ) : (
                                     <span className="text-xs text-slate-400">
@@ -4126,8 +4613,25 @@ export const AccountingManager = () => {
       {tab === "fixed-assets" ? (
         <FixedAssetsPanel canWrite={canWrite && !isCashier} isAdmin={isAdmin} />
       ) : null}
+      {tab === "bank-cash" ? (
+        <BankCashPanel
+          canWrite={canWrite && !isCashier}
+          canManage={canDelete}
+          onOpenSection={(section) => setTab(section as Tab)}
+          onReconcile={(bankAccountId) => {
+            setReconcileBankId(bankAccountId);
+            setTab("bank-reconciliation");
+          }}
+        />
+      ) : null}
+
       {tab === "bank-reconciliation" ? (
-        <BankReconciliationPanel canWrite={canWrite && !isCashier} />
+        <BankReconciliationPanel
+          key={reconcileBankId ?? "default"}
+          canWrite={canWrite && !isCashier}
+          initialBankAccountId={reconcileBankId}
+          onOpenBankCash={() => setTab("bank-cash")}
+        />
       ) : null}
       {tab === "budget" ? <BudgetPanel isAdmin={isAdmin} /> : null}
       {tab === "journal-entries" ? (
@@ -4225,6 +4729,22 @@ export const AccountingManager = () => {
                   <p className="mt-1 text-xs text-slate-500">
                     Reverse/void requests at or above this amount need
                     principal/admin approval.
+                  </p>
+                </FormField>
+                <FormField label="Capitalisation Threshold (NPR)">
+                  <NumberInput
+                    value={settingsForm.capitalizationThresholdNpr}
+                    onChange={(e) =>
+                      setSettingsForm((c) => ({
+                        ...c,
+                        capitalizationThresholdNpr: e.target.valueAsNumber,
+                      }))
+                    }
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    A Direct Expense for computers, furniture or equipment at or
+                    above this amount is recorded as a fixed asset (and
+                    registered in Fixed Assets); below it, as an expense.
                   </p>
                 </FormField>
                 <div className="md:col-span-2">

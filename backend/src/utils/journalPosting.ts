@@ -2,7 +2,7 @@ import type { ClientSession, Types } from "mongoose";
 import {
   DEFAULT_CHART_OF_ACCOUNTS,
   EXPENSE_CATEGORY_ACCOUNT_MAP,
-  FEE_TYPE_ACCOUNT_MAP,
+  feeIncomeAccountFor,
   INCOME_CATEGORY_ACCOUNT_MAP,
   PURCHASE_CATEGORY_ACCOUNT_MAP,
   SYSTEM_ACCOUNT_CODES,
@@ -11,10 +11,12 @@ import {
   type VoucherType
 } from "@phit-erp/shared";
 import { ChartOfAccount } from "../models/ChartOfAccount.js";
+import { ApiError } from "./apiError.js";
 import { JournalEntry } from "../models/JournalEntry.js";
 import { AccountingSettings } from "../models/AccountingSettings.js";
 import { getFiscalYearFromBsDate } from "./fiscalYear.js";
-import { nextVoucherNumber } from "./voucherNumbering.js";
+import { formatFiscalYearLabel, nextVoucherNumber } from "./voucherNumbering.js";
+import { VoucherCounter } from "../models/VoucherCounter.js";
 
 interface JournalLineInput {
   accountCode: string;
@@ -22,6 +24,7 @@ interface JournalLineInput {
   debitNpr: number;
   creditNpr: number;
   description?: string;
+  bankAccountId?: Types.ObjectId | string;
 }
 
 interface PostJournalParams {
@@ -59,6 +62,13 @@ const getPaymentAccountCode = (paymentMethod: string): string => {
   }
   return SYSTEM_ACCOUNT_CODES.CASH;
 };
+
+/** A bank account only applies to bank-type payments. */
+const bankAccountFor = (
+  paymentMethod: string,
+  bankAccountId?: Types.ObjectId | string
+): Types.ObjectId | string | undefined =>
+  bankAccountId && getPaymentAccountCode(paymentMethod) === SYSTEM_ACCOUNT_CODES.BANK ? bankAccountId : undefined;
 
 /**
  * Schools whose default accounts have been seeded during this process.
@@ -103,7 +113,69 @@ export const ensureDefaultChartOfAccounts = async (
     { ordered: false }
   );
 
+  await refreshAccountGroupFlags(schoolId);
   seededSchools.add(key);
+};
+
+/**
+ * isGroup = true exactly for accounts that other accounts have as parentCode. Run after any
+ * change to the chart; cheap (one read, at most two updates).
+ */
+export const refreshAccountGroupFlags = async (
+  schoolId: Types.ObjectId,
+  session?: ClientSession | null
+): Promise<void> => {
+  const query = ChartOfAccount.find({ schoolId }).select("code parentCode isGroup isActive");
+  if (session) query.session(session);
+  const accounts = await query.lean();
+  // Only active ledgers make their parent a group
+  const parents = new Set(
+    accounts
+      .filter((a) => a.isActive !== false)
+      .map((a) => a.parentCode)
+      .filter((c): c is string => Boolean(c))
+  );
+  const makeGroup = accounts.filter((a) => parents.has(a.code) && a.isGroup !== true).map((a) => a._id);
+  const makeLedger = accounts.filter((a) => !parents.has(a.code) && a.isGroup === true).map((a) => a._id);
+  const opts = session ? { session } : undefined;
+  if (makeGroup.length) await ChartOfAccount.updateMany({ _id: { $in: makeGroup } }, { $set: { isGroup: true } }, opts);
+  if (makeLedger.length) await ChartOfAccount.updateMany({ _id: { $in: makeLedger } }, { $set: { isGroup: false } }, opts);
+};
+
+/**
+ * Ledgers the app posts to automatically (cash, bank, fee heads, expense heads…). None of
+ * them may hold sub-ledgers: that would make it a group and stop every automatic posting.
+ */
+export const AUTO_POSTING_ACCOUNT_CODES = new Set<string>(
+  Object.values(SYSTEM_ACCOUNT_CODES).filter((code) => code !== SYSTEM_ACCOUNT_CODES.OTHER_INCOME_GROUP)
+);
+
+/**
+ * Group (header) accounts only total the accounts under them — no voucher may post to one.
+ * Reversals and year-end closing vouchers are allowed, so an old posting to a group can
+ * still be reversed.
+ */
+const assertNoGroupAccounts = async (
+  schoolId: Types.ObjectId,
+  codes: string[],
+  session?: ClientSession | null
+) => {
+  const unique = Array.from(new Set(codes.filter(Boolean)));
+  if (!unique.length) return;
+  const query = ChartOfAccount.findOne({
+    schoolId,
+    $or: [{ code: { $in: unique }, isGroup: true }, { parentCode: { $in: unique }, isActive: { $ne: false } }]
+  }).select("code name parentCode isGroup");
+  if (session) query.session(session);
+  const hit = await query.lean();
+  if (!hit) return;
+  const groupCode = hit.isGroup && unique.includes(hit.code) ? hit.code : String(hit.parentCode);
+  const group =
+    groupCode === hit.code ? hit : await ChartOfAccount.findOne({ schoolId, code: groupCode }).select("code name").lean();
+  throw new ApiError(
+    400,
+    `Account ${groupCode}${group?.name ? ` ${group.name}` : ""} is a group (header) account — post to an account under it instead.`
+  );
 };
 
 /**
@@ -145,6 +217,10 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
   const fiscalYearBs = getFiscalYearFromBsDate(params.dateBs, settings?.currentFiscalYearBs);
 
   // Single lookup for every line that still needs a name, rather than one query per line.
+  if (!params.isReversal && !params.isClosingEntry) {
+    await assertNoGroupAccounts(params.schoolId, params.lines.map((line) => line.accountCode), params.session);
+  }
+
   const namesNeeded = params.lines.filter((line) => !line.accountName).map((line) => line.accountCode);
   const nameMap = await resolveAccountNames(params.schoolId, namesNeeded, params.session);
 
@@ -160,31 +236,23 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
     throw new Error("Journal entry is not balanced");
   }
 
-  const voucherPrefix = settings?.voucherPrefix ?? "JV";
-  const manualNo = params.voucherNumber?.trim();
-  const voucherNumber =
-    manualNo ||
-    (await nextVoucherNumber({
+  // One format for every journal voucher: JV-<fiscal year>-<5 digits>, sequential per
+  // school and fiscal year, issued by an atomic counter. Older numbers are kept as they are.
+  const issueNumber = () =>
+    nextVoucherNumber({
       schoolId: params.schoolId,
-      prefix: voucherPrefix,
+      prefix: JOURNAL_VOUCHER_PREFIX,
       fiscalYearBs,
       session: params.session
-    }));
+    });
+  let voucherNumber = await issueNumber();
 
-  if (manualNo) {
-    const existingQuery = JournalEntry.findOne({ schoolId: params.schoolId, voucherNumber: manualNo });
-    if (params.session) existingQuery.session(params.session);
-    const existing = await existingQuery.lean();
-    if (existing) {
-      throw new Error(`Voucher number ${manualNo} already exists`);
-    }
-  }
-
-  const [created] = await JournalEntry.create(
-    [
-      {
-        schoolId: params.schoolId,
-        voucherNumber,
+  const createVoucher = (number: string) =>
+    JournalEntry.create(
+      [
+        {
+          schoolId: params.schoolId,
+          voucherNumber: number,
         voucherType: params.voucherType ?? "JOURNAL",
         dateBs: params.dateBs,
         fiscalYearBs,
@@ -205,7 +273,43 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
     ],
     params.session ? { session: params.session } : undefined
   );
-  return created;
+
+  let created: Awaited<ReturnType<typeof createVoucher>>[number] | undefined;
+  try {
+    [created] = await createVoucher(voucherNumber);
+  } catch (error) {
+    // The counter can only fall behind if it was reset or vouchers were imported: move it
+    // past the highest number in use for this series and issue again (never a duplicate).
+    if ((error as { code?: number }).code !== 11000) throw error;
+    await syncJournalCounter(params.schoolId, fiscalYearBs, params.session);
+    voucherNumber = await issueNumber();
+    [created] = await createVoucher(voucherNumber);
+  }
+  return created!;
+};
+
+/** Journal vouchers are always numbered JV-<fiscal year>-<5 digits>. */
+export const JOURNAL_VOUCHER_PREFIX = "JV";
+
+/** Set the JV counter for a fiscal year to the highest sequence already used. */
+const syncJournalCounter = async (
+  schoolId: Types.ObjectId,
+  fiscalYearBs: string,
+  session?: ClientSession | null
+) => {
+  const label = formatFiscalYearLabel(fiscalYearBs);
+  const pattern = new RegExp(`^${JOURNAL_VOUCHER_PREFIX}-${label.replace(/[-/]/g, "\\$&")}-(\\d{5,})$`);
+  const query = JournalEntry.find({ schoolId, voucherNumber: pattern }).select("voucherNumber");
+  if (session) query.session(session);
+  const highest = (await query.lean()).reduce((max, row) => {
+    const seq = Number(pattern.exec(row.voucherNumber)?.[1] ?? 0);
+    return seq > max ? seq : max;
+  }, 0);
+  await VoucherCounter.updateOne(
+    { schoolId, scope: `${JOURNAL_VOUCHER_PREFIX}:${fiscalYearBs}` },
+    { $max: { seq: highest } },
+    { upsert: true, ...(session ? { session } : {}) }
+  );
 };
 
 /**
@@ -248,7 +352,8 @@ export const reverseJournalEntry = async (
       accountName: line.accountName,
       debitNpr: line.creditNpr,
       creditNpr: line.debitNpr,
-      description: `Reversal: ${line.description ?? ""}`
+      description: `Reversal: ${line.description ?? ""}`,
+      bankAccountId: line.bankAccountId ?? undefined
     }));
 
     await postJournalEntry({
@@ -301,7 +406,8 @@ export const reverseJournalEntryById = async (
     accountName: line.accountName,
     debitNpr: line.creditNpr,
     creditNpr: line.debitNpr,
-    description: `Reversal: ${line.description ?? ""}`
+    description: `Reversal: ${line.description ?? ""}`,
+    bankAccountId: line.bankAccountId ?? undefined
   }));
 
   await postJournalEntry({
@@ -364,10 +470,15 @@ export const postFeeCollectionJournal = async (params: {
   const feeIncomeCredit = Math.max(0, amountPaidNpr + discountNpr + scholarshipNpr - lateFeeNpr);
 
   // Exclude SECURITY_DEPOSIT lines from fee income allocation (handled as liability)
-  const incomeBreakdown = (params.feeBreakdown.length > 0
-    ? params.feeBreakdown
-    : [{ feeType: "OTHER", title: "Fee Collection", amountNpr: feeIncomeCredit }]
-  ).filter((item) => String(item.feeType) !== "SECURITY_DEPOSIT");
+  // Fee income lines (a security deposit is a liability, posted below).
+  let incomeBreakdown = params.feeBreakdown.filter((item) => String(item.feeType) !== "SECURITY_DEPOSIT");
+  if (feeIncomeCredit > 0 && incomeBreakdown.length === 0) {
+    // A receipt without a fee line is a payment against the student's fee plan: tuition.
+    console.warn(
+      `[fee-posting] Receipt ${params.receiptNumber}: no fee breakdown — posting NPR ${feeIncomeCredit} to Tuition Fee (${SYSTEM_ACCOUNT_CODES.TUITION_INCOME})`
+    );
+    incomeBreakdown = [{ feeType: "TUITION", title: "Tuition / program fee", amountNpr: feeIncomeCredit }];
+  }
 
   const breakdownTotal = incomeBreakdown.reduce((sum, item) => sum + item.amountNpr, 0);
   const incomeLines: JournalLineInput[] = [];
@@ -382,7 +493,7 @@ export const postFeeCollectionJournal = async (params: {
           : Number(((item.amountNpr / breakdownTotal) * feeIncomeCredit).toFixed(2));
         allocated += share;
         if (share <= 0) return;
-        const incomeCode = FEE_TYPE_ACCOUNT_MAP[item.feeType as FeeType] ?? SYSTEM_ACCOUNT_CODES.OTHER_INCOME;
+        const incomeCode = feeIncomeAccountFor(item.feeType);
         incomeLines.push({
           accountCode: incomeCode,
           accountName: "",
@@ -393,13 +504,21 @@ export const postFeeCollectionJournal = async (params: {
       });
     } else {
       incomeLines.push({
-        accountCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
+        accountCode: SYSTEM_ACCOUNT_CODES.TUITION_INCOME,
         accountName: "",
         debitNpr: 0,
         creditNpr: feeIncomeCredit,
-        description: "Fee Collection"
+        description: "Tuition / program fee"
       });
     }
+  }
+
+  // Fee income must equal what the student paid (plus discount / scholarship, less fine).
+  const feeIncomePosted = incomeLines.reduce((sum, line) => sum + line.creditNpr, 0);
+  if (Math.abs(feeIncomePosted - feeIncomeCredit) > 0.05) {
+    throw new Error(
+      `Receipt ${params.receiptNumber}: fee income lines (${feeIncomePosted}) do not equal the fee received (${feeIncomeCredit})`
+    );
   }
 
   if (lateFeeNpr > 0) {
@@ -580,6 +699,7 @@ export const postExpenseJournal = async (params: {
   category: string;
   paymentMethod: string;
   description: string;
+  bankAccountId?: Types.ObjectId | string;
 }): Promise<void> => {
   const expenseCode = EXPENSE_CATEGORY_ACCOUNT_MAP[params.category] ?? SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE;
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
@@ -607,7 +727,8 @@ export const postExpenseJournal = async (params: {
     ],
     voucherType: "PAYMENT",
     referenceType: "AccountingExpense",
-    referenceId: params.expenseId
+    referenceId: params.expenseId,
+    bankAccountId: bankAccountFor(params.paymentMethod, params.bankAccountId)
   });
 };
 
@@ -620,6 +741,7 @@ export const postIncomeJournal = async (params: {
   category: string;
   paymentMethod: string;
   description: string;
+  bankAccountId?: Types.ObjectId | string;
 }): Promise<void> => {
   const incomeCode = INCOME_CATEGORY_ACCOUNT_MAP[params.category] ?? SYSTEM_ACCOUNT_CODES.OTHER_INCOME;
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
@@ -647,7 +769,8 @@ export const postIncomeJournal = async (params: {
     ],
     voucherType: "RECEIPT",
     referenceType: "AccountingIncome",
-    referenceId: params.incomeId
+    referenceId: params.incomeId,
+    bankAccountId: bankAccountFor(params.paymentMethod, params.bankAccountId)
   });
 };
 
@@ -661,8 +784,12 @@ export const postPurchaseJournal = async (params: {
   paymentStatus: string;
   paymentMethod: string;
   vendor: string;
-}): Promise<void> => {
+  bankAccountId?: Types.ObjectId | string;
+  /** Account to debit (expense or fixed-asset pool) — see resolvePurchasePosting. */
+  debitAccountCode?: string;
+}): Promise<typeof JournalEntry.prototype> => {
   const expenseCode =
+    params.debitAccountCode ??
     PURCHASE_CATEGORY_ACCOUNT_MAP[params.category] ??
     SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE;
   const isPaid = params.paymentStatus === "PAID";
@@ -683,7 +810,7 @@ export const postPurchaseJournal = async (params: {
         description: `Payable — ${params.vendor}`
       };
 
-  await postJournalEntry({
+  return postJournalEntry({
     schoolId: params.schoolId,
     userId: params.userId,
     dateBs: params.dateBs,
@@ -700,7 +827,8 @@ export const postPurchaseJournal = async (params: {
     ],
     voucherType: "PURCHASE",
     referenceType: "AccountingPurchase",
-    referenceId: params.purchaseId
+    referenceId: params.purchaseId,
+    bankAccountId: isPaid ? bankAccountFor(params.paymentMethod, params.bankAccountId) : undefined
   });
 };
 
@@ -717,6 +845,7 @@ export const postPurchasePaymentJournal = async (params: {
   amountNpr: number;
   paymentMethod: string;
   vendor: string;
+  bankAccountId?: Types.ObjectId | string;
 }): Promise<void> => {
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
   const apCode = SYSTEM_ACCOUNT_CODES.ACCOUNTS_PAYABLE;
@@ -744,7 +873,8 @@ export const postPurchasePaymentJournal = async (params: {
     ],
     voucherType: "PAYMENT",
     referenceType: "AccountingPurchase",
-    referenceId: params.purchaseId
+    referenceId: params.purchaseId,
+    bankAccountId: bankAccountFor(params.paymentMethod, params.bankAccountId)
   });
 };
 

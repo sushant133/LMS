@@ -58,6 +58,8 @@ export type AcademicReportType =
 
 export interface AcademicReportResponse {
   title: string;
+  /** Column order and headings for the table, print and CSV. */
+  columns: Array<{ key: string; label: string }>;
   rows: Array<Record<string, unknown>>;
 }
 

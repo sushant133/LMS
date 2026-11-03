@@ -80,6 +80,24 @@ const studentSchema = new Schema(
       ],
       default: []
     },
+    /**
+     * Backlog papers of a student still studying in a running batch (CTEVT →
+     * Running Batch Backlogs). Kept apart from backPapers, which belong to the
+     * academic status Back and are cleared when a student is not Back.
+     */
+    runningBacklogs: {
+      type: [
+        new Schema(
+          {
+            subjectName: { type: String, required: true, trim: true, maxlength: 160 },
+            subjectCode: { type: String, trim: true, maxlength: 40, default: "" },
+            programYear: { type: Number, enum: [1, 2, 3], required: true }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
+    },
     admissionDateBs: { type: String, default: "" },
     /**
      * When the student was marked PASSED_OUT. Set by the promotion service on

@@ -1,7 +1,22 @@
 import type { TeacherPaymentType } from "./types.js";
 import { normalizeTeacherPaymentType } from "./constants.js";
 
-export const roundSalaryNpr = (n: number): number => Math.round(n * 100) / 100;
+/**
+ * Money as whole paisa (integers). Uses the decimal text of the number ("1.005e2"), so
+ * amounts like 1.005 round to 1.01 instead of drifting to 1.00 through binary floating point.
+ */
+export const toPaisa = (npr: number): number => {
+  const n = Number(npr) || 0;
+  const abs = Math.abs(n);
+  const text = String(abs);
+  const shifted = text.includes("e") ? abs * 100 : Number(`${text}e2`);
+  return (n < 0 ? -1 : 1) * Math.round(shifted);
+};
+
+export const fromPaisa = (paisa: number): number => Math.round(paisa) / 100;
+
+/** Round money to 2 decimals (via integer paisa). */
+export const roundSalaryNpr = (n: number): number => fromPaisa(toPaisa(n));
 
 export type SalarySheetPaymentType = TeacherPaymentType;
 
@@ -33,6 +48,8 @@ export type SalarySheetCalcResult = {
   extraAmountNpr: number;
   salaryAmountNpr: number;
   tax1PercentNpr: number;
+  /** Net rounded to the nearest rupee: Net − (Salary amount − Tax). */
+  roundingNpr: number;
   netSalaryNpr: number;
 };
 
@@ -121,79 +138,101 @@ export const calculateTenderThisMonthNpr = (
   }).tenderThisMonthNpr;
 };
 
+/**
+ * Net salary is paid in whole rupees: rounded half-up to the nearest rupee. The difference
+ * (−0.50 … +0.49) is shown as the "Rounding" line, so
+ * Salary amount − 1% tax + Rounding = Net salary.
+ */
+export const roundNetSalaryToRupee = (
+  netBeforeRoundingNpr: number
+): { netSalaryNpr: number; roundingNpr: number } => {
+  const before = Math.max(0, toPaisa(netBeforeRoundingNpr));
+  const net = Math.round(before / 100) * 100;
+  return { netSalaryNpr: fromPaisa(net), roundingNpr: fromPaisa(net - before) };
+};
+
+/** Rounding of a saved salary row: Net − (Salary amount − Tax). */
+export const salaryRoundingNpr = (row: {
+  salaryAmountNpr?: number;
+  tax1PercentNpr?: number;
+  netSalaryNpr?: number;
+}): number =>
+  fromPaisa(
+    toPaisa(row.netSalaryNpr ?? 0) - (toPaisa(row.salaryAmountNpr ?? 0) - toPaisa(row.tax1PercentNpr ?? 0))
+  );
+
+/** 1% SST / TDS on the month's salary amount, rounded half-up to the paisa (in paisa). */
+const tax1PercentPaisa = (salaryPaisa: number): number => Math.round(salaryPaisa / 100);
+
 const applyTax = (
-  salaryAmountNpr: number,
+  salaryPaisa: number,
   extra: {
-    perDaySalaryNpr: number;
-    absentDeductionNpr: number;
-    extraAmountNpr: number;
+    perDayPaisa: number;
+    absentDeductionPaisa: number;
+    extraAmountPaisa: number;
   }
 ): SalarySheetCalcResult => {
-  const salary = roundSalaryNpr(Math.max(0, salaryAmountNpr));
-  const tax1PercentNpr = roundSalaryNpr(salary * 0.01);
+  const salary = Math.max(0, Math.round(salaryPaisa));
+  const tax = tax1PercentPaisa(salary);
+  const { netSalaryNpr, roundingNpr } = roundNetSalaryToRupee(fromPaisa(salary - tax));
   return {
-    perDaySalaryNpr: extra.perDaySalaryNpr,
-    absentDeductionNpr: extra.absentDeductionNpr,
-    extraAmountNpr: extra.extraAmountNpr,
-    salaryAmountNpr: salary,
-    tax1PercentNpr,
-    netSalaryNpr: roundSalaryNpr(Math.max(0, salary - tax1PercentNpr))
+    perDaySalaryNpr: fromPaisa(extra.perDayPaisa),
+    absentDeductionNpr: fromPaisa(extra.absentDeductionPaisa),
+    extraAmountNpr: fromPaisa(extra.extraAmountPaisa),
+    salaryAmountNpr: fromPaisa(salary),
+    tax1PercentNpr: fromPaisa(tax),
+    roundingNpr,
+    netSalaryNpr
   };
 };
 
 /**
- * Monthly: per-day = monthly ÷ calendar days of the BS month (e.g. 23000 ÷ 31);
- *          (monthly − absence/leave × per-day) + extra duty × per-day.
+ * One salary line, computed in whole paisa (integers) so nothing drifts by floating-point error.
+ * Monthly: absent deduction = monthly × deducted days ÷ calendar days of the BS month (rounded
+ *          once, e.g. 23,000 × 1 ÷ 31 = 741.94); extra duty is paid the same way.
  * Period: periods attended × rate + extra periods × rate.
  * Tender: syllabus-earned amount this month + optional extra amount (no day deduction).
+ * Then 1% tax on the salary amount, and the net is rounded to the nearest rupee.
  */
 export const calculateSalarySheetLine = (input: SalarySheetCalcInput): SalarySheetCalcResult => {
   const paymentType = normalizeTeacherPaymentType(input.paymentType);
   const extraDuty = Math.max(0, Number(input.extraDuty) || 0);
-  const extraOverride =
+  const extraOverridePaisa =
     input.extraAmountOverrideNpr !== undefined && input.extraAmountOverrideNpr !== null
-      ? roundSalaryNpr(Math.max(0, Number(input.extraAmountOverrideNpr) || 0))
+      ? Math.max(0, toPaisa(Number(input.extraAmountOverrideNpr) || 0))
       : undefined;
 
   if (paymentType === "PERIOD") {
-    const rate = Math.max(
-      0,
-      Number(input.periodRateNpr ?? input.monthlySalaryNpr) || 0
-    );
+    const rate = Math.max(0, toPaisa(Number(input.periodRateNpr ?? input.monthlySalaryNpr) || 0));
     const periods = Math.max(0, Number(input.periodsAttended) || 0);
-    const extraAmountNpr = extraOverride !== undefined ? extraOverride : roundSalaryNpr(rate * extraDuty);
-    const salaryAmountNpr = roundSalaryNpr(periods * rate + extraAmountNpr);
-    return applyTax(salaryAmountNpr, {
-      perDaySalaryNpr: roundSalaryNpr(rate),
-      absentDeductionNpr: 0,
-      extraAmountNpr
+    const extraAmountPaisa = extraOverridePaisa ?? Math.round(rate * extraDuty);
+    return applyTax(Math.round(rate * periods) + extraAmountPaisa, {
+      perDayPaisa: rate,
+      absentDeductionPaisa: 0,
+      extraAmountPaisa
     });
   }
 
   if (paymentType === "TENDER") {
-    const tenderThisMonthNpr = Math.max(0, Number(input.tenderThisMonthNpr) || 0);
-    const extraAmountNpr = extraOverride !== undefined ? extraOverride : 0;
-    const salaryAmountNpr = roundSalaryNpr(tenderThisMonthNpr + extraAmountNpr);
-    return applyTax(salaryAmountNpr, {
-      perDaySalaryNpr: 0,
-      absentDeductionNpr: 0,
-      extraAmountNpr
+    const tenderThisMonth = Math.max(0, toPaisa(Number(input.tenderThisMonthNpr) || 0));
+    const extraAmountPaisa = extraOverridePaisa ?? 0;
+    return applyTax(tenderThisMonth + extraAmountPaisa, {
+      perDayPaisa: 0,
+      absentDeductionPaisa: 0,
+      extraAmountPaisa
     });
   }
 
   const days = Math.max(1, Number(input.workingDaysInMonth) || 30);
   const perDayDivisor = Math.max(1, Number(input.calendarDaysInMonth) || days);
-  const monthly = Math.max(0, Number(input.monthlySalaryNpr) || 0);
+  const monthly = Math.max(0, toPaisa(Number(input.monthlySalaryNpr) || 0));
   const leave = Math.max(0, Number(input.leaveDays) || 0);
   const deducted = Math.min(deductedAttendanceDays(input.absentDays, leave), days);
-  const perDay = monthly / perDayDivisor;
-  const absentDeductionNpr = roundSalaryNpr(perDay * deducted);
-  const extraAmountNpr =
-    extraOverride !== undefined ? extraOverride : roundSalaryNpr(perDay * extraDuty);
-  const salaryAmountNpr = roundSalaryNpr(Math.max(0, monthly - absentDeductionNpr + extraAmountNpr));
-  return applyTax(salaryAmountNpr, {
-    perDaySalaryNpr: roundSalaryNpr(perDay),
-    absentDeductionNpr,
-    extraAmountNpr
+  const absentDeductionPaisa = Math.round((monthly * deducted) / perDayDivisor);
+  const extraAmountPaisa = extraOverridePaisa ?? Math.round((monthly * extraDuty) / perDayDivisor);
+  return applyTax(Math.max(0, monthly - absentDeductionPaisa + extraAmountPaisa), {
+    perDayPaisa: Math.round(monthly / perDayDivisor),
+    absentDeductionPaisa,
+    extraAmountPaisa
   });
 };

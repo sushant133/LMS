@@ -161,7 +161,7 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
     .font(fonts.regular)
     .fontSize(10)
     .fillColor("#0c2d6b")
-    .text("OFFICIAL FEE RECEIPT", 50, headerY, {
+    .text("FEE RECEIPT", 50, headerY, {
       align: "center",
       width: contentWidth,
       characterSpacing: 1.2

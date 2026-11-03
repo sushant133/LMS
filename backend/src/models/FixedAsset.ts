@@ -45,6 +45,8 @@ const fixedAssetSchema = new Schema(
 
     /** Journal that capitalised the asset, when it was posted through this module. */
     acquisitionJournalEntryId: { type: Schema.Types.ObjectId, ref: "JournalEntry" },
+    /** Direct Expense (purchase) this asset was registered from, when capitalised there. */
+    sourcePurchaseId: { type: Schema.Types.ObjectId, ref: "AccountingPurchase", index: true },
 
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true },

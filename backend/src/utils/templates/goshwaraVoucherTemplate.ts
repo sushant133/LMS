@@ -21,6 +21,17 @@ import {
   toNepaliDigits as toNepaliDigitsShared
 } from "@phit-erp/shared";
 import { convertHtmlToPdf } from "../convertHtmlToPdf.js";
+import { amountToWordsEnglish } from "@phit-erp/shared";
+
+/** Journal vouchers print in English: Nepali digits from older records become 0-9. */
+const toLatinDigits = (value: string | number | null | undefined): string =>
+  String(value ?? "").replace(/[०-९]/g, (d) => String("०१२३४५६७८९".indexOf(d)));
+
+const hasDevanagari = (value: string) => /[\u0900-\u097F]/.test(value);
+
+/** Amount for the voucher print, e.g. 12,500.00 */
+const formatAmountEnglish = (amount: number): string =>
+  Number(amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export interface ExactGoshwaraVoucherPdfData {
   /**
@@ -52,6 +63,9 @@ export interface ExactGoshwaraVoucherPdfData {
   chequePresenter?: string;
   chequeDate?: string;
   chequeRank?: string;
+  /** Names under Checked By / Approved By */
+  checkedByName?: string;
+  approvedByName?: string;
   lines?: Array<{
     sn?: string | number;
     particulars?: string;
@@ -65,10 +79,14 @@ export interface ExactGoshwaraVoucherPdfData {
 }
 
 export interface GoshwaraSchoolInfo {
+  /** College name (English) — printed at the top of the Journal Voucher */
   name?: string;
   nameNp?: string;
   logo?: string;
+  /** College address (English) */
   address?: string;
+  /** PAN of the institution (Accounting Settings), printed under the address */
+  pan?: string;
   principalName?: string;
 }
 
@@ -89,7 +107,7 @@ const escapeHtml = (value: string): string =>
     .replace(/'/g, "&#39;");
 
 const money = (n?: number): string =>
-  n != null && !Number.isNaN(Number(n)) && Number(n) > 0 ? formatAmountNepali(n, 2) : "";
+  n != null && !Number.isNaN(Number(n)) && Number(n) > 0 ? formatAmountEnglish(Number(n)) : "";
 
 /** Short blank dots only when field empty (paper form — not a long underline) */
 const DOTS_BLANK = "....................";
@@ -100,473 +118,212 @@ const fillOrDots = (value?: string, dots = DOTS_BLANK): string => {
   return v ? escapeHtml(v) : dots;
 };
 
+/** Nepal fiscal year (Shrawan–Ashadh) of a BS date, e.g. 2083-07-12 → 2083/84 */
+const fiscalYearOf = (dateBs: string): string => {
+  const match = /^(\d{4})-(\d{2})/.exec(dateBs);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const start = Number(match[2]) >= 4 ? year : year - 1;
+  return `${start}/${String(start + 1).slice(-2)}`;
+};
+
+/** Rows printed in the table body, so short vouchers still look like the paper form. */
+const MIN_TABLE_ROWS = 8;
+
 /**
- * Paper-accurate Goshwara HTML.
- * Table uses rowspan so left columns are one tall open area; जम्मा only under right cols.
+ * Journal Voucher in the government / IRD format:
+ * institution header (name, address, PAN) · title · voucher no. / date / fiscal year ·
+ * S.N. | Account Code | Account Head | Particulars | Debit | Credit · total · amount in
+ * words · narration · payment details · Prepared / Checked / Approved / Received By.
  */
 export const buildExactGoshwaraVoucherHtml = (
   data: ExactGoshwaraVoucherPdfData,
-  _school: GoshwaraSchoolInfo = {}
+  school: GoshwaraSchoolInfo = {}
 ): string => {
   const blank = Boolean(data.blankForm);
 
-  /*
-   * Official Nepal Government header — Nepali only, exactly three centered lines:
-   *   नेपाल सरकार
-   *   {College Name (Nepali)} कार्यालय
-   *   {College Address (Nepali)}
-   * `instituteName` is only a fallback so vouchers saved before this format
-   * (which stored the Nepali college name on the institute line) still print.
-   */
-  const collegeNameNp = blank
-    ? ""
-    : (data.govOfficeName || data.instituteName || data.officeName || "").trim();
-  const collegeAddressNp = blank ? "" : (data.addressLine || data.officeAddress || "").trim();
+  // English college name / address; the stored (older, Nepali) header is only a fallback
+  const collegeName = (school.name || data.govOfficeName || data.instituteName || data.officeName || "").trim();
+  const collegeAddress = (school.address || data.addressLine || data.officeAddress || "").trim();
+  const pan = (school.pan || "").trim();
 
-  /*
-   * Office line (paper form): ....................कार्यालय
-   * Dots are only the blank to WRITE the college name — NOT under "कार्यालय".
-   */
-  const lineOfficeHtml = collegeNameNp
-    ? `<div class="hl-wrap office-line"><span class="office-name">${escapeHtml(collegeNameNp)}</span><span class="office-suffix">&nbsp;कार्यालय</span></div>`
-    : `<div class="hl-wrap office-line"><span class="office-dots">${DOTS_BLANK}</span><span class="office-suffix">कार्यालय</span></div>`;
+  const voucherNo = blank ? "" : toLatinDigits((data.voucherNo ?? "").trim());
+  const dateBs = blank ? "" : toLatinDigits((data.dateBs ?? "").trim());
+  const fiscalYear = blank ? "" : fiscalYearOf(dateBs);
+  const narration = blank ? "" : (data.particulars ?? "").trim();
 
-  // Address: plain centered text when filled; blank dots (writing space) on an empty form
-  const lineAddressHtml = collegeAddressNp
-    ? `<div class="hl-wrap"><span class="hl-plain">${escapeHtml(collegeAddressNp)}</span></div>`
-    : `<div class="hl-wrap"><span class="hl-blank">${DOTS_BLANK}</span></div>`;
+  const sourceLines = blank ? [] : data.lines ?? [];
+  const totalDebit = sourceLines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0);
+  const totalCredit = sourceLines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
+  const total = blank ? 0 : Number(data.totalAmount) || Math.max(totalDebit, totalCredit);
 
-  // Convert numeric voucher/date digits to Nepali when purely numeric parts present
-  const voucherNo = blank ? "" : toNepaliDigits((data.voucherNo ?? "").trim());
-  const dateBs = blank ? "" : toNepaliDigits((data.dateBs ?? "").trim());
-  const totalStr = blank ? "" : money(data.totalAmount);
-  // Prefer user-written Nepali अक्षरेपी; else auto Nepali words
+  // Amount in words (English); words typed in Nepali on older vouchers are re-written
+  const typedWords = (data.amountInWords ?? "").trim();
   const words = blank
     ? ""
-    : (data.amountInWords ?? "").trim() ||
-      (data.totalAmount ? amountToWordsNepali(data.totalAmount) : "");
+    : (typedWords && !hasDevanagari(typedWords) ? typedWords : "") ||
+      (total ? `${amountToWordsEnglish(total)} Only` : "");
 
-  // Build freehand-style content stacked inside the tall open cells
-  const sourceLines = blank ? [] : data.lines ?? [];
-
-  const snStack: string[] = [];
-  const partStack: string[] = [];
-  const accStack: string[] = [];
-  const ledStack: string[] = [];
-  const drStack: string[] = [];
-  const crStack: string[] = [];
-
-  for (let i = 0; i < sourceLines.length; i++) {
-    const line = sourceLines[i]!;
-    const sn =
-      line.sn != null && String(line.sn).trim() !== ""
-        ? escapeHtml(String(line.sn))
-        : toNepaliDigits(i + 1);
-    snStack.push(`<div class="entry">${sn}</div>`);
-    // विवरण = line particular (reason for this debit/credit), e.g. नगद प्राप्त
-    partStack.push(
-      `<div class="entry entry-part">${escapeHtml((line.particulars || "").trim())}</div>`
-    );
-    accStack.push(`<div class="entry">${escapeHtml(line.account || "")}</div>`);
-    ledStack.push(`<div class="entry">${escapeHtml(line.ledgerNo || "")}</div>`);
-    drStack.push(
-      `<div class="entry amt">${line.debit ? formatAmountNepali(Number(line.debit), 2) : ""}</div>`
-    );
-    crStack.push(
-      `<div class="entry amt">${line.credit ? formatAmountNepali(Number(line.credit), 2) : ""}</div>`
-    );
+  const bodyRows = sourceLines.map((line, index) => {
+    const sn = line.sn != null && String(line.sn).trim() !== "" ? toLatinDigits(String(line.sn)) : String(index + 1);
+    return `<tr>
+      <td class="c">${escapeHtml(sn)}</td>
+      <td class="c mono">${escapeHtml(toLatinDigits(line.ledgerNo || ""))}</td>
+      <td>${escapeHtml(line.account || "")}</td>
+      <td>${escapeHtml((line.particulars || "").trim())}</td>
+      <td class="c"></td>
+      <td class="r">${line.debit ? formatAmountEnglish(Number(line.debit)) : ""}</td>
+      <td class="r">${line.credit ? formatAmountEnglish(Number(line.credit)) : ""}</td>
+    </tr>`;
+  });
+  for (let i = bodyRows.length; i < MIN_TABLE_ROWS; i++) {
+    bodyRows.push(`<tr class="empty"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`);
   }
 
-  const receiptNo = blank ? "" : (data.receiptNo || data.voucherNo || "").trim();
+  const receiptNo = blank ? "" : toLatinDigits((data.receiptNo || "").trim());
   const receivedAmount = blank
     ? ""
-    : (data.receivedAmount || (totalStr ? `रु. ${totalStr}` : "")).trim();
-  const presenterDate = blank ? "" : (data.presenterDate || data.dateBs || "").trim();
+    : toLatinDigits((data.receivedAmount || "").trim()).replace(/^रु\.?\s*/, "Rs. ");
+  const chequeNo = blank ? "" : toLatinDigits((data.chequeNo || "").trim());
+  const chequeAmount = blank ? "" : toLatinDigits((data.chequeAmount || "").trim()).replace(/^रु\.?\s*/, "Rs. ");
+  const chequeDate = blank ? "" : toLatinDigits((data.chequeDate || "").trim());
+  const showPayment = blank || Boolean(receiptNo || receivedAmount || chequeNo || chequeAmount);
+
+  const field = (value: string, width = "") =>
+    value ? `<span class="val">${escapeHtml(value)}</span>` : `<span class="blank ${width}"></span>`;
+
+  const sign = (title: string, name = "", designation = "", date = "") => `
+    <div class="sign">
+      <div class="sign-line"></div>
+      <div class="sign-title">${title}</div>
+      <div class="sign-meta">Name: ${name ? escapeHtml(name) : ""}</div>
+      <div class="sign-meta">Designation: ${designation ? escapeHtml(designation) : ""}</div>
+      <div class="sign-meta">Date: ${date ? escapeHtml(date) : ""}</div>
+    </div>`;
 
   return `<!DOCTYPE html>
-<html lang="ne">
+<html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <!-- Empty title so browser print header does not show "गोश्वारा भौचर" + date -->
+  <!-- Empty title so the browser print header does not show the document name -->
   <title>&#8203;</title>
   <style>
-    /*
-     * Fonts: convertHtmlToPdf injects local Noto Sans Devanagari as base64
-     * (no Google Fonts network dependency). System fonts cover browser HTML print.
-     */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
+    @page { size: A4 portrait; margin: 0; }
     body {
-      font-family: 'Kanchan', 'Preeti Unicode', 'Noto Sans Devanagari', 'Nirmala UI', Mangal, 'Kokila', sans-serif;
+      font-family: 'Times New Roman', Georgia, 'Noto Sans Devanagari', serif;
       color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-      /* Equal L/R so centered header is true page center.
-         Margins live on body (not @page) so Chromium does not paint
-         browser print chrome (date / document title) in the page margin. */
-      margin: 10mm 10mm;
-      padding: 0 2mm;
-    }
-
-    /* ========== HEADER ========== */
-    /* True page-center: meta floats absolutely so it does NOT shift the center block */
-    .page-header {
-      position: relative;
-      width: 100%;
-      min-height: 88px;
-      margin-bottom: 6px;
-      text-align: center;
-    }
-    .meta-right {
-      position: absolute;
-      top: 0;
-      right: 0;
-      z-index: 2;
-      text-align: right;
-      font-size: 11.5px;
-      line-height: 1.5;
-      max-width: 28%;
-      /* no layout impact on centered text */
-    }
-    .meta-right .form-no { margin-bottom: 2px; }
-
-    .center-head {
-      display: block;
-      width: 100%;
-      margin: 0 auto;
-      padding: 0;
-      text-align: center;
-    }
-    .center-head .gov {
-      display: block;
-      width: 100%;
-      text-align: center;
-      font-size: 15px;
-      font-weight: 700;
-      margin-bottom: 10px;
-      letter-spacing: normal;
-      word-spacing: normal;
-    }
-    /* Header lines: centered; no underline under fixed labels like कार्यालय */
-    .center-head .hl-wrap {
-      display: block;
-      width: 100%;
-      text-align: center;
-      margin-top: 7px;
-      line-height: 1.45;
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: normal;
-      word-spacing: normal;
-    }
-    /* Filled name/address — plain text, no dotted border underneath */
-    .center-head .hl-plain {
-      display: inline;
-      border: none;
-      padding: 0;
-      letter-spacing: normal;
-      word-spacing: normal;
-    }
-    /* Empty form only: character dots for handwriting space (not a CSS border under words) */
-    .center-head .hl-blank {
-      display: inline;
-      border: none;
-      letter-spacing: 0;
-    }
-    /* Office line: dots BEFORE कार्यालय only — never dots under कार्यालय */
-    .center-head .office-line .office-dots {
-      display: inline;
-      border: none;
-      letter-spacing: 0;
-      text-decoration: none;
-    }
-    .center-head .office-line .office-name {
-      display: inline;
-      border: none;
-      text-decoration: none;
-    }
-    .center-head .office-line .office-suffix {
-      display: inline;
-      border: none;
-      text-decoration: none;
-      font-weight: 700;
-    }
-
-    /* Title row — title truly centered; मिति absolute on right */
-    .title-row {
-      position: relative;
-      width: 100%;
-      text-align: center;
-      margin: 16px 0 10px;
-      min-height: 28px;
-    }
-    .title-row h1 {
-      font-size: 20px;
-      font-weight: 700;
-      display: inline-block;
-      margin: 0 auto;
-      letter-spacing: normal;
-      text-align: center;
-    }
-    .title-row .miti {
-      position: absolute;
-      right: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 13px;
-      font-weight: 500;
-      white-space: nowrap;
-    }
-
-    /* ========== MAIN TABLE (paper structure) ========== */
-    table.gv {
-      width: 100%;
-      border-collapse: collapse;
-      border: 2px solid #000;
-      table-layout: fixed;
-    }
-    table.gv th,
-    table.gv td {
-      border: 1px solid #000;
       font-size: 12.5px;
+      line-height: 1.4;
+      /* Margins on body (not @page) so the browser prints no header/footer */
+      margin: 12mm 14mm;
     }
-    table.gv thead th {
-      font-weight: 700;
-      text-align: center;
-      vertical-align: middle;
-      height: 30px;
-      padding: 4px 2px;
-      background: #fff;
+    .head { display: grid; grid-template-columns: 84px 1fr 84px; align-items: start; gap: 10px; }
+    .form-no { text-align: right; font-size: 11.5px; font-weight: 700; white-space: nowrap; padding-top: 2px; }
+    .logo { width: 60px; height: 60px; object-fit: contain; }
+    .head-text { text-align: center; }
+    .org { font-size: 18px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; }
+    .addr { font-size: 12.5px; margin-top: 2px; }
+    .pan { font-size: 12px; margin-top: 2px; }
+    .rule { border: 0; border-top: 2px solid #000; margin: 8px 0 0; }
+    .rule-thin { border: 0; border-top: 1px solid #000; margin: 2px 0 10px; }
+    .title { text-align: center; margin: 2px 0 10px; }
+    .title span {
+      display: inline-block; border: 1.5px solid #000; padding: 4px 26px;
+      font-size: 15px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
     }
-
-    /* Column widths matching paper proportions */
-    .w-sn   { width: 6%; }
-    .w-part { width: 38%; }
-    .w-acc  { width: 12%; }
-    .w-led  { width: 10%; }
-    .w-dr   { width: 17%; }
-    .w-cr   { width: 17%; }
-
-    /* Tall open body — left 3 cols rowspan=2 (body+jamma) */
-    table.gv td.body-open {
-      height: 320px;
-      vertical-align: top;
-      padding: 6px 4px;
-    }
-    table.gv td.body-right {
-      height: 292px; /* body only; जम्मा row sits below */
-      vertical-align: top;
-      padding: 6px 4px;
-    }
-    table.gv td.jamma-label {
-      height: 28px;
-      text-align: center;
-      vertical-align: middle;
-      font-weight: 700;
-      font-size: 12px;
-      padding: 2px;
-    }
-    table.gv td.jamma-amt {
-      height: 28px;
-      text-align: right;
-      vertical-align: middle;
-      font-weight: 700;
-      padding: 2px 6px;
-      font-size: 12px;
-    }
-
-    .entry {
-      min-height: 22px;
-      margin-bottom: 8px;
-      line-height: 1.35;
-      word-break: break-word;
-      white-space: pre-wrap;
-    }
-    .entry.entry-part {
-      font-weight: 600;
-      text-align: left;
-    }
-    .entry.amt { text-align: right; }
-
-    /* ========== BOTTOM SECTION ========== */
-    .bottom {
-      margin-top: 10px;
-      font-size: 13px;
-    }
-    .bottom-grid {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    .bottom-grid td {
-      border: none;
-      width: 50%;
-      vertical-align: top;
-      padding: 2px 0 0 0;
-      line-height: 1.95;
-    }
-    .bottom-grid td.right {
-      padding-left: 28px;
-    }
-    .field-label {
-      white-space: nowrap;
-    }
-
-    .rule {
-      border: none;
-      border-top: 1px solid #000;
-      margin: 10px 0 8px;
-    }
-    /* Full-width line on paper between प्राप्त रकम / चेक रकम and पेश गर्ने */
-    .rule.mid-rule {
-      margin: 6px 0 8px;
-      border-top-width: 1.5px;
-    }
-
-    .amount-line {
-      line-height: 1.85;
-      margin-top: 4px;
-    }
-    .cash-line {
-      line-height: 1.85;
-      margin-top: 4px;
-    }
-
-    .sign-wrap {
-      margin-top: 28px;
-      text-align: right;
-      padding-right: 8px;
-    }
-    .sign-wrap .cap {
-      font-size: 13px;
-    }
-    .sign-wrap .uline {
-      display: inline-block;
-      width: 140px;
-      border-top: 1px solid #000;
-      margin-top: 22px;
-    }
-
-    @page {
-      size: A4;
-      /* Zero @page margin suppresses browser header/footer band (date + title) */
-      margin: 0;
-    }
-
-    @media print {
-      html, body {
-        margin: 10mm 10mm;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-    }
+    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; font-size: 12.5px; }
+    .meta div:nth-child(2) { text-align: center; }
+    .meta div:nth-child(3) { text-align: right; }
+    .lbl { font-weight: 700; }
+    .val { border-bottom: 1px dotted #000; padding: 0 4px; }
+    .blank { display: inline-block; min-width: 110px; border-bottom: 1px dotted #000; height: 1em; vertical-align: bottom; }
+    .blank.wide { min-width: 220px; }
+    table.jv { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.jv th, table.jv td { border: 1px solid #000; padding: 5px 6px; vertical-align: top; overflow-wrap: anywhere; }
+    table.jv thead th { background: #eee; font-weight: 700; text-align: center; font-size: 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    table.jv tbody tr { height: 24px; }
+    table.jv tr.empty td { height: 24px; }
+    table.jv tfoot td { font-weight: 700; }
+    .c { text-align: center; }
+    .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .mono { font-family: 'Courier New', monospace; font-size: 11.5px; }
+    .w-sn { width: 6%; } .w-code { width: 11%; } .w-head { width: 20%; } .w-part { width: 25%; } .w-lf { width: 8%; } .w-amt { width: 15%; }
+    .block { margin-top: 10px; }
+    .block p { margin-top: 4px; }
+    .pay { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin-top: 10px; padding: 8px 10px; border: 1px solid #000; }
+    .signs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 46px; }
+    .sign-line { border-top: 1px solid #000; margin-bottom: 4px; }
+    .sign-title { font-weight: 700; text-align: center; }
+    .sign-meta { font-size: 11px; margin-top: 2px; }
   </style>
 </head>
 <body>
+  <div class="head">
+    <div>${school.logo && !blank ? `<img class="logo" src="${school.logo}" alt=""/>` : ""}</div>
+    <div class="head-text">
+      <div class="org">${collegeName ? escapeHtml(collegeName) : '<span class="blank wide"></span>'}</div>
+      <div class="addr">${collegeAddress ? escapeHtml(collegeAddress) : '<span class="blank wide"></span>'}</div>
+      ${pan ? `<div class="pan">PAN No.: ${escapeHtml(pan)}</div>` : ""}
+    </div>
+    <!-- Auditor General form number (म.ले.प.फा.नं. १०), in its own column so it never overlaps the name -->
+    <div class="form-no">AGF No. 10</div>
+  </div>
+  <hr class="rule"/><hr class="rule-thin"/>
 
-  <!-- HEADER: center text is full-width centered; meta is absolute (does not shift center) -->
-  <div class="page-header">
-    <div class="meta-right">
-      <div class="form-no">म.ले.प.फा.नं. १०</div>
-      <div>गो. भी. नं.&nbsp;${voucherNo ? escapeHtml(voucherNo) : ""}</div>
-    </div>
-    <div class="center-head">
-      <div class="gov">नेपाल सरकार</div>
-      ${lineOfficeHtml}
-      ${lineAddressHtml}
-    </div>
+  <div class="title"><span>Journal Voucher</span></div>
+
+  <div class="meta">
+    <div><span class="lbl">Voucher No.:</span> ${field(voucherNo)}</div>
+    <div><span class="lbl">Date (BS):</span> ${field(dateBs)}</div>
+    <div><span class="lbl">Fiscal Year:</span> ${field(fiscalYear)}</div>
   </div>
 
-  <!-- TITLE: गोश्वारा भौचर dead-center; मिति on the right edge -->
-  <div class="title-row">
-    <h1>गोश्वारा भौचर</h1>
-    <span class="miti">मिति :-&nbsp;${dateBs ? escapeHtml(dateBs) : DOTS_SHORT}</span>
-  </div>
-
-  <!-- MAIN TABLE: paper structure -->
-  <table class="gv">
+  <table class="jv">
     <thead>
       <tr>
-        <th class="w-sn">सि.नं.</th>
-        <th class="w-part">विवरण</th>
-        <th class="w-acc">खाता</th>
-        <th class="w-led">हि. नं.</th>
-        <th class="w-dr">डेबिट</th>
-        <th class="w-cr">क्रेडिट</th>
+        <th class="w-sn">S.N.</th>
+        <th class="w-code">Account Code</th>
+        <th class="w-head">Account Head</th>
+        <th class="w-part">Particulars</th>
+        <th class="w-lf" title="Ledger Folio">L.F.</th>
+        <th class="w-amt">Debit (NPR)</th>
+        <th class="w-amt">Credit (NPR)</th>
       </tr>
     </thead>
     <tbody>
-      <!--
-        Paper form: left 3 columns are ONE tall open area (no mid horizontal rules).
-        Right 3 columns: tall open area + bottom जम्मा strip only under those cols.
-      -->
-      <tr>
-        <td class="w-sn body-open" rowspan="2">${snStack.join("")}</td>
-        <td class="w-part body-open" rowspan="2">${partStack.join("")}</td>
-        <td class="w-acc body-open" rowspan="2">${accStack.join("")}</td>
-        <td class="w-led body-right">${ledStack.join("")}</td>
-        <td class="w-dr body-right">${drStack.join("")}</td>
-        <td class="w-cr body-right">${crStack.join("")}</td>
-      </tr>
-      <tr>
-        <td class="jamma-label">जम्मा</td>
-        <td class="jamma-amt">${totalStr}</td>
-        <td class="jamma-amt">${totalStr}</td>
-      </tr>
+      ${bodyRows.join("")}
     </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" class="r">Total</td>
+        <td class="r">${blank ? "" : formatAmountEnglish(totalDebit || total)}</td>
+        <td class="r">${blank ? "" : formatAmountEnglish(totalCredit || total)}</td>
+      </tr>
+    </tfoot>
   </table>
 
-  <!-- BOTTOM: matches paper form — top pair, full-width line, then पेश/मिति/दर्जा -->
-  <div class="bottom">
-    <!-- Row 1–2: रसिद/प्राप्त | चेक नं./चेक रकम -->
-    <table class="bottom-grid">
-      <tr>
-        <td>
-          <span class="field-label">रसिद नम्बर :-</span> ${fillOrDots(receiptNo, "")}<br/>
-          <span class="field-label">प्राप्त रकम :-</span> ${fillOrDots(receivedAmount, "")}
-        </td>
-        <td class="right">
-          <span class="field-label">चेक नं. :-</span> ${fillOrDots(data.chequeNo, "")}<br/>
-          <span class="field-label">चेक रकम :-</span> ${fillOrDots(data.chequeAmount, "")}
-        </td>
-      </tr>
-    </table>
+  <div class="block">
+    <p><span class="lbl">Amount in words:</span> ${words ? `Rupees ${escapeHtml(words.replace(/^Rupees\s+/i, ""))}` : '<span class="blank wide"></span>'}</p>
+    <p><span class="lbl">Narration:</span> ${narration ? escapeHtml(narration) : '<span class="blank wide"></span>'}</p>
+  </div>
 
-    <!-- Paper form has a solid horizontal line here (between प्राप्त रकम and पेश गर्ने) -->
-    <hr class="rule mid-rule"/>
+  ${
+    showPayment
+      ? `<div class="pay">
+    <div><span class="lbl">Receipt No.:</span> ${field(receiptNo)}</div>
+    <div><span class="lbl">Cheque No.:</span> ${field(chequeNo)}</div>
+    <div><span class="lbl">Amount Received:</span> ${field(receivedAmount)}</div>
+    <div><span class="lbl">Cheque Amount / Date:</span> ${field([chequeAmount, chequeDate].filter(Boolean).join(" · "))}</div>
+  </div>`
+      : ""
+  }
 
-    <!-- Row 3–5: पेश गर्ने / मिति / दर्जा (both columns) -->
-    <table class="bottom-grid">
-      <tr>
-        <td>
-          <span class="field-label">पेश गर्ने :-</span> ${fillOrDots(data.presenterName, "")}<br/>
-          <span class="field-label">मिति :-</span> ${fillOrDots(presenterDate, "")}<br/>
-          <span class="field-label">दर्जा :-</span> ${fillOrDots(data.presenterRank, "")}
-        </td>
-        <td class="right">
-          <span class="field-label">पेश गर्ने :-</span> ${fillOrDots(data.chequePresenter, "")}<br/>
-          <span class="field-label">मिति :-</span> ${fillOrDots(data.chequeDate, "")}<br/>
-          <span class="field-label">दर्जा :-</span> ${fillOrDots(data.chequeRank, "")}
-        </td>
-      </tr>
-    </table>
-
-    <hr class="rule"/>
-
-    <p class="amount-line">
-      यसमा उल्लेखित रकम रु.&nbsp;${totalStr || "...................."}
-      &nbsp;&nbsp;अक्षरेपी रु.&nbsp;${words || "................................"}
-      &nbsp;बुझिलिन्छ ।
-    </p>
-    <p class="cash-line">
-      चेक नं.&nbsp;${(data.chequeNo || "").trim() || "...................."}
-      &nbsp;&nbsp;नगद&nbsp;....................
-      &nbsp;&nbsp;बुझिलिएँ ।
-    </p>
-
-    <div class="sign-wrap">
-      <div class="cap">बुझिलिनेको सही</div>
-      <div class="uline"></div>
-    </div>
+  <div class="signs">
+    ${sign("Prepared By", blank ? "" : data.presenterName || "", blank ? "" : data.presenterRank || "", blank ? "" : toLatinDigits(data.presenterDate || ""))}
+    ${sign("Checked By", blank ? "" : data.checkedByName || "")}
+    ${sign("Approved By", blank ? "" : data.approvedByName || "")}
+    ${sign("Received By", blank ? "" : data.chequePresenter || "", blank ? "" : data.chequeRank || "")}
   </div>
 
 </body>
@@ -637,7 +394,7 @@ export const buildPdfDataFromVoucherRecord = (voucher: {
             (line.description || "").trim() ||
             (voucher.particulars || "").trim();
           return {
-            sn: (pl?.sn || "").trim() || toNepaliDigits(index + 1),
+            sn: toLatinDigits((pl?.sn || "").trim()) || String(index + 1),
             particulars: particular,
             account: (pl?.account || "").trim() || line.accountName || "",
             ledgerNo: (pl?.ledgerNo || "").trim() || line.accountCode || "",
@@ -666,7 +423,7 @@ export const buildPdfDataFromVoucherRecord = (voucher: {
                 (l.credit && l.credit > 0))
           )
           .map((l, i) => ({
-            sn: l.sn || toNepaliDigits(i + 1),
+            sn: toLatinDigits(l.sn) || String(i + 1),
             particulars: (l.particulars || "").trim(),
             account: l.account || "",
             ledgerNo: l.ledgerNo || "",
@@ -685,7 +442,11 @@ export const buildPdfDataFromVoucherRecord = (voucher: {
     totalAmount: voucher.totalAmount,
     debit: voucher.totalDebitNpr ?? voucher.totalAmount,
     credit: voucher.totalCreditNpr ?? voucher.totalAmount,
-    amountInWords: voucher.amountInWords || amountToWordsNepali(voucher.totalAmount),
+    // English words unless typed in English on the voucher
+    amountInWords:
+      voucher.amountInWords && !hasDevanagari(voucher.amountInWords)
+        ? voucher.amountInWords
+        : `${amountToWordsEnglish(voucher.totalAmount)} Only`,
     receiptNo: voucher.receiptNo || "",
     receivedAmount: voucher.receivedAmount || "",
     presenterName: voucher.presenterName || "",
@@ -736,10 +497,10 @@ export const buildExactPdfDataFromJournal = (params: {
     totalAmount: entry.totalDebitNpr,
     debit: entry.totalDebitNpr,
     credit: entry.totalCreditNpr,
-    amountInWords: amountToWordsNepali(entry.totalDebitNpr),
+    amountInWords: `${amountToWordsEnglish(entry.totalDebitNpr)} Only`,
     // Each journal line description → PDF विवरण (e.g. नगद प्राप्त / शुल्क आम्दानी)
     lines: entry.lines.map((line, index) => ({
-      sn: toNepaliDigits(index + 1),
+      sn: String(index + 1),
       particulars: (line.description || "").trim() || entry.narration,
       account: line.accountName,
       ledgerNo: line.accountCode,

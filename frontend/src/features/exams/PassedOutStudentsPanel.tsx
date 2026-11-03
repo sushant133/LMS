@@ -26,6 +26,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
+import { labelYearsWithBatch } from "lib/academicStructureUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 import { CertificateTemplatesPanel } from "./CertificateTemplatesPanel";
 import { CharacterCertificateEditDialog } from "./CharacterCertificateEditDialog";
@@ -107,8 +108,8 @@ export const PassedOutStudentsPanel = ({ batches, years }: PassedOutStudentsPane
   // filterYearsByBatch returns nothing without a batch; "All batches" should
   // still offer every year.
   const yearOptions = useMemo(
-    () => (batchFilter ? filterYearsByBatch(years, batchFilter) : years),
-    [years, batchFilter],
+    () => (batchFilter ? filterYearsByBatch(years, batchFilter) : labelYearsWithBatch(years, batches)),
+    [years, batchFilter, batches],
   );
 
   // Server already filters by batch/year/status; search stays client-side so

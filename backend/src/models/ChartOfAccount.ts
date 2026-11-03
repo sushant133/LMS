@@ -8,6 +8,8 @@ const chartOfAccountSchema = new Schema(
     nameNp: { type: String },
     accountType: { type: String, enum: ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"], required: true },
     parentCode: { type: String },
+    /** Group (header) account: other accounts have it as parentCode. Never posted to. */
+    isGroup: { type: Boolean, default: false },
     description: { type: String },
     isSystem: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true }

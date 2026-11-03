@@ -183,8 +183,8 @@ export const SettingsManager = () => {
                   }
                 />
                 <p className="text-xs text-slate-500">
-                  Printed under नेपाल सरकार as “{form.schoolNameNp || "…"} कार्यालय”
-                  on government-format documents (Journal Voucher / गोश्वारा भौचर).
+                  Used on Nepali-language documents. Journal Vouchers are printed in English
+                  with the College Name and address above.
                 </p>
               </FormField>
               <FormField label="College Address (Nepali)">

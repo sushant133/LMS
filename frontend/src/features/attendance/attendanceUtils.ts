@@ -18,6 +18,39 @@ const statusAbbreviation: Record<string, string> = {
   LATE: "L",
   LEAVE: "LV",
   MEDICAL_LEAVE: "ML",
+  EARLY_LEAVE: "EL",
+};
+
+export interface AttendanceReportColumn {
+  key: string;
+  label: string;
+}
+
+/** Cell text for an attendance report: "%" columns show the sign, blanks show "—". */
+export const formatReportValue = (column: AttendanceReportColumn, value: unknown): string => {
+  if (value === null || value === undefined || value === "") return "—";
+  if (column.key === "percentage" && typeof value === "number") return `${value}%`;
+  return String(value);
+};
+
+/** Any report (columns + rows) as an Excel sheet, with S.N. */
+export const downloadAttendanceReportExcel = (
+  columns: AttendanceReportColumn[],
+  rows: Array<Record<string, unknown>>,
+  sheetName: string,
+  filename: string,
+) => {
+  const sheet: Array<Array<string | number>> = [
+    ["S.N.", ...columns.map((column) => column.label)],
+    ...rows.map((row, index) => [
+      index + 1,
+      ...columns.map((column) => {
+        const value = row[column.key];
+        return typeof value === "number" ? value : value == null ? "" : String(value);
+      }),
+    ]),
+  ];
+  writeWorkbook(sheet, sheetName.slice(0, 31), filename);
 };
 
 const writeWorkbook = (

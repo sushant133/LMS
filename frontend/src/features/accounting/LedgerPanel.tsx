@@ -5,6 +5,7 @@ import type {
   ChartOfAccountRecord,
   JournalEntryRecord,
 } from "@phit-erp/shared";
+import { headerAccountCodes } from "@phit-erp/shared";
 import {
   BookMarked,
   FileDown,
@@ -344,11 +345,19 @@ export const LedgerPanel = ({
                   <option value="">All accounts</option>
                   {accounts
                     .filter((a) => a.isActive !== false)
-                    .map((a) => (
-                      <option key={a._id} value={a.code}>
-                        {a.code} — {a.name}
-                      </option>
-                    ))}
+                    .map((a) => {
+                      const isGroup = headerAccountCodes(accounts).has(a.code);
+                      return (
+                        <option
+                          key={a._id}
+                          value={a.code}
+                          style={isGroup ? { fontWeight: 700 } : undefined}
+                        >
+                          {a.code} — {a.name}
+                          {isGroup ? " (group)" : ""}
+                        </option>
+                      );
+                    })}
                 </Select>
               </FormField>
               <FormField label="Ledger group">

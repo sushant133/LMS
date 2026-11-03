@@ -23,6 +23,21 @@ const accountingExpenseSchema = new Schema(
       ],
       default: "CASH"
     },
+    /** Bank account used when paid by bank; absent on cash and older records. */
+    bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount" },
+    /** Details printed on the Journal Voucher (AGF No. 10) */
+    voucherDetails: {
+      narration: { type: String, default: "" },
+      receiptNo: { type: String, default: "" },
+      chequeNo: { type: String, default: "" },
+      chequeDateBs: { type: String, default: "" },
+      preparedByName: { type: String, default: "" },
+      preparedByDesignation: { type: String, default: "" },
+      checkedByName: { type: String, default: "" },
+      approvedByName: { type: String, default: "" },
+      receivedByName: { type: String, default: "" },
+      receivedByDesignation: { type: String, default: "" }
+    },
     description: { type: String, required: true },
     voucherNumber: { type: String },
     approvedBy: { type: String },

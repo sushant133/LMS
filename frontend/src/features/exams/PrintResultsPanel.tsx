@@ -586,7 +586,7 @@ export const PrintResultsPanel = ({
           {/*
             CTEVT Internal Assessment Report — Print Bulk only.
             Header nesting matches the official PDF:
-            SN | Regd | Symbol | Name (header rows: Student's Name / Full Marks /
+            SN | Symbol | Name (header rows: Student's Name / Full Marks /
             Pass Marks) | one column per subject | Total | % | Grade | Status | Remarks
           */}
           <div ref={bulkResultsRef} className="print-results-bulk-table iar-report">
@@ -640,7 +640,6 @@ export const PrintResultsPanel = ({
             <table className="iar-marks" cellSpacing={0} cellPadding={0}>
               <colgroup>
                 <col className="iar-col-sn" />
-                <col className="iar-col-regd" />
                 <col className="iar-col-symbol" />
                 <col className="iar-col-name" />
                 {Array.from({ length: markColumnCount }).map((_, i) => (
@@ -657,9 +656,6 @@ export const PrintResultsPanel = ({
                 <tr>
                   <th rowSpan={3} className="iar-sn">
                     S.N.
-                  </th>
-                  <th rowSpan={3} className="iar-regd">
-                    Regd.No.
                   </th>
                   <th rowSpan={3} className="iar-symbol">
                     Symbol
@@ -727,7 +723,6 @@ export const PrintResultsPanel = ({
                 {grid.rows.map((row) => (
                   <tr key={row.resultId}>
                     <td className="iar-sn">{row.sn}</td>
-                    <td className="iar-regd">{row.registrationNumber}</td>
                     <td className="iar-symbol">{row.symbolNumber || ""}</td>
                     <td className="iar-name">{row.studentName}</td>
                     {/* One column per subject: the total mark the teacher recorded. */}
@@ -776,7 +771,7 @@ export const PrintResultsPanel = ({
               </div>
               <div className="iar-sign">
                 <div className="iar-sign-line" />
-                <div>Submitted By</div>
+                <div>Verified By</div>
               </div>
               <div className="iar-sign">
                 <div className="iar-sign-line" />

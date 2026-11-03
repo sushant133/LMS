@@ -4,8 +4,51 @@ import { Setting } from "../models/Setting.js";
 import { Exam } from "../models/Exam.js";
 import { Result } from "../models/Result.js";
 import { Attendance } from "../models/Attendance.js";
+import { DailyAttendance } from "../models/DailyAttendance.js";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import type { Request } from "express";
 import { tenantObjectId } from "./tenant.js";
+import { formatAddressLine } from "./formatAddress.js";
+import { getInstitutionType, isCollege } from "./institution.js";
+import { getOffsetBsDate, getTodayBs } from "./nepaliDate.js";
+
+/** Statuses that mean the student attended the class. */
+const ATTENDED = new Set(["PRESENT", "LATE", "EARLY_LEAVE"]);
+
+/** "2081 Batch · 1st Year" (college) or "Class 5 · A" (school). */
+const studentGroupLabel = (student: Record<string, unknown>, college: boolean): string => {
+  const name = (ref: unknown) => (ref && typeof ref === "object" ? String((ref as { name?: string }).name ?? "") : "");
+  const parts = college ? [name(student.batchId), name(student.yearId)] : [name(student.classId), name(student.sectionId)];
+  return parts.filter(Boolean).join(" · ") || "Not assigned";
+};
+
+/** Current academic year from settings, else "Current". */
+const currentAcademicYear = async (schoolId: unknown): Promise<string> => {
+  const setting = await Setting.findOne({ schoolId }).select("academicYearBs").lean();
+  return (setting as { academicYearBs?: string } | null)?.academicYearBs || "Current";
+};
+
+/**
+ * Attendance rate from Student Daily Attendance (final sheets) — subject-wise sheets are
+ * used only when no daily sheet exists. Present, Late and Early leave count as attended.
+ */
+const attendanceRate = async (schoolId: unknown, fromDateBs?: string) => {
+  const dateFilter = fromDateBs ? { dateBs: { $gte: fromDateBs } } : {};
+  const daily = await DailyAttendance.find({ schoolId, status: { $ne: "DRAFT" }, ...dateFilter })
+    .select("entries.status")
+    .lean();
+  const sheets = daily.length > 0 ? daily : await Attendance.find({ schoolId, ...dateFilter }).select("entries.status").lean();
+  let total = 0;
+  let attended = 0;
+  for (const sheet of sheets as Array<{ entries?: Array<{ status?: string }> }>) {
+    for (const entry of sheet.entries ?? []) {
+      total += 1;
+      if (ATTENDED.has(String(entry.status))) attended += 1;
+    }
+  }
+  return { total, rate: total > 0 ? Math.round((attended / total) * 10000) / 100 : 0 };
+};
+
 
 /**
  * IEMIS Export Service - Expanded Version
@@ -33,6 +76,7 @@ export interface StudentMasterRow {
   guardianPhone: string;
   address: string;
   feesDueNpr: number;
+  academicStatus: string;
 }
 
 export interface TeacherMasterRow {
@@ -108,8 +152,9 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
     motherPhone: s.motherPhone || "",
     guardianName: s.guardianName,
     guardianPhone: s.guardianPhone,
-    address: `${s.address?.municipality || ""}, Ward ${s.address?.ward || ""}`,
-    feesDueNpr: s.feesDueNpr || 0
+    address: formatAddressLine(s.address) || "",
+    feesDueNpr: s.feesDueNpr || 0,
+    academicStatus: s.academicStatus || "ACTIVE"
   }));
 }
 
@@ -179,38 +224,27 @@ export async function generateInfrastructureExport(req: Request): Promise<Infras
 export async function generateFlashIIPerformance(req: Request): Promise<FlashIIPerformance> {
   const schoolId = tenantObjectId(req);
 
-  const [studentCount, results, attendances] = await Promise.all([
-    Student.countDocuments({ schoolId }),
-    Result.find({ schoolId }).lean(),
-    Attendance.find({ schoolId }).lean()
+  const [studentCount, results, attendance, academicYearBs] = await Promise.all([
+    Student.countDocuments({ schoolId, academicStatus: { $in: ["ACTIVE", "PENDING_NOT_PASSED"] } }),
+    Result.find({ schoolId }).select("gpa passFailStatus studentId").lean(),
+    attendanceRate(schoolId),
+    currentAcademicYear(schoolId)
   ]);
 
-  // Attendance rate
-  let totalEntries = 0;
-  let presentEntries = 0;
-  attendances.forEach((a: any) => {
-    a.entries.forEach((e: any) => {
-      totalEntries++;
-      if (e.status === "PRESENT") presentEntries++;
-    });
-  });
-  const avgAttendance = totalEntries > 0 ? (presentEntries / totalEntries) * 100 : 0;
-
-  // Exam performance
-  const gpas = results.map((r: any) => r.gpa || 0).filter((g: number) => g > 0);
+  const gpas = results.map((r) => Number(r.gpa) || 0).filter((g) => g > 0);
   const avgGpa = gpas.length > 0 ? gpas.reduce((a, b) => a + b, 0) / gpas.length : 0;
-
-  const lowPerformers = results.filter((r: any) => (r.gpa || 0) < 1.6).length;
+  const passed = results.filter((r) => r.passFailStatus === "PASS").length;
 
   return {
-    academicYearBs: "Current",
+    academicYearBs,
     totalStudents: studentCount,
-    averageAttendanceRate: Math.round(avgAttendance * 100) / 100,
-    examParticipation: results.length,
+    averageAttendanceRate: attendance.rate,
+    examParticipation: new Set(results.map((r) => String(r.studentId))).size,
     averageGpa: Math.round(avgGpa * 100) / 100,
-    promotionRateEstimate: avgGpa > 2.0 ? 92 : avgGpa > 1.6 ? 78 : 65, // heuristic
-    topPerformersCount: results.filter((r: any) => (r.gpa || 0) >= 3.6).length,
-    studentsWithLowPerformance: lowPerformers
+    // Share of published results that are a Pass (was a fixed guess from the GPA)
+    promotionRateEstimate: results.length > 0 ? Math.round((passed / results.length) * 10000) / 100 : 0,
+    topPerformersCount: results.filter((r) => (Number(r.gpa) || 0) >= 3.6).length,
+    studentsWithLowPerformance: results.filter((r) => r.passFailStatus === "FAIL").length
   };
 }
 
@@ -219,7 +253,14 @@ export async function generateFlashIIPerformance(req: Request): Promise<FlashIIP
  */
 export async function generateEnrollmentSummary(req: Request) {
   const schoolId = tenantObjectId(req);
-  const students = await Student.find({ schoolId }).populate("classId", "name").lean();
+  const college = isCollege(await getInstitutionType(req));
+  // Enrollment = students currently enrolled (studying or with back papers)
+  const students = await Student.find({ schoolId, academicStatus: { $in: ["ACTIVE", "PENDING_NOT_PASSED"] } })
+    .populate("classId", "name")
+    .populate("sectionId", "name")
+    .populate("batchId", "name")
+    .populate("yearId", "name")
+    .lean();
 
   const summary: any = {
     totalStudents: students.length,
@@ -235,7 +276,7 @@ export async function generateEnrollmentSummary(req: Request) {
     const g = s.gender || "Unknown";
     summary.byGender[g] = (summary.byGender[g] || 0) + 1;
 
-    const c = (s.classId as any)?.name || "Unassigned";
+    const c = studentGroupLabel(s, college);
     const existingClass = summary.byClass.find((x: any) => x.className === c);
     if (existingClass) existingClass.count++;
     else summary.byClass.push({ className: c, count: 1 });
@@ -261,7 +302,85 @@ export async function generateEnrollmentSummary(req: Request) {
     else summary.byCaste.push({ category: caste, count: 1 });
   });
 
+  const sortByCount = (rows: Array<{ count: number }>) => rows.sort((a, b) => b.count - a.count);
+  summary.byClass.sort((a: any, b: any) => String(a.className).localeCompare(String(b.className), undefined, { numeric: true }));
+  sortByCount(summary.byDisability);
+  sortByCount(summary.byEthnicity);
+  sortByCount(summary.byReligion);
+  sortByCount(summary.byCaste);
   return summary;
+}
+
+/**
+ * One-screen analytics for Reports & Analytics: enrollment, staff, attendance, results
+ * and infrastructure, all for the signed-in institution.
+ */
+export async function generateReportsAnalytics(req: Request) {
+  const schoolId = tenantObjectId(req);
+  const [enrollment, statusRows, teachers, staff, attendanceAll, attendance30, results, infrastructure, academicYearBs] =
+    await Promise.all([
+      generateEnrollmentSummary(req),
+      Student.aggregate<{ _id: string; count: number }>([
+        { $match: { schoolId } },
+        { $group: { _id: { $ifNull: ["$academicStatus", "ACTIVE"] }, count: { $sum: 1 } } }
+      ]),
+      Teacher.countDocuments({ schoolId, status: { $ne: "INACTIVE" } }),
+      CollegeStaff.countDocuments({ schoolId, isDeleted: { $ne: true }, status: { $ne: "INACTIVE" } }),
+      attendanceRate(schoolId),
+      attendanceRate(schoolId, getOffsetBsDate(-30)),
+      Result.find({ schoolId }).select("gpa passFailStatus").lean(),
+      generateInfrastructureExport(req),
+      currentAcademicYear(schoolId)
+    ]);
+  const gpas = results.map((r) => Number(r.gpa) || 0).filter((g) => g > 0);
+  const passed = results.filter((r) => r.passFailStatus === "PASS").length;
+  const statusLabels: Record<string, string> = {
+    ACTIVE: "Studying",
+    PENDING_NOT_PASSED: "Back (not passed)",
+    PASSED_OUT: "Passed out",
+    ALUMNI: "Alumni",
+    WITHDRAWN: "Withdrawn",
+    CANCELLED: "Cancelled",
+    SUSPENDED: "Suspended"
+  };
+  return {
+    academicYearBs,
+    generatedAt: getTodayBs(),
+    students: {
+      enrolled: enrollment.totalStudents,
+      allRecords: statusRows.reduce((s, r) => s + r.count, 0),
+      byStatus: statusRows
+        .map((r) => ({ category: statusLabels[r._id] ?? r._id, count: r.count }))
+        .sort((a, b) => b.count - a.count),
+      byGender: Object.entries(enrollment.byGender as Record<string, number>)
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count),
+      byGroup: (enrollment.byClass as Array<{ className: string; count: number }>).map((row) => ({
+        category: row.className,
+        count: row.count
+      })),
+      byDisability: enrollment.byDisability,
+      byEthnicity: enrollment.byEthnicity,
+      byReligion: enrollment.byReligion,
+      byCaste: enrollment.byCaste
+    },
+    staff: { teachers, otherStaff: staff },
+    attendance: {
+      overallRate: attendanceAll.rate,
+      overallMarks: attendanceAll.total,
+      last30DaysRate: attendance30.rate,
+      last30DaysMarks: attendance30.total
+    },
+    results: {
+      results: results.length,
+      passRate: results.length > 0 ? Math.round((passed / results.length) * 10000) / 100 : 0,
+      averageGpa: gpas.length > 0 ? Math.round((gpas.reduce((a, b) => a + b, 0) / gpas.length) * 100) / 100 : 0,
+      passed,
+      failed: results.filter((r) => r.passFailStatus === "FAIL").length,
+      topPerformers: results.filter((r) => (Number(r.gpa) || 0) >= 3.6).length
+    },
+    infrastructure
+  };
 }
 
 /**
@@ -291,9 +410,10 @@ function neutralizeCsvFormula(value: string): string {
 }
 
 /** CSV helper with proper escaping */
-export function toCsv(rows: any[]): string {
-  if (!rows.length) return "";
-  const headers = Object.keys(rows[0]);
+export function toCsv(rows: any[], headerKeys?: string[]): string {
+  // An empty export still carries its column headings
+  if (!rows.length) return headerKeys ? headerKeys.join(",") : "";
+  const headers = headerKeys ?? Object.keys(rows[0]);
   const csvRows = [headers.join(",")];
 
   for (const row of rows) {
@@ -309,5 +429,5 @@ export function toCsv(rows: any[]): string {
     });
     csvRows.push(values.join(","));
   }
-  return csvRows.join("\n");
+  return csvRows.join("\r\n");
 }

@@ -1,3 +1,4 @@
+import { roundNetSalaryToRupee } from "@phit-erp/shared";
 interface FeeCalculationInput {
   previousDueNpr: number;
   currentChargesNpr: number;
@@ -52,7 +53,8 @@ export const calculateNetSalary = (input: {
     Number(input.loanDeductionNpr || 0) +
     Number(input.taxNpr || 0) +
     Number(input.otherDeductionsNpr || 0);
-  return Math.max(0, gross - deductions);
+  // Paid in whole rupees (same rule as the salary sheet)
+  return roundNetSalaryToRupee(Math.max(0, gross - deductions)).netSalaryNpr;
 };
 
 export const calculateSuggestedLateFee = (
@@ -91,8 +93,18 @@ export const defaultCoversYearFromTopped = (toppedProgramYear: number): number =
   return Math.min(3, Math.max(1, toppedProgramYear + 1));
 };
 
+/**
+ * Database filter for real receipts (money received) — leaves out system opening charges,
+ * flagged or (before the migration) recognised by their OPEN- receipt number.
+ */
+export const REAL_RECEIPT_FILTER = {
+  isOpeningCharge: { $ne: true },
+  receiptNumber: { $not: /^OPEN-/ }
+} as const;
+
 /** True when row is the system admission-plan opening charge (not a real payment). */
 export const isOpeningTuitionCharge = (row: Record<string, unknown>): boolean => {
+  if (row.isOpeningCharge === true) return true;
   const receipt = String(row.receiptNumber ?? "");
   const notes = String(row.notes ?? "");
   return (
@@ -187,6 +199,39 @@ export const carryExcessToNextYear = (params: {
   return merged.sort((a, b) => a.programYear - b.programYear);
 };
 
+/** Fee paid on a receipt in advance for later program years (its advance allocations). */
+export const receiptAdvanceTotalNpr = (row: Record<string, unknown>): number =>
+  Math.round(receiptAdvanceAllocations(row).reduce((s, a) => s + a.amountNpr, 0) * 100) / 100;
+
+/**
+ * Fee rows with no program year (older or imported receipts). They are replayed in date
+ * order like a running account, so their due is not lost from year-wise totals.
+ */
+export const summarizeUnassignedFees = (collections: Array<Record<string, unknown>>) => {
+  const rows = collections.filter((c) => {
+    const y = Number(c.programYear);
+    return y !== 1 && y !== 2 && y !== 3;
+  });
+  let remainingNpr = 0;
+  let paidNpr = 0;
+  let chargedNpr = 0;
+  for (const c of rows) {
+    const totals = calculateFeeTotals({
+      previousDueNpr: remainingNpr,
+      currentChargesNpr: Number(c.currentChargesNpr ?? 0),
+      amountPaidNpr: Number(c.amountPaidNpr ?? 0),
+      discountNpr: Number(c.discountNpr ?? 0),
+      scholarshipNpr: Number(c.scholarshipNpr ?? 0),
+      lateFeeNpr: 0
+    });
+    remainingNpr = totals.remainingDueNpr;
+    chargedNpr += Number(c.currentChargesNpr ?? 0);
+    if (!isOpeningTuitionCharge(c)) paidNpr += Number(c.amountPaidNpr ?? 0);
+  }
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return { count: rows.length, chargedNpr: round(chargedNpr), paidNpr: round(paidNpr), remainingNpr: round(remainingNpr) };
+};
+
 /**
  * Check advance allocations for a receipt of `programYear` paying `amountPaidNpr`.
  * Throws a readable message; returns the cleaned list to store.
@@ -240,115 +285,200 @@ export const buildProgramYearFeeSummary = (
   collections: Array<Record<string, unknown>>,
   awards: Array<Record<string, unknown>> = [],
   plannedFees: PlannedYearFees = {}
+) => buildStudentFeePosition(collections, awards, plannedFees).years;
+
+type FeeBucket = 1 | 2 | 3 | "other";
+
+const round2Fee = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+/**
+ * A student's complete fee position — the one calculation behind Student Fee Records,
+ * the Student Ledger / Fee Summary, Receivables Aging and the stored outstanding due.
+ *
+ * Each year's charge is reduced by its own discounts and scholarships (receipts and
+ * awards). Payments are then applied in date order: first to the receipt's own year,
+ * then later years, then earlier years; a receipt with no program year first pays charges
+ * that also have no year, then year 1, 2, 3. Saved advance allocations only steer where a
+ * receipt's money goes after its own year is settled. Only money left once every due is
+ * covered is an advance (credit balance), so a payment that settled a due is never also
+ * counted as advance.
+ *
+ * Always: payable − discount − scholarship − paid = outstanding − advance.
+ */
+export const buildStudentFeePosition = (
+  collections: Array<Record<string, unknown>>,
+  awards: Array<Record<string, unknown>> = [],
+  plannedFees: PlannedYearFees = {}
 ) => {
-  return ([1, 2, 3] as const).map((programYear) => {
-    const yearRows = collections.filter((c) => Number(c.programYear) === programYear);
-    const openingRows = yearRows.filter((c) => isOpeningTuitionCharge(c));
-    const paymentRows = yearRows.filter((c) => !isOpeningTuitionCharge(c));
+  const yearOf = (row: Record<string, unknown>): FeeBucket => {
+    const y = Number(row.programYear);
+    return y === 1 || y === 2 || y === 3 ? y : "other";
+  };
+  const num = (value: unknown) => Number(value ?? 0) || 0;
 
-    const openingChargeNpr = openingRows.reduce(
-      (s, c) => s + Number(c.currentChargesNpr ?? 0),
-      0
-    );
-    const paymentChargeNpr = paymentRows.reduce(
-      (s, c) => s + Number(c.currentChargesNpr ?? 0),
-      0
-    );
-    // Late fee / fine is not used for student tuition dues
-    const lateFeeNpr = 0;
-
-    const plannedNpr = Math.max(0, Number(plannedFees[programYear]) || 0);
-
-    // Fixed year plan is authoritative when set — prevents double-count of
-    // opening charge + same amount re-entered as "Fee charged" on payment.
-    let baseChargeNpr = 0;
-    if (plannedNpr > 0) {
-      baseChargeNpr = plannedNpr;
-    } else if (openingChargeNpr > 0) {
-      // Opening booked the year; only count payment charges ABOVE that opening amount
-      baseChargeNpr =
-        openingChargeNpr + Math.max(0, paymentChargeNpr - openingChargeNpr);
+  // ── Charges and credits per bucket ──────────────────────────────────────────
+  type Bucket = {
+    charged: number;
+    discount: number;
+    scholarship: number;
+    award?: Record<string, unknown>;
+    capacity: number;
+    applied: number;
+    fromOther: number;
+    overpaid: number;
+    rows: number;
+  };
+  const buckets = new Map<FeeBucket, Bucket>();
+  for (const key of [1, 2, 3, "other"] as FeeBucket[]) {
+    const rows = collections.filter((c) => yearOf(c) === key);
+    const opening = rows.filter((c) => isOpeningTuitionCharge(c)).reduce((s, c) => s + num(c.currentChargesNpr), 0);
+    const paymentCharges = rows.filter((c) => !isOpeningTuitionCharge(c)).reduce((s, c) => s + num(c.currentChargesNpr), 0);
+    const planned = key === "other" ? 0 : Math.max(0, num(plannedFees[key]));
+    let charged: number;
+    if (key === "other") {
+      charged = opening + paymentCharges;
+    } else if (planned > 0) {
+      // Fixed year plan is authoritative — prevents double-count of opening charge +
+      // the same amount re-entered as "Fee charged" on a payment.
+      charged = planned;
+    } else if (opening > 0) {
+      charged = opening + Math.max(0, paymentCharges - opening);
     } else {
-      baseChargeNpr = paymentChargeNpr;
+      charged = paymentCharges;
     }
+    const discount = rows.reduce((s, c) => s + num(c.discountNpr), 0);
+    let scholarship = rows.reduce((s, c) => s + num(c.scholarshipNpr), 0);
 
-    const chargedNpr = baseChargeNpr + lateFeeNpr;
-    // This year's own receipts (minus any advance they carried for later years)
-    // plus advance received for this year on earlier years' receipts.
-    const advanceNpr = collections.reduce(
-      (s, c) =>
-        s +
-        receiptAdvanceAllocations(c)
-          .filter((a) => a.programYear === programYear)
-          .reduce((t, a) => t + a.amountNpr, 0),
-      0
-    );
-    const paidNpr =
-      yearRows.reduce((s, c) => s + receiptOwnYearPaidNpr(c), 0) + advanceNpr;
-    let scholarshipNpr = yearRows.reduce((s, c) => s + Number(c.scholarshipNpr ?? 0), 0);
-    const discountNpr = yearRows.reduce((s, c) => s + Number(c.discountNpr ?? 0), 0);
-
-    const award = awards.find(
-      (a) =>
-        Number(a.coversProgramYear) === programYear &&
-        (a.status === "ACTIVE" || a.status === "APPLIED")
-    );
-
-    // Credit active/applied awards so year-wise "Due" reflects scholarship allotment.
+    const award =
+      key === "other"
+        ? undefined
+        : awards.find(
+            (a) => Number(a.coversProgramYear) === key && (a.status === "ACTIVE" || a.status === "APPLIED")
+          );
     if (award) {
-      const afterBase = Math.max(0, chargedNpr - paidNpr - discountNpr - scholarshipNpr);
-      const waiverType = String(award.waiverType || "FULL").toUpperCase();
-      if (waiverType === "FULL") {
-        // Full year waiver → remaining must be zero for this program year.
-        scholarshipNpr += afterBase;
-      } else if (afterBase > 0) {
-        // Partial: credit remaining award amount not already on fee receipts.
-        const awardAmt = Math.max(0, Number(award.amountNpr) || 0);
-        const stillNeeded = Math.max(0, awardAmt - scholarshipNpr);
-        scholarshipNpr += Math.min(stillNeeded, afterBase);
+      // Award credit covers what receipts' own discount / scholarship has not.
+      const open = Math.max(0, charged - discount - scholarship);
+      if (String(award.waiverType || "FULL").toUpperCase() === "FULL") {
+        scholarship += open;
+      } else {
+        const stillNeeded = Math.max(0, num(award.amountNpr) - scholarship);
+        scholarship += Math.min(stillNeeded, open);
       }
     }
 
-    const remainingNpr = Math.max(0, chargedNpr - paidNpr - scholarshipNpr - discountNpr);
+    buckets.set(key, {
+      charged,
+      discount,
+      scholarship,
+      award,
+      capacity: Math.max(0, charged - discount - scholarship),
+      applied: 0,
+      fromOther: 0,
+      overpaid: 0,
+      rows: rows.length
+    });
+  }
+
+  // ── Apply payments in date order ────────────────────────────────────────────
+  const payments = collections
+    .filter((c) => !isOpeningTuitionCharge(c) && num(c.amountPaidNpr) > 0)
+    .sort((a, b) => {
+      const byDate = String(a.paidDateBs ?? "").localeCompare(String(b.paidDateBs ?? ""));
+      if (byDate !== 0) return byDate;
+      const ta = new Date(String(a.createdAt ?? 0)).getTime() || 0;
+      const tb = new Date(String(b.createdAt ?? 0)).getTime() || 0;
+      if (ta !== tb) return ta - tb;
+      return String(a._id ?? "").localeCompare(String(b._id ?? ""));
+    });
+
+  let advanceNpr = 0;
+  for (const payment of payments) {
+    const own = yearOf(payment);
+    const steered = receiptAdvanceAllocations(payment).map((a) => a.programYear as FeeBucket);
+    const order: FeeBucket[] =
+      own === "other"
+        ? ["other", 1, 2, 3]
+        : [own, ...steered, ...([1, 2, 3] as const).filter((y) => y > own), ...([1, 2, 3] as const).filter((y) => y < own), "other"];
+    let left = num(payment.amountPaidNpr);
+    for (const key of [...new Set(order)]) {
+      if (left <= 0) break;
+      const bucket = buckets.get(key)!;
+      const room = Math.max(0, bucket.capacity - bucket.applied);
+      const take = Math.min(room, left);
+      if (take <= 0) continue;
+      bucket.applied += take;
+      if (key !== own) bucket.fromOther += take;
+      left -= take;
+    }
+    if (left > 0.004) {
+      // Paid more than every due: a credit balance, shown on the receipt's own year.
+      buckets.get(own)!.overpaid += left;
+      advanceNpr += left;
+    }
+  }
+
+  // ── Per-year rows (same shape as before) ────────────────────────────────────
+  const years = ([1, 2, 3] as const).map((programYear) => {
+    const b = buckets.get(programYear)!;
+    const chargedNpr = round2Fee(b.charged);
+    const paidNpr = round2Fee(b.applied + b.overpaid);
+    const scholarshipNpr = round2Fee(b.scholarship);
+    const discountNpr = round2Fee(b.discount);
+    const remainingNpr = round2Fee(Math.max(0, b.capacity - b.applied));
+    const plannedNpr = Math.max(0, num(plannedFees[programYear]));
+    const hasLedger = b.rows > 0 || plannedNpr > 0 || b.applied > 0;
 
     let status: "PAID" | "PARTIAL" | "DUE" | "SCHOLARSHIP" | "NO_RECORD" = "NO_RECORD";
-    const hasLedger = yearRows.length > 0 || plannedNpr > 0 || advanceNpr > 0;
-    if (!hasLedger && award) {
-      status = "SCHOLARSHIP";
-    } else if (!hasLedger) {
-      status = "NO_RECORD";
-    } else if (award && remainingNpr <= 0) {
-      // Scholarship covers this year (full waiver or collections fully offset)
-      status = paidNpr > 0 && scholarshipNpr <= 0 ? "PAID" : "SCHOLARSHIP";
-    } else if (scholarshipNpr > 0 && paidNpr === 0 && remainingNpr === 0) {
-      status = "SCHOLARSHIP";
-    } else if (remainingNpr <= 0 && (paidNpr > 0 || scholarshipNpr > 0 || plannedNpr > 0)) {
-      status = "PAID";
-    } else if (paidNpr > 0 || scholarshipNpr > 0 || award) {
-      status = "PARTIAL";
-    } else {
-      status = "DUE";
-    }
+    if (!hasLedger && b.award) status = "SCHOLARSHIP";
+    else if (!hasLedger) status = "NO_RECORD";
+    else if (b.award && remainingNpr <= 0) status = paidNpr > 0 && scholarshipNpr <= 0 ? "PAID" : "SCHOLARSHIP";
+    else if (scholarshipNpr > 0 && paidNpr === 0 && remainingNpr === 0) status = "SCHOLARSHIP";
+    else if (remainingNpr <= 0 && (paidNpr > 0 || scholarshipNpr > 0 || plannedNpr > 0)) status = "PAID";
+    else if (paidNpr > 0 || scholarshipNpr > 0 || b.award) status = "PARTIAL";
+    else status = "DUE";
 
     return {
       programYear,
       label: PROGRAM_YEAR_LABELS[programYear] ?? `Year ${programYear}`,
       chargedNpr,
       paidNpr,
-      /** Part of paidNpr received in advance on an earlier year's receipt. */
-      advanceNpr,
+      /** Part of paidNpr that came from another year's receipt. */
+      advanceNpr: round2Fee(b.fromOther),
       scholarshipNpr,
       discountNpr,
       remainingNpr,
       status,
-      scholarshipNote: award
+      scholarshipNote: b.award
         ? String(
-            award.reason ||
-              `Merit scholarship covering ${PROGRAM_YEAR_LABELS[programYear]} (based on year ${award.toppedProgramYear})`
+            b.award.reason ||
+              `Merit scholarship covering ${PROGRAM_YEAR_LABELS[programYear]} (based on year ${b.award.toppedProgramYear})`
           )
         : undefined
     };
   });
+
+  const other = buckets.get("other")!;
+  const all = [...buckets.values()];
+  const totalPaid = payments.reduce((s, c) => s + num(c.amountPaidNpr), 0);
+  return {
+    years,
+    /** Charges and payments saved without a program year. */
+    unassigned: {
+      count: other.rows,
+      chargedNpr: round2Fee(other.charged),
+      paidNpr: round2Fee(other.applied + other.overpaid),
+      remainingNpr: round2Fee(Math.max(0, other.capacity - other.applied))
+    },
+    totals: {
+      payableNpr: round2Fee(all.reduce((s, b) => s + b.charged, 0)),
+      discountNpr: round2Fee(all.reduce((s, b) => s + b.discount, 0)),
+      scholarshipNpr: round2Fee(all.reduce((s, b) => s + b.scholarship, 0)),
+      paidNpr: round2Fee(totalPaid),
+      outstandingNpr: round2Fee(all.reduce((s, b) => s + Math.max(0, b.capacity - b.applied), 0)),
+      /** Paid beyond every due (credit balance). */
+      advanceNpr: round2Fee(advanceNpr)
+    }
+  };
 };
 
 /**
@@ -774,33 +904,12 @@ export const recalculateStudentFeesDue = async (
     3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
   };
 
-  const yearWise = buildProgramYearFeeSummary(
+  // Same calculation as Student Fee Records / Student Ledger / Receivables Aging
+  const runningDue = buildStudentFeePosition(
     collections as unknown as Array<Record<string, unknown>>,
     awards as unknown as Array<Record<string, unknown>>,
     planned
-  );
-  let runningDue = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
-
-  // Legacy / unscoped fee rows (no program year 1–3) — still replay chronologically
-  const otherRows = collections.filter((c) => {
-    const y = Number(c.programYear);
-    return y !== 1 && y !== 2 && y !== 3;
-  });
-  if (otherRows.length > 0) {
-    let otherDue = 0;
-    for (const collection of otherRows) {
-      const totals = calculateFeeTotals({
-        previousDueNpr: otherDue,
-        currentChargesNpr: collection.currentChargesNpr ?? 0,
-        amountPaidNpr: collection.amountPaidNpr,
-        discountNpr: collection.discountNpr ?? 0,
-        scholarshipNpr: collection.scholarshipNpr ?? 0,
-        lateFeeNpr: 0
-      });
-      otherDue = totals.remainingDueNpr;
-    }
-    runningDue += otherDue;
-  }
+  ).totals.outstandingNpr;
 
   // Keep receipt "Remaining" aligned with the payment's program year
   await syncCollectionYearDueSnapshots(

@@ -23,6 +23,8 @@ const accountingIncomeSchema = new Schema(
       ],
       default: "CASH"
     },
+    /** Bank account used when paid by bank; absent on cash and older records. */
+    bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount" },
     description: { type: String },
     receiptNumber: { type: String },
     voucherNumber: { type: String },

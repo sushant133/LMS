@@ -1,3 +1,4 @@
+import { isPathHidden } from "lib/hiddenModules";
 import { Suspense, type ReactNode, useLayoutEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
@@ -29,6 +30,9 @@ const StudentsIndexRedirect = lazy(() =>
 );
 const CreateStudentPage = lazy(() =>
   import("pages/CreateStudentPage").then((module) => ({ default: module.CreateStudentPage })),
+);
+const StudentDataChecksPage = lazy(() =>
+  import("features/students/StudentDataChecks").then((module) => ({ default: module.StudentDataChecks })),
 );
 const StudentListPage = lazy(() =>
   import("pages/StudentListPage").then((module) => ({ default: module.StudentListPage })),
@@ -296,6 +300,14 @@ export default function App() {
                     </LazyRoute>
                   }
                 />
+                <Route
+                  path="data-checks"
+                  element={
+                    <LazyRoute>
+                      <StudentDataChecksPage />
+                    </LazyRoute>
+                  }
+                />
               </Route>
               <Route
                 path="/my-students"
@@ -481,6 +493,7 @@ export default function App() {
               }
             >
               <Route path="/complains" element={<LazyRoute><ComplaintsPage /></LazyRoute>} />
+              <Route path="/complaints" element={<Navigate to="/complains" replace />} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
@@ -515,7 +528,10 @@ export default function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/parent-links" element={<ParentLinksPage />} />
-              <Route path="/hr" element={<HrPage />} />
+              <Route
+                path="/hr"
+                element={isPathHidden("/hr") ? <Navigate to="/" replace /> : <HrPage />}
+              />
             </Route>
 
             {/* Transport: admins manage; drivers/transport staff (COLLEGE_STAFF) can open routes view */}

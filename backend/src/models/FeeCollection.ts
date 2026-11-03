@@ -113,6 +113,11 @@ const feeCollectionSchema = new Schema(
     accountantName: { type: String, default: "" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true },
+    /**
+     * System opening charge (the student's admission fee plan for a year): a fee CHARGE,
+     * not money received. Excluded from every collection report; used as a charge only.
+     */
+    isOpeningCharge: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },
     deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
     voidReason: { type: String },

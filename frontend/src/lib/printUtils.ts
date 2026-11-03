@@ -983,7 +983,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         color: #000 !important;
         background: #fff !important;
         font-family: "Times New Roman", Times, Georgia, serif !important;
-        font-size: 11px !important;
+        font-size: 13px !important;
         line-height: 1.2 !important;
       }
       .iar-report *,
@@ -993,7 +993,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .iar-title {
         text-align: center;
-        font-size: 15px;
+        font-size: 17px;
         font-weight: 700;
         letter-spacing: 0.05em;
         text-transform: uppercase;
@@ -1001,14 +1001,14 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .iar-office {
         text-align: center;
-        font-size: 13px;
+        font-size: 15px;
         font-weight: 700;
         text-transform: uppercase;
         margin: 0 0 2px;
       }
       .iar-sheet-title {
         text-align: center;
-        font-size: 13px;
+        font-size: 15px;
         font-weight: 700;
         text-transform: uppercase;
         margin: 0 0 6px;
@@ -1019,7 +1019,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         border: 1px solid #000 !important;
         margin: 0 0 6px !important;
         table-layout: fixed !important;
-        font-size: 10.5px !important;
+        font-size: 12.5px !important;
       }
       .iar-meta td {
         border: 1px solid #000 !important;
@@ -1033,7 +1033,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         border-collapse: collapse !important;
         border: 1px solid #000 !important;
         table-layout: fixed !important;
-        font-size: 9.5px !important;
+        font-size: 11.5px !important;
       }
       .iar-marks th,
       .iar-marks td {
@@ -1060,9 +1060,8 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         border-bottom-style: solid !important;
       }
       .iar-col-sn { width: 3.2% !important; }
-      .iar-col-regd { width: 7.5% !important; }
-      .iar-col-symbol { width: 7% !important; }
-      .iar-col-name { width: 14% !important; }
+      .iar-col-symbol { width: 8.5% !important; }
+      .iar-col-name { width: 20% !important; }
       .iar-col-total { width: 5.5% !important; }
       .iar-col-pct { width: 3.5% !important; }
       .iar-col-grade { width: 3.5% !important; }
@@ -1072,15 +1071,15 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .iar-regd {
         text-align: center !important;
         font-family: Consolas, "Courier New", monospace !important;
-        font-size: 8px !important;
+        font-size: 10px !important;
         word-break: break-all;
         line-height: 1.15;
       }
-      .iar-symbol { text-align: center !important; font-size: 8.5px !important; white-space: nowrap; }
+      .iar-symbol { text-align: center !important; font-size: 10.5px !important; white-space: nowrap; }
       .iar-name {
         text-align: left !important;
         font-weight: 700 !important;
-        font-size: 9px !important;
+        font-size: 11px !important;
         line-height: 1.15;
         padding-left: 2px !important;
         padding-right: 2px !important;
@@ -1089,14 +1088,14 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .iar-corner {
         text-align: center !important;
         font-weight: 700 !important;
-        font-size: 8px !important;
+        font-size: 10px !important;
         line-height: 1.15;
         vertical-align: middle !important;
       }
       .iar-subject-name {
         text-align: center !important;
         font-weight: 700 !important;
-        font-size: 8px !important;
+        font-size: 10px !important;
         line-height: 1.1;
         word-break: break-word;
         hyphens: auto;
@@ -1105,27 +1104,27 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .iar-num {
         text-align: center !important;
         font-variant-numeric: tabular-nums;
-        font-size: 9px !important;
+        font-size: 11px !important;
         white-space: nowrap;
       }
       .iar-total,
       .iar-pct,
       .iar-grade {
         text-align: center !important;
-        font-size: 9px !important;
+        font-size: 11px !important;
         font-weight: 600;
         white-space: nowrap;
       }
       .iar-grade { font-weight: 700 !important; }
       .iar-status {
         text-align: center !important;
-        font-size: 8.5px !important;
+        font-size: 10.5px !important;
         font-weight: 700 !important;
       }
       .iar-status-fail { color: #b91c1c !important; }
       .iar-remarks {
         text-align: left !important;
-        font-size: 8px !important;
+        font-size: 10px !important;
         padding-left: 2px !important;
       }
       .iar-legend {
@@ -1134,7 +1133,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         border: 1px solid #000 !important;
         margin-top: 6px !important;
         table-layout: fixed !important;
-        font-size: 9px !important;
+        font-size: 11px !important;
       }
       .iar-legend td {
         border: 1px solid #000 !important;
@@ -1145,7 +1144,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         justify-content: space-between !important;
         margin-top: 22px !important;
         padding: 0 24px !important;
-        font-size: 11px !important;
+        font-size: 13px !important;
         font-weight: 700 !important;
       }
       .iar-sign { text-align: center; min-width: 170px; }

@@ -6,7 +6,9 @@ const journalLineSchema = new Schema(
     accountName: { type: String, required: true },
     debitNpr: { type: Number, default: 0 },
     creditNpr: { type: Number, default: 0 },
-    description: { type: String }
+    description: { type: String },
+    /** Bank account this line moves; falls back to the entry's bankAccountId. */
+    bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount" }
   },
   { _id: false }
 );

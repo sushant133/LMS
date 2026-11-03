@@ -27,6 +27,11 @@ const cashBookEntrySchema = new Schema(
     referenceType: { type: String },
     referenceId: { type: Schema.Types.ObjectId },
     balanceAfterNpr: { type: Number, required: true },
+    /**
+     * "LEDGER": receipts are DEBIT, payments CREDIT (the cash book convention). Rows saved
+     * before this field existed used the opposite (CREDIT = money in).
+     */
+    convention: { type: String },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

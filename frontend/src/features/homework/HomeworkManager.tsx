@@ -18,6 +18,7 @@ import { Select } from "components/ui/select";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
+import { groupSubjectsByCourseYear } from "lib/subjectOptions";
 import { parseErrorMessage } from "lib/utils";
 import { ClassroomPostCard } from "./ClassroomPostCard";
 import { ComposePostModal } from "./ComposePostModal";
@@ -84,6 +85,8 @@ export const HomeworkManager = () => {
     : isStudent
       ? (studentSubjectsQuery.data ?? [])
       : (subjectsQuery.data ?? []);
+  // One entry per subject (not one per batch); the server matches every batch's copy
+  const subjectGroups = groupSubjectsByCourseYear(subjects);
   const teacherAssignments = isTeacher
     ? (teacherScopeQuery.data?.scope.assignments ?? [])
     : [];
@@ -193,7 +196,7 @@ export const HomeworkManager = () => {
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Select
           className="min-w-0"
-          value={filters.subjectId}
+          value={filters.subjectId ? subjectGroups.optionFor(filters.subjectId) : ""}
           onChange={(event) =>
             setFilters((current) => ({
               ...current,
@@ -202,9 +205,9 @@ export const HomeworkManager = () => {
           }
         >
           <option value="">All subjects</option>
-          {subjects.map((subject) => (
-            <option key={subject._id} value={subject._id}>
-              {subject.name}
+          {subjectGroups.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.subject.name}
             </option>
           ))}
         </Select>

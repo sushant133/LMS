@@ -1,5 +1,6 @@
 import { parseBsDate } from "@munatech/nepali-datepicker";
 import { scrollToForm } from "lib/scrollToForm";
+import { useSearchParams } from "react-router-dom";
 import {
   Suspense,
   useMemo,
@@ -485,15 +486,20 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     studentId: string;
   } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
-  const [adminSection, setAdminSection] = useState<
+  type AdminSection =
     | "manage"
     | "admit-card"
     | "attendance-sheet"
     | "print-results"
     | "exam-records"
     | "enter-marks"
-    | "confidential-codes"
-  >("manage");
+    | "confidential-codes";
+  // ?exam=print-results (e.g. from Reports & Analytics) opens Results directly
+  const [examSearchParams] = useSearchParams();
+  const [adminSection, setAdminSection] = useState<AdminSection>(() => {
+    const requested = examSearchParams.get("exam");
+    return requested === "print-results" || requested === "exam-records" ? requested : "manage";
+  });
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
   >("routine");

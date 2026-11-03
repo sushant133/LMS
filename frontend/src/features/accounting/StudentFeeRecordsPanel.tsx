@@ -7,9 +7,11 @@ import {
   type ReactNode,
 } from "react";
 import { printPageCss } from "lib/printPage";
+import { isBankPaymentMethod } from "./bankCashShared";
 import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  BankAccountRecord,
   BatchRecord,
   EnhancedFeeCollectionRecord,
   ExtendedFeeStructureInput,
@@ -39,6 +41,7 @@ import {
   Receipt,
   Trash2,
   Upload,
+  Layers,
   Wallet,
   X,
 } from "lucide-react";
@@ -68,16 +71,19 @@ import {
   isStaffLevelDepartmentAccount,
   normalizeUserRole,
 } from "lib/roles";
-import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import {
   adDateToBsString,
   bsDateToAdString,
   downloadRecordsExcel,
   formatDualDateCell,
+  exportRegister,
+  labelYearsWithBatch,
+  type RegisterColumn,
 } from "./accountingUtils";
-import { printHtmlViaIframe } from "./voucherPrint";
+import { printHtmlViaIframe, printSimpleDocument } from "./voucherPrint";
 
-type PanelTab = "ledger" | "record" | "scholarship" | "receipts";
+type PanelTab = "ledger" | "record" | "scholarship" | "receipts" | "yearwise";
 
 type FeeAttachment = {
   name?: string;
@@ -203,6 +209,8 @@ const emptyPaymentForm = () => ({
   discountNpr: "0",
   scholarshipNpr: "0",
   paymentMethod: "CASH" as (typeof PAYMENT_METHODS)[number],
+  /** Bank account the money went into (bank / wallet payments). */
+  bankAccountId: "",
   transactionNumber: "",
   receivedByName: "",
   paidByName: "",
@@ -543,6 +551,11 @@ export const StudentFeeRecordsPanel = () => {
   /** Ledger filters */
   const [ledgerBatchId, setLedgerBatchId] = useState("");
   const [ledgerYearId, setLedgerYearId] = useState("");
+  /** Year-wise fees: one batch, one program year (fee, paid, remaining for that year) */
+  const [yearwiseBatchId, setYearwiseBatchId] = useState("");
+  const [yearwiseProgramYear, setYearwiseProgramYear] = useState<1 | 2 | 3>(1);
+  const [yearwiseSearch, setYearwiseSearch] = useState("");
+  const [yearwiseOnlyDue, setYearwiseOnlyDue] = useState(false);
   /** Record / scholarship student picker filters */
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerBatchId, setPickerBatchId] = useState("");
@@ -587,6 +600,15 @@ export const StudentFeeRecordsPanel = () => {
     queryFn: () =>
       unwrap<StudentScholarshipAwardRecord[]>(api.get("/accounting/scholarships")),
   });
+
+  const bankAccountsQuery = useQuery({
+    queryKey: ["accounting-bank-cash", "accounts"],
+    queryFn: () => unwrap<BankAccountRecord[]>(api.get("/accounting/bank-accounts")),
+  });
+  const activeBankAccounts = useMemo(
+    () => (bankAccountsQuery.data ?? []).filter((bank) => bank.isActive),
+    [bankAccountsQuery.data],
+  );
 
   const structuresQuery = useQuery({
     queryKey: ["accounting-structures"],
@@ -724,6 +746,7 @@ export const StudentFeeRecordsPanel = () => {
       scholarshipNpr: String(row.scholarshipNpr ?? 0),
       paymentMethod:
         (row.paymentMethod as (typeof PAYMENT_METHODS)[number]) || "CASH",
+      bankAccountId: row.bankAccountId ?? "",
       transactionNumber: row.transactionNumber ?? "",
       receivedByName: row.receivedByName ?? "",
       paidByName: row.paidByName ?? "",
@@ -846,7 +869,10 @@ export const StudentFeeRecordsPanel = () => {
   const students = studentsQuery.data ?? [];
   const accounts = accountsQuery.data ?? [];
   const batches = batchesQuery.data ?? [];
-  const years = yearsQuery.data ?? [];
+  const years = useMemo(
+    () => labelYearsWithBatch(yearsQuery.data ?? [], batches),
+    [yearsQuery.data, batches],
+  );
 
   const yearsForLedgerBatch = useMemo(() => {
     if (!ledgerBatchId) return years;
@@ -901,6 +927,92 @@ export const StudentFeeRecordsPanel = () => {
       );
     });
   }, [accounts, search, ledgerBatchId, ledgerYearId]);
+
+  /**
+   * Year-wise fees: every student of the chosen batch with that program year's fee, discount,
+   * scholarship, paid (advance from other receipts included) and remaining — the same
+   * year-wise calculation as the Student ledger.
+   */
+  const yearwiseRows = useMemo(() => {
+    if (!yearwiseBatchId) return [];
+    const q = yearwiseSearch.trim().toLowerCase();
+    return accounts
+      .filter((a) => asId(a.student?.batchId) === yearwiseBatchId)
+      .filter((a) => {
+        if (!q) return true;
+        const name = a.student?.user?.fullName?.toLowerCase() ?? "";
+        const adm = a.student?.admissionNumber?.toLowerCase() ?? "";
+        return name.includes(q) || adm.includes(q);
+      })
+      .map((a) => {
+        const row = (a.yearWise ?? []).find((y) => y.programYear === yearwiseProgramYear);
+        return {
+          account: a,
+          chargedNpr: row?.chargedNpr ?? 0,
+          discountNpr: row?.discountNpr ?? 0,
+          scholarshipNpr: row?.scholarshipNpr ?? 0,
+          paidNpr: row?.paidNpr ?? 0,
+          advanceNpr: row?.advanceNpr ?? 0,
+          remainingNpr: row?.remainingNpr ?? 0,
+          status: row?.status ?? "NO_RECORD",
+        };
+      })
+      .filter((r) => !yearwiseOnlyDue || r.remainingNpr > 0)
+      .sort((x, y) => {
+        const rx = Number(x.account.student?.rollNumber) || Number.MAX_SAFE_INTEGER;
+        const ry = Number(y.account.student?.rollNumber) || Number.MAX_SAFE_INTEGER;
+        return rx - ry || (x.account.student?.user?.fullName ?? "").localeCompare(y.account.student?.user?.fullName ?? "");
+      });
+  }, [accounts, yearwiseBatchId, yearwiseProgramYear, yearwiseSearch, yearwiseOnlyDue]);
+  const yearwiseTotals = useMemo(() => {
+    const sum = (key: "chargedNpr" | "discountNpr" | "scholarshipNpr" | "paidNpr" | "remainingNpr") =>
+      Math.round(yearwiseRows.reduce((t, r) => t + r[key], 0) * 100) / 100;
+    const charged = sum("chargedNpr");
+    const waived = sum("discountNpr") + sum("scholarshipNpr");
+    const paid = sum("paidNpr");
+    return {
+      charged,
+      discount: sum("discountNpr"),
+      scholarship: sum("scholarshipNpr"),
+      paid,
+      remaining: sum("remainingNpr"),
+      fullyPaid: yearwiseRows.filter((r) => r.chargedNpr > 0 && r.remainingNpr <= 0).length,
+      withDue: yearwiseRows.filter((r) => r.remainingNpr > 0).length,
+      /** Collected as a share of what is payable after discounts and scholarships */
+      collectedPercent: charged - waived > 0 ? Math.round((paid / (charged - waived)) * 1000) / 10 : 0,
+    };
+  }, [yearwiseRows]);
+  const yearwiseBatchName = batches.find((b) => b._id === yearwiseBatchId)?.name ?? "";
+  const yearwiseLabel = PROGRAM_YEARS.find((y) => Number(y.value) === yearwiseProgramYear)?.label ?? `Year ${yearwiseProgramYear}`;
+
+  const exportYearwise = (format: "print" | "xlsx") => {
+    if (!yearwiseRows.length) {
+      toast.error("No students to export — choose a batch first");
+      return;
+    }
+    const columns: Array<RegisterColumn<(typeof yearwiseRows)[number]>> = [
+      { label: "Student", value: (r) => r.account.student?.user?.fullName ?? "" },
+      { label: "Admission No.", value: (r) => r.account.student?.admissionNumber ?? "" },
+      { label: "Roll No.", value: (r) => String(r.account.student?.rollNumber ?? "") },
+      { label: "Current year", value: (r) => r.account.sectionName ?? "" },
+      { label: "Fee for the year", value: (r) => r.chargedNpr, amount: true },
+      { label: "Discount", value: (r) => r.discountNpr, amount: true },
+      { label: "Scholarship", value: (r) => r.scholarshipNpr, amount: true },
+      { label: "Paid", value: (r) => r.paidNpr, amount: true },
+      { label: "Remaining", value: (r) => r.remainingNpr, amount: true },
+      { label: "Status", value: (r) => r.status.replace(/_/g, " ") },
+    ];
+    const title = `Year-wise Fee Status — ${yearwiseBatchName} · ${yearwiseLabel}`;
+    if (format === "xlsx") {
+      exportRegister({ title, columns, rows: yearwiseRows, format: "xlsx" });
+      return;
+    }
+    printSimpleDocument({
+      title,
+      landscape: true,
+      bodyHtml: exportRegister({ title, columns, rows: yearwiseRows, format: "html" }) ?? "",
+    });
+  };
 
   /** Students available in payment / scholarship pickers after search + batch+year filter */
   const pickerStudents = useMemo(() => {
@@ -1057,6 +1169,11 @@ export const StudentFeeRecordsPanel = () => {
       toast.error("Enter receipt number");
       return null;
     }
+    const paidToBank = isBankPaymentMethod(paymentForm.paymentMethod);
+    if (paidToBank && activeBankAccounts.length > 0 && !paymentForm.bankAccountId) {
+      toast.error("Choose the bank account the money went into");
+      return null;
+    }
     const amountPaid = Number(paymentForm.amountPaidNpr);
     const charges = Number(paymentForm.currentChargesNpr);
     // Security deposits are recorded in Security Deposit Records — not here.
@@ -1085,16 +1202,23 @@ export const StudentFeeRecordsPanel = () => {
       toast.error("Enter fee amount paid (or apply scholarship)");
       return null;
     }
+    if (Number(paymentForm.scholarshipNpr) > 0 && paymentForm.scholarshipType === "NONE") {
+      toast.error("Choose the scholarship type for the scholarship amount");
+      return null;
+    }
     const feeBreakdown: Array<{
       feeType: string;
       title: string;
       amountNpr: number;
     }> = [];
-    if (charges > 0) {
+    // Fee charged on this receipt, or — paying against the existing plan — the amount
+    // paid, so the receipt always posts to Tuition Fee income.
+    const tuitionAmount = charges > 0 ? charges : amountPaid + advanceTotal;
+    if (tuitionAmount > 0) {
       feeBreakdown.push({
         feeType: "TUITION",
         title: `${PROGRAM_YEARS.find((y) => String(y.value) === paymentForm.programYear)?.label ?? "Year"} tuition / program fee`,
-        amountNpr: charges,
+        amountNpr: tuitionAmount,
       });
     }
     if (depositPaid > 0) {
@@ -1120,6 +1244,7 @@ export const StudentFeeRecordsPanel = () => {
       scholarshipNpr: Number(paymentForm.scholarshipNpr) || 0,
       lateFeeNpr: 0,
       paymentMethod: paymentForm.paymentMethod,
+      bankAccountId: paidToBank ? paymentForm.bankAccountId || undefined : undefined,
       transactionNumber: paymentForm.transactionNumber || undefined,
       // Always the person recording this entry (not manual). Backend also enforces this on create.
       receivedByName:
@@ -1684,6 +1809,7 @@ export const StudentFeeRecordsPanel = () => {
                 ["record", "Record payment", Plus],
                 ["scholarship", "Merit Scholarship", Award],
                 ["receipts", "All receipts", Receipt],
+                ["yearwise", "Year-wise fees", Layers],
               ] as const
             ).map(([id, label, Icon]) => (
               <Button
@@ -1785,13 +1911,65 @@ export const StudentFeeRecordsPanel = () => {
                   </Button>
                 </div>
               </div>
-              <p className="mt-2 text-xs text-slate-500">
-                Showing {filteredAccounts.length} of {accounts.length} student
-                {accounts.length === 1 ? "" : "s"}
-                {ledgerBatchId || ledgerYearId || search
-                  ? " (filtered)"
-                  : ""}
-              </p>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-500">
+                  Showing {filteredAccounts.length} of {accounts.length} student
+                  {accounts.length === 1 ? "" : "s"}
+                  {ledgerBatchId || ledgerYearId || search
+                    ? " (filtered)"
+                    : ""}
+                </p>
+                <div className="flex gap-2">
+                  {(["print", "xlsx"] as const).map((format) => (
+                    <Button
+                      key={format}
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={filteredAccounts.length === 0}
+                      onClick={() => {
+                        const yearCell = (n: number) => (acc: StudentAccountSummary) => {
+                          const row = acc.yearWise?.find((y) => y.programYear === n);
+                          if (!row) return "";
+                          const parts = [
+                            row.status.replace(/_/g, " "),
+                            `Paid ${formatCurrencyNpr(row.paidNpr)}`,
+                            row.remainingNpr > 0 ? `Due ${formatCurrencyNpr(row.remainingNpr)}` : "",
+                          ];
+                          return parts.filter(Boolean).join(" · ");
+                        };
+                        const columns: Array<RegisterColumn<StudentAccountSummary>> = [
+                          { label: "Student", value: (a) => a.student.user?.fullName ?? "" },
+                          { label: "Admission No.", value: (a) => a.student.admissionNumber },
+                          {
+                            label: "Batch / Year",
+                            value: (a) => [a.className, a.sectionName].filter(Boolean).join(" / "),
+                          },
+                          { label: "1st Year", value: yearCell(1) },
+                          { label: "2nd Year", value: yearCell(2) },
+                          { label: "3rd Year", value: yearCell(3) },
+                          { label: "Total paid", value: (a) => a.totalPaidNpr, amount: true },
+                          { label: "Remaining", value: (a) => a.remainingDueNpr, amount: true },
+                          { label: "Last payment", value: (a) => a.lastPaymentDateBs ?? "" },
+                        ];
+                        const title = "Student Fee Ledger";
+                        if (format === "xlsx") {
+                          exportRegister({ title, columns, rows: filteredAccounts, format: "xlsx" });
+                          return;
+                        }
+                        printSimpleDocument({
+                          title,
+                          landscape: true,
+                          bodyHtml:
+                            exportRegister({ title, columns, rows: filteredAccounts, format: "html" }) ?? "",
+                        });
+                      }}
+                    >
+                      {format === "print" ? "Print / PDF" : "Excel"}
+                    </Button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {filteredAccounts.length === 0 ? (
@@ -1855,7 +2033,7 @@ export const StudentFeeRecordsPanel = () => {
                                     </div>
                                     {(row.advanceNpr ?? 0) > 0 ? (
                                       <div className="text-xs text-sky-700">
-                                        incl. advance {formatCurrencyNpr(row.advanceNpr ?? 0)}
+                                        incl. {formatCurrencyNpr(row.advanceNpr ?? 0)} from another year's receipt
                                       </div>
                                     ) : null}
                                     {row.scholarshipNpr > 0 ? (
@@ -1877,9 +2055,29 @@ export const StudentFeeRecordsPanel = () => {
                           })}
                           <Td className="font-medium text-emerald-700">
                             {formatCurrencyNpr(acc.totalPaidNpr)}
+                            {acc.unassignedFees &&
+                            (acc.unassignedFees.chargedNpr > 0 ||
+                              acc.unassignedFees.remainingNpr > 0) ? (
+                              <div
+                                className="text-xs font-normal text-amber-700"
+                                title="Charges saved without a program year — payments settle these first"
+                              >
+                                {acc.unassignedFees.chargedNpr > 0
+                                  ? `Other charges (no year) ${formatCurrencyNpr(acc.unassignedFees.chargedNpr)}`
+                                  : ""}
+                                {acc.unassignedFees.remainingNpr > 0
+                                  ? ` · due ${formatCurrencyNpr(acc.unassignedFees.remainingNpr)}`
+                                  : ""}
+                              </div>
+                            ) : null}
                           </Td>
                           <Td className="font-medium text-rose-700">
                             {formatCurrencyNpr(acc.remainingDueNpr)}
+                            {(acc.advanceNpr ?? 0) > 0 ? (
+                              <div className="text-xs font-normal text-sky-700">
+                                Advance {formatCurrencyNpr(acc.advanceNpr ?? 0)}
+                              </div>
+                            ) : null}
                           </Td>
                           <Td>
                             {acc.lastPaymentDateBs || acc.lastPaymentDateAd ? (
@@ -2367,13 +2565,18 @@ export const StudentFeeRecordsPanel = () => {
                 <FormField label="Payment method">
                   <Select
                     value={paymentForm.paymentMethod}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const method = e.target.value as (typeof PAYMENT_METHODS)[number];
                       setPaymentForm((f) => ({
                         ...f,
-                        paymentMethod: e.target
-                          .value as (typeof PAYMENT_METHODS)[number],
-                      }))
-                    }
+                        paymentMethod: method,
+                        // One bank only: pick it straight away
+                        bankAccountId:
+                          isBankPaymentMethod(method) && !f.bankAccountId && activeBankAccounts.length === 1
+                            ? activeBankAccounts[0]!._id
+                            : f.bankAccountId,
+                      }));
+                    }}
                   >
                     {PAYMENT_METHODS.map((m) => (
                       <option key={m} value={m}>
@@ -2382,6 +2585,32 @@ export const StudentFeeRecordsPanel = () => {
                     ))}
                   </Select>
                 </FormField>
+                {isBankPaymentMethod(paymentForm.paymentMethod) ? (
+                  <FormField label="Bank account">
+                    {activeBankAccounts.length > 0 ? (
+                      <Select
+                        value={paymentForm.bankAccountId}
+                        onChange={(e) =>
+                          setPaymentForm((f) => ({
+                            ...f,
+                            bankAccountId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Select bank account</option>
+                        {activeBankAccounts.map((bank) => (
+                          <option key={bank._id} value={bank._id}>
+                            {bank.bankName} ({bank.accountNumber})
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <p className="rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500">
+                        No bank accounts yet — add them in Bank / Cash → Bank Accounts.
+                      </p>
+                    )}
+                  </FormField>
+                ) : null}
                 <FormField label="Transaction / voucher no.">
                   <Input
                     value={paymentForm.transactionNumber}
@@ -3118,12 +3347,165 @@ export const StudentFeeRecordsPanel = () => {
         </div>
       ) : null}
 
+      {/* ─── Year-wise fees: one batch + program year ─── */}
+      {tab === "yearwise" ? (
+        <Card className="min-w-0 max-w-full overflow-hidden">
+          <CardHeader>
+            <CardTitle className="text-base">Year-wise fee status</CardTitle>
+            <p className="text-sm text-slate-500">
+              Choose a batch and a year (e.g. 2083 batch · 1st Year) to see each student&apos;s fee
+              for that year, what has been paid towards it and what remains.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:grid-cols-2 lg:grid-cols-5">
+              <FormField label="Batch">
+                <Select value={yearwiseBatchId} onChange={(e) => setYearwiseBatchId(e.target.value)}>
+                  <option value="">Select batch</option>
+                  {batches.map((b) => (
+                    <option key={b._id} value={b._id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Year">
+                <Select
+                  value={String(yearwiseProgramYear)}
+                  onChange={(e) => setYearwiseProgramYear(Number(e.target.value) as 1 | 2 | 3)}
+                >
+                  {PROGRAM_YEARS.map((y) => (
+                    <option key={y.value} value={y.value}>
+                      {y.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Search">
+                <Input
+                  placeholder="Name or admission no."
+                  value={yearwiseSearch}
+                  onChange={(e) => setYearwiseSearch(e.target.value)}
+                />
+              </FormField>
+              <FormField label="Show">
+                <Select
+                  value={yearwiseOnlyDue ? "due" : "all"}
+                  onChange={(e) => setYearwiseOnlyDue(e.target.value === "due")}
+                >
+                  <option value="all">All students</option>
+                  <option value="due">Only with remaining due</option>
+                </Select>
+              </FormField>
+              <div className="flex items-end gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => exportYearwise("print")}>
+                  <Printer className="mr-1.5 h-4 w-4" />
+                  Print / PDF
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={() => exportYearwise("xlsx")}>
+                  <FileDown className="mr-1.5 h-4 w-4" />
+                  Excel
+                </Button>
+              </div>
+            </div>
+
+            {!yearwiseBatchId ? (
+              <EmptyState title="Choose a batch" description="Pick a batch and year to see the year's fee status." />
+            ) : yearwiseRows.length === 0 ? (
+              <EmptyState title="No students" description="No students of this batch match the filters." />
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {[
+                    ["Students", String(yearwiseRows.length)],
+                    [`Fee for ${yearwiseLabel}`, formatCurrencyNpr(yearwiseTotals.charged)],
+                    ["Paid", formatCurrencyNpr(yearwiseTotals.paid)],
+                    ["Remaining", formatCurrencyNpr(yearwiseTotals.remaining)],
+                    ["Collected", `${yearwiseTotals.collectedPercent}% · ${yearwiseTotals.fullyPaid} fully paid · ${yearwiseTotals.withDue} with due`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-xs text-slate-500">{label}</p>
+                      <p className="mt-1 font-semibold tabular-nums text-slate-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <Table>
+                    <TableHead>
+                      <tr>
+                        <Th className="w-12 text-center">S.N.</Th>
+                        <Th>Student</Th>
+                        <Th>Admission No.</Th>
+                        <Th>Current year</Th>
+                        <Th className="text-right">Fee for the year</Th>
+                        <Th className="text-right">Discount</Th>
+                        <Th className="text-right">Scholarship</Th>
+                        <Th className="text-right">Paid</Th>
+                        <Th className="text-right">Remaining</Th>
+                        <Th>Status</Th>
+                      </tr>
+                    </TableHead>
+                    <TableBody>
+                      {yearwiseRows.map((r, index) => (
+                        <tr key={String(r.account.student?._id ?? index)}>
+                          <Td className="text-center">{index + 1}</Td>
+                          <Td className="font-medium">{r.account.student?.user?.fullName ?? "—"}</Td>
+                          <Td>{r.account.student?.admissionNumber ?? "—"}</Td>
+                          <Td>{r.account.sectionName || "—"}</Td>
+                          <Td className="text-right tabular-nums">{formatCurrencyNpr(r.chargedNpr)}</Td>
+                          <Td className="text-right tabular-nums">{formatCurrencyNpr(r.discountNpr)}</Td>
+                          <Td className="text-right tabular-nums">{formatCurrencyNpr(r.scholarshipNpr)}</Td>
+                          <Td className="text-right tabular-nums">
+                            {formatCurrencyNpr(r.paidNpr)}
+                            {r.advanceNpr > 0 ? (
+                              <div className="text-xs text-slate-500">
+                                incl. {formatCurrencyNpr(r.advanceNpr)} advance
+                              </div>
+                            ) : null}
+                          </Td>
+                          <Td
+                            className={cn(
+                              "text-right font-semibold tabular-nums",
+                              r.remainingNpr > 0 ? "text-rose-700" : "text-emerald-700",
+                            )}
+                          >
+                            {formatCurrencyNpr(r.remainingNpr)}
+                          </Td>
+                          <Td className="text-xs">{r.status.replace(/_/g, " ")}</Td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-50 font-semibold">
+                        <Td colSpan={4} className="text-right">
+                          TOTAL ({yearwiseRows.length})
+                        </Td>
+                        <Td className="text-right tabular-nums">{formatCurrencyNpr(yearwiseTotals.charged)}</Td>
+                        <Td className="text-right tabular-nums">{formatCurrencyNpr(yearwiseTotals.discount)}</Td>
+                        <Td className="text-right tabular-nums">{formatCurrencyNpr(yearwiseTotals.scholarship)}</Td>
+                        <Td className="text-right tabular-nums">{formatCurrencyNpr(yearwiseTotals.paid)}</Td>
+                        <Td className="text-right tabular-nums">{formatCurrencyNpr(yearwiseTotals.remaining)}</Td>
+                        <Td />
+                      </tr>
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* ─── Receipts ─── */}
       {tab === "receipts" ? (
         <Card className="min-w-0 max-w-full overflow-hidden">
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <CardTitle className="text-base">All fee receipts</CardTitle>
+              <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                All fee receipts
+                <Button size="sm" variant="outline" onClick={() => setTab("yearwise")}>
+                  <Layers className="mr-1.5 h-3.5 w-3.5" />
+                  Year-wise fee status (batch + year)
+                </Button>
+              </CardTitle>
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
                 {canPrintReceipts

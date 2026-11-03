@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -134,6 +135,16 @@ export const StudentListManager = () => {
   const [yearNameFilter, setYearNameFilter] = useState("");
   /** Dashboard deep-link: ACTIVE | PASSED_OUT | ALUMNI | … */
   const [statusFilter, setStatusFilter] = useState("");
+  /** Students list (admin): the server sends one page; Print / Excel / barcodes load every match. */
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => window.clearTimeout(id);
+  }, [searchQuery]);
+  /** Rows rendered in the hidden print area (the full filtered set while printing). */
+  const [printRows, setPrintRows] = useState<StudentRecord[] | null>(null);
 
   // Apply filters from main dashboard stat cards (?status= / ?yearName= / ?gender=)
   useEffect(() => {
@@ -149,15 +160,48 @@ export const StudentListManager = () => {
     if (q) setSearchQuery(q);
   }, [searchParams]);
 
+  /** Filters sent to GET /students (same filters for the page and for exports). */
+  const listParams = useMemo(
+    () => ({
+      ...(adminWorkspace ? adminScopeParams : {}),
+      listView: "1",
+      q: debouncedSearch || undefined,
+      batchId: isCollege ? batchFilter || undefined : undefined,
+      yearId: isCollege ? yearFilter || undefined : undefined,
+      classId: !isCollege ? classFilter || undefined : undefined,
+      sectionId: !isCollege ? sectionFilter || undefined : undefined,
+      yearName: isCollege && !yearFilter ? yearNameFilter || undefined : undefined,
+      status: statusFilter || undefined,
+      gender: genderFilter || undefined,
+    }),
+    [
+      adminWorkspace,
+      batchFilter,
+      classFilter,
+      debouncedSearch,
+      genderFilter,
+      isCollege,
+      sectionFilter,
+      statusFilter,
+      yearFilter,
+      yearNameFilter,
+    ],
+  );
+  // Back to the first page whenever the filters change
+  useEffect(() => setPage(1), [listParams]);
+
   const studentsQuery = useQuery({
-    queryKey: ["students", adminWorkspace ? "admin" : "default"],
-    queryFn: () =>
-      unwrap<StudentRecord[]>(
-        api.get("/students", {
-          params: adminWorkspace ? adminScopeParams : undefined,
-        }),
-      ),
-    enabled: hasInstitutionRead,
+    queryKey: ["students", adminWorkspace ? "admin" : "default", "list-page", listParams, page],
+    queryFn: async () => {
+      const response = await api.get<{ data: StudentRecord[]; meta?: { total?: number } }>(
+        "/students",
+        { params: { ...listParams, page, pageSize: PAGE_SIZE } },
+      );
+      const rows = response.data.data ?? [];
+      return { rows, total: Number(response.data.meta?.total ?? rows.length) };
+    },
+    enabled: hasInstitutionRead && !isTeacher,
+    placeholderData: (previous) => previous,
   });
   const classesQuery = useQuery({
     queryKey: ["classes"],
@@ -232,7 +276,12 @@ export const StudentListManager = () => {
     : (yearsQuery.data ?? []);
   const students = isTeacher
     ? (teacherScopeQuery.data?.students ?? [])
-    : (studentsQuery.data ?? []);
+    : (studentsQuery.data?.rows ?? []);
+  /** All students matching the filters (not only this page). */
+  const matchingTotal = isTeacher ? null : (studentsQuery.data?.total ?? 0);
+  const pageCount = matchingTotal ? Math.max(1, Math.ceil(matchingTotal / PAGE_SIZE)) : 1;
+  const pageFrom = matchingTotal ? (page - 1) * PAGE_SIZE + 1 : 0;
+  const pageTo = matchingTotal ? Math.min(page * PAGE_SIZE, matchingTotal) : 0;
 
   /**
    * When dashboard opens with yearName (e.g. "1st Year"), resolve matching year
@@ -291,6 +340,7 @@ export const StudentListManager = () => {
   );
 
   const filteredStudents = useMemo(() => {
+    if (!isTeacher) return students;
     const query = searchQuery.trim().toLowerCase();
     const genderWanted = genderFilter.trim().toLowerCase();
     const yearNameWanted = yearNameFilter.trim().toLowerCase();
@@ -304,7 +354,10 @@ export const StudentListManager = () => {
         if (batchFilter && student.batchId !== batchFilter) return false;
         // Prefer explicit year dropdown; else match all year IDs with dashboard yearName
         if (yearFilter && student.yearId !== yearFilter) return false;
-        else if (!yearFilter && yearIdsMatchingName.length > 0) {
+        // Dashboard "Active — No Year Set" card
+        else if (!yearFilter && yearNameWanted === "__none__") {
+          if (student.yearId) return false;
+        } else if (!yearFilter && yearIdsMatchingName.length > 0) {
           if (
             !student.yearId ||
             !yearIdsMatchingName.includes(student.yearId)
@@ -380,6 +433,7 @@ export const StudentListManager = () => {
     classFilter,
     genderFilter,
     isCollege,
+    isTeacher,
     searchQuery,
     secondaryMap,
     sectionFilter,
@@ -416,7 +470,7 @@ export const StudentListManager = () => {
           `${labels.secondary}: ${secondaryMap.get(yearFilter) ?? "Selected"}`,
         );
       } else if (yearNameFilter) {
-        lines.push(`${labels.secondary}: ${yearNameFilter}`);
+        lines.push(`${labels.secondary}: ${yearNameFilter === "__none__" ? "Not set" : yearNameFilter}`);
       }
     } else {
       if (classFilter) {
@@ -489,6 +543,12 @@ export const StudentListManager = () => {
     return map.get(String(value)) ?? "";
   };
 
+  /** Every student matching the filters (all pages) — for Print, Excel and barcodes. */
+  const loadAllFiltered = async (): Promise<StudentRecord[]> =>
+    isTeacher
+      ? filteredStudents
+      : unwrap<StudentRecord[]>(api.get("/students", { params: listParams }));
+
   const handleDownloadBarcodes = async () => {
     if (filteredStudents.length === 0) {
       toast.error("No students to download");
@@ -496,8 +556,9 @@ export const StudentListManager = () => {
     }
     setDownloadingBarcodes(true);
     try {
+      const allRows = await loadAllFiltered();
       await downloadStudentBarcodeListPdf(
-        filteredStudents.map((student) => ({
+        allRows.map((student) => ({
           name: student.user?.fullName ?? "Unknown student",
           rollNumber:
             student.rollNumber != null ? String(student.rollNumber).trim() : "",
@@ -515,8 +576,8 @@ export const StudentListManager = () => {
         },
       );
       toast.success(
-        `Barcode list downloaded — ${filteredStudents.length} student${
-          filteredStudents.length === 1 ? "" : "s"
+        `Barcode list downloaded — ${allRows.length} student${
+          allRows.length === 1 ? "" : "s"
         }`,
       );
     } catch (e) {
@@ -533,20 +594,24 @@ export const StudentListManager = () => {
     }
     setPrinting(true);
     try {
+      const allRows = await loadAllFiltered();
+      // Render every matching student into the print area before printing
+      flushSync(() => setPrintRows(allRows));
       const el = document.getElementById(STUDENTS_PRINT_AREA_ID);
       if (!el?.textContent?.trim()) {
         throw new Error("Print content is empty — try again");
       }
       await printElementById(STUDENTS_PRINT_AREA_ID, "students-list-print");
       toast.success(
-        `Print dialog opened — ${filteredStudents.length} student${
-          filteredStudents.length === 1 ? "" : "s"
+        `Print dialog opened — ${allRows.length} student${
+          allRows.length === 1 ? "" : "s"
         }`,
       );
     } catch (e) {
       toast.error(parseErrorMessage(e));
     } finally {
       setPrinting(false);
+      setPrintRows(null);
     }
   };
 
@@ -652,8 +717,11 @@ export const StudentListManager = () => {
             {isTeacher && !canManage
               ? "Students in your assigned subject batch/year (or class/section). "
               : null}
-            Showing {filteredStudents.length} of {students.length} student
-            {students.length === 1 ? "" : "s"}
+            {matchingTotal === null
+              ? `Showing ${filteredStudents.length} of ${students.length} student${students.length === 1 ? "" : "s"}`
+              : matchingTotal === 0
+                ? "No students match"
+                : `Showing ${pageFrom}–${pageTo} of ${matchingTotal} student${matchingTotal === 1 ? "" : "s"}`}
             {isTeacher &&
             !canManage &&
             students.length === 0 &&
@@ -687,15 +755,19 @@ export const StudentListManager = () => {
             className="w-full sm:w-auto"
             disabled={filteredStudents.length === 0}
             onClick={() => {
-              downloadStudentsExcel(filteredStudents, {
-                isCollege,
-                primaryLabel: labels.primary,
-                secondaryLabel: labels.secondary,
-                primaryMap,
-                secondaryMap,
-                includeFees: canManage,
-              });
-              toast.success("Student data exported to Excel");
+              void loadAllFiltered()
+                .then((allRows) => {
+                  downloadStudentsExcel(allRows, {
+                    isCollege,
+                    primaryLabel: labels.primary,
+                    secondaryLabel: labels.secondary,
+                    primaryMap,
+                    secondaryMap,
+                    includeFees: canManage,
+                  });
+                  toast.success(`Student data exported to Excel — ${allRows.length} students`);
+                })
+                .catch((e) => toast.error(parseErrorMessage(e)));
             }}
           >
             Export Excel
@@ -710,7 +782,9 @@ export const StudentListManager = () => {
               {statusFilter
                 ? ` · status: ${statusFilter.replace(/_/g, " ")}`
                 : ""}
-              {yearNameFilter ? ` · year: ${yearNameFilter}` : ""}
+              {yearNameFilter
+                ? ` · year: ${yearNameFilter === "__none__" ? "not set" : yearNameFilter}`
+                : ""}
             </p>
             <Button size="sm" variant="outline" onClick={clearFilters}>
               Clear
@@ -815,7 +889,33 @@ export const StudentListManager = () => {
           )}
         </div>
 
-        {students.length === 0 ? (
+        {matchingTotal !== null && pageCount > 1 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+            <span>
+              Page {page} of {pageCount} · {PAGE_SIZE} per page
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || studentsQuery.isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= pageCount || studentsQuery.isFetching}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {students.length === 0 && !(matchingTotal !== null && hasActiveFilters) ? (
           <EmptyState
             title="No students found"
             description={
@@ -897,7 +997,7 @@ export const StudentListManager = () => {
                       return (
                         <tr key={student._id} className="align-top">
                           <Td className="text-center tabular-nums text-slate-500">
-                            {index + 1}
+                            {(matchingTotal === null ? 0 : (page - 1) * PAGE_SIZE) + index + 1}
                           </Td>
                           <Td className="min-w-0">
                             <div className="min-w-0 space-y-1">
@@ -1264,8 +1364,8 @@ export const StudentListManager = () => {
                   color: "#64748b",
                 }}
               >
-                Total: {filteredStudents.length} student
-                {filteredStudents.length === 1 ? "" : "s"}
+                Total: {(printRows ?? filteredStudents).length} student
+                {(printRows ?? filteredStudents).length === 1 ? "" : "s"}
               </p>
             </div>
           </div>
@@ -1362,7 +1462,7 @@ export const StudentListManager = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredStudents.map((student, index) => {
+            {(printRows ?? filteredStudents).map((student, index) => {
               const displayName =
                 student.user?.fullName ?? "Unknown student";
               const displayPhone = student.user?.phone || "—";
@@ -1505,8 +1605,8 @@ export const StudentListManager = () => {
               : ""}
           </p>
           <p style={{ margin: 0 }}>
-            {filteredStudents.length} student
-            {filteredStudents.length === 1 ? "" : "s"}
+            {(printRows ?? filteredStudents).length} student
+            {(printRows ?? filteredStudents).length === 1 ? "" : "s"}
           </p>
         </footer>
       </div>

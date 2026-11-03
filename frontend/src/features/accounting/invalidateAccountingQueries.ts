@@ -27,6 +27,11 @@ export const invalidateAccountingQueries = async (): Promise<void> => {
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-sheet"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-sheet-months"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-cash-book"] }),
+    // Bank / Cash tab: balances, transfers, Cash Book / Bank Book
+    queryClient.invalidateQueries({ queryKey: ["accounting-bank-cash"] }),
+    // Bank Reconciliation lists the same bank entries
+    queryClient.invalidateQueries({ queryKey: ["bank-reconciliation-preview"] }),
+    queryClient.invalidateQueries({ queryKey: ["bank-reconciliations"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-refund-records"] }),
     queryClient.invalidateQueries({ queryKey: ["fee-refunds"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-report"] }),

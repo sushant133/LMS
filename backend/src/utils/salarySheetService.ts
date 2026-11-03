@@ -7,6 +7,7 @@ import {
   formatTenderPayBreakdown,
   normalizeTeacherPaymentType,
   paidPresentDays,
+  salaryRoundingNpr,
   sumTeacherTenderAmountNpr,
   type TeacherPaymentType
 } from "@phit-erp/shared";
@@ -1054,6 +1055,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         (saved as { valuesManualOverride?: boolean } | undefined)
           ?.valuesManualOverride
       );
+      // Paid rows keep the amounts they were paid with (never recalculated)
+      const keepSavedMoney = valuesManual || saved?.status === "PAID";
       drafts.push({
         employeeType: "TEACHER",
         teacherId: id,
@@ -1100,19 +1103,19 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
           Number(saved.extraAmountNpr) > 0
             ? Number(saved.extraAmountNpr)
             : undefined,
-        savedAbsentDeductionNpr: valuesManual
+        savedAbsentDeductionNpr: keepSavedMoney
           ? Number(saved?.absentDeductionNpr ?? 0)
           : undefined,
-        savedExtraAmountNpr: valuesManual
+        savedExtraAmountNpr: keepSavedMoney
           ? Number(saved?.extraAmountNpr ?? 0)
           : undefined,
-        savedSalaryAmountNpr: valuesManual
+        savedSalaryAmountNpr: keepSavedMoney
           ? Number(saved?.salaryAmountNpr ?? 0)
           : undefined,
-        savedTax1PercentNpr: valuesManual
+        savedTax1PercentNpr: keepSavedMoney
           ? Number(saved?.taxNpr ?? 0)
           : undefined,
-        savedNetSalaryNpr: valuesManual
+        savedNetSalaryNpr: keepSavedMoney
           ? Number(saved?.netSalaryNpr ?? 0)
           : undefined
       });
@@ -1155,6 +1158,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         (saved as { valuesManualOverride?: boolean } | undefined)
           ?.valuesManualOverride
       );
+      // Paid rows keep the amounts they were paid with (never recalculated)
+      const keepSavedMoney = valuesManual || saved?.status === "PAID";
       drafts.push({
         employeeType: "STAFF",
         staffId: id,
@@ -1184,19 +1189,19 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
           Number(saved.extraAmountNpr) > 0
             ? Number(saved.extraAmountNpr)
             : undefined,
-        savedAbsentDeductionNpr: valuesManual
+        savedAbsentDeductionNpr: keepSavedMoney
           ? Number(saved?.absentDeductionNpr ?? 0)
           : undefined,
-        savedExtraAmountNpr: valuesManual
+        savedExtraAmountNpr: keepSavedMoney
           ? Number(saved?.extraAmountNpr ?? 0)
           : undefined,
-        savedSalaryAmountNpr: valuesManual
+        savedSalaryAmountNpr: keepSavedMoney
           ? Number(saved?.salaryAmountNpr ?? 0)
           : undefined,
-        savedTax1PercentNpr: valuesManual
+        savedTax1PercentNpr: keepSavedMoney
           ? Number(saved?.taxNpr ?? 0)
           : undefined,
-        savedNetSalaryNpr: valuesManual
+        savedNetSalaryNpr: keepSavedMoney
           ? Number(saved?.netSalaryNpr ?? 0)
           : undefined
       });
@@ -1345,7 +1350,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       periodsAttended: d.periodsAttended,
       tenderThisMonthNpr: d.tenderThisMonthNpr
     });
-    const useManualMoney = Boolean(d.valuesManualOverride);
+    const useManualMoney =
+      Boolean(d.valuesManualOverride) || (d.status === "PAID" && d.savedNetSalaryNpr !== undefined);
     return {
       sn: index + 1,
       employeeType: d.employeeType,
@@ -1388,7 +1394,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       remarks: d.remarks,
       attendanceIncomplete: d.attendanceIncomplete,
       attendanceManualOverride: d.attendanceManualOverride,
-      valuesManualOverride: useManualMoney,
+      valuesManualOverride: Boolean(d.valuesManualOverride),
       attendanceDaysRecorded: d.attendanceDaysRecorded,
       attendanceExpectedDays: d.attendanceExpectedDays,
       unrecordedDays: d.unrecordedDays,
@@ -1406,12 +1412,17 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     };
   });
 
+  // Rounding to the nearest rupee, from each row as saved (manual overrides included)
+  for (const row of rows) {
+    (row as { roundingNpr?: number }).roundingNpr = salaryRoundingNpr(row);
+  }
   const totals = {
     totalMonthlySalaryNpr: round2(rows.reduce((s, r) => s + r.monthlySalaryNpr, 0)),
     totalAbsentDeductionNpr: round2(rows.reduce((s, r) => s + r.absentDeductionNpr, 0)),
     totalExtraAmountNpr: round2(rows.reduce((s, r) => s + r.extraAmountNpr, 0)),
     totalSalaryAmountNpr: round2(rows.reduce((s, r) => s + r.salaryAmountNpr, 0)),
     totalTax1PercentNpr: round2(rows.reduce((s, r) => s + r.tax1PercentNpr, 0)),
+    totalRoundingNpr: round2(rows.reduce((s, r) => s + salaryRoundingNpr(r), 0)),
     totalNetSalaryNpr: round2(rows.reduce((s, r) => s + r.netSalaryNpr, 0)),
     totalNetSalaryInWords: formatNrsAmountInWords(
       rows.reduce((s, r) => s + r.netSalaryNpr, 0)

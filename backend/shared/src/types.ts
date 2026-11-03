@@ -348,6 +348,8 @@ export interface StudentRecord {
   backCount?: number;
   /** Back papers: subject and the program year it was failed in. */
   backPapers?: Array<{ subjectName: string; subjectCode?: string; programYear: number }>;
+  /** Backlog papers while still studying in a running batch */
+  runningBacklogs?: Array<{ subjectName: string; subjectCode?: string; programYear: number }>;
   admissionDateBs: string;
   /** Set when the student was marked PASSED_OUT (BS). */
   passedOutAtBs?: string;
@@ -791,8 +793,10 @@ export type DailyAttendanceReportType =
   | "summary"
   | "student"
   | "defaulter"
+  | "absent"
   | "leave"
   | "late"
+  | "early-leave"
   | "class";
 
 export interface DailyAttendanceStudentReportRow {
@@ -806,6 +810,9 @@ export interface DailyAttendanceStudentReportRow {
   late: number;
   leave: number;
   medicalLeave: number;
+  earlyLeave?: number;
+  /** Batch · Year (college) or Class · Section */
+  groupLabel?: string;
   percentage: number;
   isDefaulter: boolean;
 }
@@ -1420,6 +1427,8 @@ export interface DashboardMetric {
   label: string;
   value: number;
   change?: string;
+  /** Where the card links to (e.g. the student list filtered to this card's students). */
+  href?: string;
 }
 
 export interface DashboardNotificationItem {

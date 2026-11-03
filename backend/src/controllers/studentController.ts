@@ -5,9 +5,12 @@ import {
   EDIT_DELETE_ADMIN_ONLY_MESSAGE,
   ensurePendingRequiredDocuments,
   studentBackCountSchema,
+  studentRunningBacklogsSchema,
   studentSchema
 } from "@phit-erp/shared";
+import { Batch } from "../models/Batch.js";
 import { Student } from "../models/Student.js";
+import { Year } from "../models/Year.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -31,6 +34,7 @@ import { updatePortalUser } from "../utils/userPassword.js";
 import { validateStudentAdmissionScope } from "../utils/academicValidation.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import {
   createSession,
   commitTransaction,
@@ -121,6 +125,93 @@ const sanitizeStudentForLimitedStaffList = (student: {
 const usesLimitedStudentView = (role: string | undefined): boolean =>
   role === "TEACHER" || role === "LIBRARY_STAFF";
 
+/** Student list page order: roll number first (students without one last), then name. */
+const compareStudentListRows = (
+  a: { rollNumber?: number | null; user?: unknown },
+  b: { rollNumber?: number | null; user?: unknown }
+): number => {
+  const ar = a.rollNumber;
+  const br = b.rollNumber;
+  const aHas = typeof ar === "number" && Number.isFinite(ar) && ar > 0;
+  const bHas = typeof br === "number" && Number.isFinite(br) && br > 0;
+  if (aHas && bHas && ar !== br) return (ar as number) - (br as number);
+  if (aHas && !bHas) return -1;
+  if (!aHas && bHas) return 1;
+  const aName = (a.user as { fullName?: string } | null)?.fullName ?? "";
+  const bName = (b.user as { fullName?: string } | null)?.fullName ?? "";
+  return aName.localeCompare(bName, undefined, { sensitivity: "base" });
+};
+
+const isObjectIdString = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-f\d]{24}$/i.test(value);
+
+/**
+ * Filters of the Students list page (?listView=1): search, batch / year (or class / section),
+ * dashboard year name, status and gender. Pickers that call GET /students without
+ * listView are unaffected and still receive every student.
+ */
+const applyStudentListFilters = async (req: Request, filter: Record<string, unknown>): Promise<void> => {
+  const q = req.query;
+  const and: Array<Record<string, unknown>> = [];
+  for (const field of ["batchId", "yearId", "classId", "sectionId"] as const) {
+    if (isObjectIdString(q[field])) and.push({ [field]: q[field] });
+  }
+
+  const yearName = typeof q.yearName === "string" ? q.yearName.trim() : "";
+  if (yearName === "__none__") {
+    and.push({ yearId: null });
+  } else if (yearName && !isObjectIdString(q.yearId)) {
+    const years = await Year.find({ schoolId: tenantObjectId(req) }).select("name").lean();
+    const wanted = yearName.toLowerCase();
+    const exact = years.filter((y) => (y.name ?? "").trim().toLowerCase() === wanted);
+    const matches = exact.length
+      ? exact
+      : years.filter((y) => {
+          const name = (y.name ?? "").trim().toLowerCase();
+          return name.includes(wanted) || wanted.includes(name);
+        });
+    and.push({ yearId: { $in: matches.map((y) => y._id) } });
+  }
+
+  const status = typeof q.status === "string" ? q.status.trim().toUpperCase() : "";
+  if (status === "ACTIVE") {
+    and.push({ $or: [{ academicStatus: "ACTIVE" }, { academicStatus: { $exists: false } }, { academicStatus: null }] });
+  } else if (status) {
+    and.push({ academicStatus: status });
+  }
+
+  const gender = typeof q.gender === "string" ? q.gender.trim().toLowerCase() : "";
+  if (gender === "male" || gender === "female") {
+    and.push({ gender: new RegExp(`^\s*${gender}\s*$`, "i") });
+  } else if (gender === "other") {
+    and.push({ gender: { $not: /^\s*(male|female)\s*$/i } });
+  }
+
+  const search = typeof q.q === "string" ? q.q.trim() : "";
+  if (search) {
+    const rx = new RegExp(escapeRegex(search), "i");
+    const users = await User.find({
+      schoolId: tenantObjectId(req),
+      $or: [{ fullName: rx }, { email: rx }, { phone: rx }]
+    })
+      .select("_id")
+      .lean();
+    and.push({
+      $or: [
+        { user: { $in: users.map((u) => u._id) } },
+        { admissionNumber: rx },
+        { guardianPhone: rx },
+        { fatherPhone: rx },
+        { motherPhone: rx }
+      ]
+    });
+  }
+
+  if (and.length) {
+    filter.$and = [...((filter.$and as Array<Record<string, unknown>>) ?? []), ...and];
+  }
+};
+
 export const listStudents = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
   const adminStudentScope = await actorMayUseAdminWorkspaceScope(req);
@@ -143,8 +234,33 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
       .toLowerCase()
   );
 
+  // Students list page (?listView=1): server-side filters, roll/name order and paging
+  // (?page=, ?pageSize= default 50). Exports call without page to get the full filtered set.
+  const listView = req.query.listView === "1" || req.query.page !== undefined;
+  if (listView) await applyStudentListFilters(req, filter);
+  const pageRaw = Number(req.query.page);
+  let pageMeta: { page: number; pageSize: number; total: number } | undefined;
+  let pageIds: string[] | undefined;
+  if (Number.isFinite(pageRaw) && pageRaw >= 1) {
+    const page = Math.trunc(pageRaw);
+    const pageSizeRaw = Number(req.query.pageSize);
+    const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(Math.trunc(pageSizeRaw), 1), 500) : 50;
+    const candidates = await Student.find(filter)
+      .select("rollNumber user")
+      .populate("user", "fullName isActive")
+      .lean();
+    const ordered = candidates
+      .filter((s) => {
+        const u = s.user as { isActive?: boolean } | null | undefined;
+        return Boolean(u) && (!loginActiveOnly || u!.isActive !== false);
+      })
+      .sort(compareStudentListRows);
+    pageMeta = { page, pageSize, total: ordered.length };
+    pageIds = ordered.slice((page - 1) * pageSize, page * pageSize).map((s) => String(s._id));
+  }
+
   // Always populate academic group labels for roster filters (library issue, etc.)
-  const students = await Student.find(filter)
+  const students = await Student.find(pageIds ? { _id: { $in: pageIds } } : filter)
     .populate(
       "user",
       limitedView ? "fullName role isActive" : "-password"
@@ -164,12 +280,15 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
       return u != null && u.isActive !== false;
     });
   }
+  if (listView) linked.sort(compareStudentListRows);
 
   if (limitedView) {
     return sendSuccess(
       res,
       "Students fetched",
-      linked.map((s) => sanitizeStudentForLimitedStaffList(s as never))
+      linked.map((s) => sanitizeStudentForLimitedStaffList(s as never)),
+      200,
+      pageMeta
     );
   }
 
@@ -194,7 +313,7 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
     };
   });
 
-  return sendSuccess(res, "Students fetched", adminRows);
+  return sendSuccess(res, "Students fetched", adminRows, 200, pageMeta);
 });
 
 export const getStudentById = asyncHandler(async (req: Request, res: Response) => {
@@ -803,6 +922,55 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
  * Examination Management → Back Students: update number of remaining backs only.
  * Student must already have academicStatus PENDING_NOT_PASSED ("Back").
  */
+/** CTEVT → Running Batch Backlogs: set the backlog papers of a student still studying. */
+export const updateStudentRunningBacklogs = asyncHandler(async (req: Request, res: Response) => {
+  const payload = studentRunningBacklogsSchema.parse(req.body);
+  const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
+  if (!student) {
+    throw new ApiError(404, "Student not found");
+  }
+  const status = student.academicStatus ?? "ACTIVE";
+  if (status !== "ACTIVE") {
+    throw new ApiError(
+      400,
+      status === "PENDING_NOT_PASSED"
+        ? "This student has academic status Back — record their subjects in Back Students"
+        : "Running batch backlogs can only be recorded for active (studying) students"
+    );
+  }
+
+  const seen = new Set<string>();
+  const backlogs = payload.backlogs
+    .map((p) => ({ subjectName: p.subjectName.trim(), subjectCode: (p.subjectCode ?? "").trim(), programYear: p.programYear }))
+    .filter((p) => {
+      const key = `${p.subjectName.toLowerCase()}|${p.programYear}`;
+      if (!p.subjectName || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  const before = (student.runningBacklogs ?? []).map((p) => ({
+    subjectName: p.subjectName,
+    subjectCode: p.subjectCode ?? "",
+    programYear: p.programYear
+  }));
+  student.runningBacklogs = backlogs as unknown as typeof student.runningBacklogs;
+  await student.save();
+
+  await recordAudit(req, {
+    action: "student.running_backlogs_update",
+    entity: "Student",
+    entityId: student._id.toString(),
+    before: { runningBacklogs: before },
+    after: { runningBacklogs: student.runningBacklogs }
+  });
+
+  return sendSuccess(res, backlogs.length ? "Backlogs updated" : "Backlogs cleared", {
+    _id: student._id.toString(),
+    runningBacklogs: student.runningBacklogs
+  });
+});
+
 export const updateStudentBackCount = asyncHandler(async (req: Request, res: Response) => {
   const payload = studentBackCountSchema.parse(req.body);
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
@@ -1074,4 +1242,61 @@ export const deleteStudent = asyncHandler(async (req: Request, res: Response) =>
   } finally {
     await endSession(session);
   }
+});
+/**
+ * Read-only data check for admins: student records whose status and placement disagree.
+ *  - Passed Out students still placed in 3rd Year (a passed-out student has finished the years).
+ *  - Active students in an ended batch (batch marked inactive) or placed at year "Ended".
+ * Nothing is changed; each row links to the student so it can be corrected by hand.
+ */
+export const getStudentDataChecks = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const [students, batches, years] = await Promise.all([
+    Student.find({ schoolId })
+      .select("admissionNumber rollNumber academicStatus batchId yearId user")
+      .populate("user", "fullName")
+      .lean(),
+    Batch.find({ schoolId }).select("name academicYearBs isActive").lean(),
+    Year.find({ schoolId }).select("name").lean()
+  ]);
+  const batchById = new Map(batches.map((b) => [b._id.toString(), b]));
+  const yearNameById = new Map(years.map((y) => [y._id.toString(), y.name]));
+  const describe = (student: (typeof students)[number], reason: string) => {
+    const batch = student.batchId ? batchById.get(student.batchId.toString()) : undefined;
+    return {
+      studentId: student._id.toString(),
+      admissionNumber: student.admissionNumber,
+      rollNumber: student.rollNumber,
+      fullName: (student.user as { fullName?: string } | null)?.fullName ?? "",
+      batchName: batch ? `${batch.name}${batch.academicYearBs ? ` (${batch.academicYearBs})` : ""}` : "",
+      yearName: student.yearId ? (yearNameById.get(student.yearId.toString()) ?? "") : "",
+      academicStatus: student.academicStatus ?? "ACTIVE",
+      reason
+    };
+  };
+
+  const passedOutInThirdYear = students
+    .filter(
+      (s) =>
+        s.academicStatus === "PASSED_OUT" &&
+        Boolean(s.yearId) &&
+        yearNameById.get(String(s.yearId)) === "3rd Year"
+    )
+    .map((s) => describe(s, "Status is Passed Out but the student is still placed in 3rd Year"));
+
+  const activeInEndedBatch = students
+    .filter((s) => (s.academicStatus ?? "ACTIVE") === "ACTIVE")
+    .flatMap((s) => {
+      const batch = s.batchId ? batchById.get(s.batchId.toString()) : undefined;
+      const yearName = s.yearId ? yearNameById.get(s.yearId.toString()) : undefined;
+      if (batch && batch.isActive === false) {
+        return [describe(s, "Active student in a batch marked as ended (inactive)")];
+      }
+      if (yearName === "Ended") {
+        return [describe(s, "Active student placed at year \"Ended\"")];
+      }
+      return [];
+    });
+
+  return sendSuccess(res, "Student data checks", { passedOutInThirdYear, activeInEndedBatch });
 });

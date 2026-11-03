@@ -31,7 +31,9 @@ const accountingSettingsSchema = new Schema(
     tdsEnabled: { type: Boolean, default: false },
     institutionSignatureUrl: { type: String },
     /** Amount (NPR) above which reversals/voids require principal/admin approval */
-    approvalThresholdNpr: { type: Number, default: 25000 }
+    approvalThresholdNpr: { type: Number, default: 25000 },
+    /** Direct Expense in an asset category at or above this (NPR) is capitalised. */
+    capitalizationThresholdNpr: { type: Number, default: 5000 }
   },
   { timestamps: true }
 );

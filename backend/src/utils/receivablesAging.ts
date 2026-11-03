@@ -1,6 +1,8 @@
 import type { Types } from "mongoose";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { Student } from "../models/Student.js";
+import { StudentScholarshipAward } from "../models/StudentScholarshipAward.js";
+import { buildStudentFeePosition } from "./accountingCalculations.js";
 import { compareBsDates, countInclusiveBsDays, getTodayBs } from "./nepaliDate.js";
 
 /**
@@ -59,30 +61,48 @@ export const buildReceivablesAging = async (
 ) => {
   const asOfDateBs = options?.asOfDateBs?.trim() || getTodayBs();
 
-  const studentFilter: Record<string, unknown> = { schoolId, feesDueNpr: { $gt: 0 } };
+  const studentFilter: Record<string, unknown> = { schoolId };
   if (options?.batchId) studentFilter.batchId = options.batchId;
 
-  const students = await Student.find(studentFilter)
-    .populate("user", "fullName phone")
-    .sort({ feesDueNpr: -1 })
-    .lean();
+  // Outstanding as at the date, from the same fee position Student Fee Records and the
+  // Student Ledger use (receipts after the date have not happened yet).
+  const [allStudents, allCollections, awards] = await Promise.all([
+    Student.find(studentFilter).populate("user", "fullName phone").lean(),
+    FeeCollection.find({ schoolId, isDeleted: false, paidDateBs: { $lte: asOfDateBs } }).lean(),
+    StudentScholarshipAward.find({ schoolId, isDeleted: false, status: { $in: ["ACTIVE", "APPLIED"] } }).lean()
+  ]);
+  const collectionsByStudent = new Map<string, Array<Record<string, unknown>>>();
+  for (const c of allCollections) {
+    const key = c.studentId.toString();
+    const list = collectionsByStudent.get(key) ?? [];
+    list.push(c as unknown as Record<string, unknown>);
+    collectionsByStudent.set(key, list);
+  }
+  const outstandingByStudent = new Map<string, number>();
+  for (const s of allStudents) {
+    const key = s._id.toString();
+    const position = buildStudentFeePosition(
+      collectionsByStudent.get(key) ?? [],
+      awards.filter((a) => String(a.studentId) === key) as unknown as Array<Record<string, unknown>>,
+      {
+        1: Math.max(0, Number(s.year1FeeNpr) || 0),
+        2: Math.max(0, Number(s.year2FeeNpr) || 0),
+        3: Math.max(0, Number(s.year3FeeNpr) || 0)
+      }
+    );
+    if (position.totals.outstandingNpr > 0) outstandingByStudent.set(key, position.totals.outstandingNpr);
+  }
+  const students = allStudents
+    .filter((s) => outstandingByStudent.has(s._id.toString()))
+    .sort((x, y) => (outstandingByStudent.get(y._id.toString()) ?? 0) - (outstandingByStudent.get(x._id.toString()) ?? 0));
 
   if (students.length === 0) {
     return { rows: [] as AgingRow[], totals: emptyTotals() };
   }
 
-  // One query for every student's payment history, then reduce in memory — far cheaper
-  // than a per-student lookup on a list that can run to thousands of rows.
-  const collections = await FeeCollection.find({
-    schoolId,
-    isDeleted: false,
-    studentId: { $in: students.map((s) => s._id) }
-  })
-    .select("studentId paidDateBs")
-    .lean();
-
   const lastPaymentByStudent = new Map<string, string>();
-  for (const collection of collections) {
+  for (const collection of allCollections) {
+    if (!(Number(collection.amountPaidNpr) > 0)) continue;
     const key = collection.studentId.toString();
     const existing = lastPaymentByStudent.get(key);
     if (!existing || compareBsDates(collection.paidDateBs, existing) > 0) {
@@ -105,7 +125,7 @@ export const buildReceivablesAging = async (
       }
     }
 
-    const outstandingNpr = round2(student.feesDueNpr ?? 0);
+    const outstandingNpr = round2(outstandingByStudent.get(studentKey) ?? 0);
     // With no usable reference date the age is unknown; treat it as the oldest bucket so
     // it surfaces for follow-up rather than quietly landing in "current".
     const bucket = daysOutstanding === null ? "over90" : bucketFor(daysOutstanding);

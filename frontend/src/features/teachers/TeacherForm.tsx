@@ -6,12 +6,14 @@ import {
   TEACHER_PAYMENT_TYPE_LABELS,
   TEACHER_PAYMENT_TYPES,
   teacherSchema,
+  type BatchRecord,
   type SchoolSettingsRecord,
   type SubjectRecord,
   type TeacherInput,
   type TeacherPaymentType,
+  type YearRecord,
 } from "@phit-erp/shared";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -27,6 +29,7 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { HrDocumentsSection } from "features/hr-documents/HrDocumentsSection";
+import { groupSubjectsByCourseYear } from "lib/subjectOptions";
 import type { HrDocument } from "@phit-erp/shared";
 import { api, resolveApiUrl, resolveMediaUrl, unwrap } from "lib/api";
 
@@ -96,8 +99,22 @@ export const TeacherForm = ({
     queryKey: ["settings"],
     queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
   });
-  const subjects = (subjectsQuery.data ?? []).filter(
-    (subject) => subject.isActive !== false,
+  const yearsQuery = useQuery({
+    queryKey: ["years"],
+    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
+  });
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
+  });
+  // One option per subject and year, not one per batch (see lib/subjectOptions)
+  const { options: subjectOptions, optionFor: subjectOptionFor } = useMemo(
+    () =>
+      groupSubjectsByCourseYear(subjectsQuery.data ?? [], {
+        years: yearsQuery.data ?? [],
+        batches: batchesQuery.data ?? [],
+      }),
+    [subjectsQuery.data, yearsQuery.data, batchesQuery.data],
   );
   const currentAcademicYear =
     settingsQuery.data?.academicYearBs?.trim() || "";
@@ -457,23 +474,28 @@ export const TeacherForm = ({
                   <div className="md:col-span-4">
                     <FormField label="Subject">
                       <Select
-                        value={tender.subjectId}
+                        value={tender.subjectId ? subjectOptionFor(tender.subjectId) : ""}
                         onChange={(event) =>
                           setForm((current) => {
                             const next = [...(current.tenders ?? [])];
+                            const previous = next[index]!;
                             next[index] = {
-                              ...next[index]!,
-                              subjectId: event.target.value,
+                              ...previous,
+                              // Same subject re-picked: keep the saved record untouched
+                              subjectId:
+                                previous.subjectId &&
+                                subjectOptionFor(previous.subjectId) === event.target.value
+                                  ? previous.subjectId
+                                  : event.target.value,
                             };
                             return { ...current, tenders: next };
                           })
                         }
                       >
                         <option value="">Select subject</option>
-                        {subjects.map((subject) => (
-                          <option key={subject._id} value={subject._id}>
-                            {subject.name}
-                            {subject.code ? ` (${subject.code})` : ""}
+                        {subjectOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
                           </option>
                         ))}
                       </Select>

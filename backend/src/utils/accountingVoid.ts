@@ -5,6 +5,7 @@ import { Student } from "../models/Student.js";
 import { recalculateStudentFeesDue } from "./accountingCalculations.js";
 import { reverseCashEntry } from "./accountingCashBook.js";
 import { reverseJournalEntry } from "./journalPosting.js";
+import { assertPurchaseAssetCanBeVoided, removePurchaseAsset } from "./purchaseCapitalization.js";
 import { getTodayBs } from "./nepaliDate.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,8 +69,12 @@ export const voidWithJournalReversal = async (
   dateBs: string,
   session?: ClientSession | null
 ): Promise<Record<string, unknown>> => {
+  // A purchase registered as a fixed asset takes the asset with it (refused once depreciated)
+  const asset =
+    referenceType === "AccountingPurchase" ? await assertPurchaseAssetCanBeVoided(schoolId, record._id) : null;
   const before = await softVoidFinancialRecord(record, userId, reason, session);
   await reverseJournalEntry(schoolId, userId, referenceType, record._id);
   await reverseCashEntry(req, referenceType, record._id.toString(), dateBs);
+  if (asset) await removePurchaseAsset(schoolId, record._id, userId, session);
   return before;
 };

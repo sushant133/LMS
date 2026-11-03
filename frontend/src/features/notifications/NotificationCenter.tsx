@@ -1,7 +1,7 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import type { NotificationRecord } from "@phit-erp/shared";
 import { Bell, CheckCheck, ChevronRight, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { PageContent } from "components/layout/PageContent";
@@ -16,6 +16,7 @@ import {
   applyNotificationReadLocally,
   applyNotificationRemovedLocally,
   invalidateNotificationQueries,
+  type NotificationFeedPage,
 } from "lib/notificationQueries";
 import {
   notificationImage,
@@ -38,6 +39,9 @@ const TYPE_FILTERS: Array<{ value: string; label: string }> = [
   { value: "COMPLAINT", label: "Complaints" },
   { value: "GENERAL", label: "General" },
 ];
+
+/** Notifications loaded per page ("Load more" fetches the next page). */
+const PAGE_SIZE = 50;
 
 const formatWhen = (value?: string): string => {
   if (!value) return "";
@@ -76,27 +80,39 @@ export const NotificationCenter = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const notificationsQuery = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () =>
-      unwrap<NotificationRecord[]>(
-        api.get("/notifications", { params: { limit: 100 } }),
-      ),
+  // Pages of PAGE_SIZE, newest first; the type filter is applied by the server.
+  const notificationsQuery = useInfiniteQuery({
+    queryKey: ["notifications", "feed", typeFilter],
+    queryFn: async ({ pageParam }): Promise<NotificationFeedPage> => {
+      const response = await api.get<{ data: NotificationRecord[]; meta?: { total?: number } }>(
+        "/notifications",
+        { params: { limit: PAGE_SIZE, skip: pageParam, type: typeFilter || undefined } },
+      );
+      const rows = response.data.data ?? [];
+      return { rows, total: Number(response.data.meta?.total ?? rows.length) };
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + page.rows.length, 0);
+      return lastPage.rows.length > 0 && loaded < lastPage.total ? loaded : undefined;
+    },
     staleTime: 15_000,
     refetchOnWindowFocus: true,
   });
 
-  const notifications = notificationsQuery.data ?? [];
+  // True inbox counts (not just what is loaded)
+  const totalsQuery = useQuery({
+    queryKey: ["notification-totals"],
+    queryFn: () =>
+      unwrap<{ count: number; total: number }>(api.get("/notifications/unread-count")),
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+  });
 
-  const filtered = useMemo(() => {
-    return notifications.filter((item) => {
-      if (typeFilter && item.type !== typeFilter) return false;
-      return true;
-    });
-  }, [notifications, typeFilter]);
-
-  const unreadCount = notifications.filter((item) => !item.read).length;
-  const totalCount = notifications.length;
+  const filtered = (notificationsQuery.data?.pages ?? []).flatMap((page) => page.rows);
+  const matchingTotal = notificationsQuery.data?.pages.at(-1)?.total ?? filtered.length;
+  const unreadCount = totalsQuery.data?.count ?? 0;
+  const totalCount = totalsQuery.data?.total ?? 0;
 
   const markRead = useMutation({
     mutationFn: (id: string) => unwrap(api.put(`/notifications/${id}/read`)),
@@ -234,7 +250,7 @@ export const NotificationCenter = () => {
               Loading notifications...
             </CardContent>
           </Card>
-        ) : notifications.length === 0 ? (
+        ) : totalCount === 0 && filtered.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-sm text-slate-500">
               <Bell className="h-8 w-8 text-slate-300" />
@@ -376,6 +392,22 @@ export const NotificationCenter = () => {
             );
           })
         )}
+        {filtered.length > 0 ? (
+          <div className="flex flex-col items-center gap-2 pt-2 text-sm text-slate-500">
+            <span>
+              Showing {filtered.length} of {matchingTotal}
+            </span>
+            {notificationsQuery.hasNextPage ? (
+              <Button
+                variant="outline"
+                onClick={() => void notificationsQuery.fetchNextPage()}
+                disabled={notificationsQuery.isFetchingNextPage}
+              >
+                {notificationsQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {viewing ? (

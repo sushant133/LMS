@@ -2,6 +2,7 @@ import {
   FINANCIAL_SUMMARY_SECTIONS,
   REPORT_COLUMNS,
   getReportRows as getSharedReportRows,
+  isReportStructureRow,
   type AccountingReportType,
   type FinancialSummaryReport,
   type ReportColumn,
@@ -10,6 +11,7 @@ import {
 } from "@phit-erp/shared";
 import { adToBs, bsToAd } from "@munatech/nepali-datepicker";
 import { saveAs } from "file-saver";
+import { api } from "lib/api";
 import { formatCurrencyNpr } from "lib/utils";
 import * as XLSX from "xlsx";
 
@@ -118,7 +120,17 @@ export const getReportRows = (
 export const getReportCellValue = (
   row: Record<string, unknown>,
   column: ReportColumn,
-): string => formatReportCell(getNestedValue(row, column.key), column.format);
+): string => {
+  const value = getNestedValue(row, column.key);
+  // Statement headings and total lines leave their unused cells blank.
+  if (
+    isReportStructureRow(row) &&
+    (value === null || value === undefined || value === "")
+  ) {
+    return "";
+  }
+  return formatReportCell(value, column.format);
+};
 
 const buildSheetData = (
   reportType: AccountingReportType,
@@ -132,6 +144,29 @@ const buildSheetData = (
       columns.map((column) => getReportCellValue(row, column)),
     ),
   ];
+};
+
+/**
+ * Export CSV: the server builds it (same columns as the report table, UTF-8 BOM) and
+ * names it "<type>-<from>-<to>.csv".
+ */
+export const downloadReportCsv = async (
+  reportType: AccountingReportType,
+  path: string,
+  params: { fromDateBs?: string; toDateBs?: string } & Record<string, unknown>,
+): Promise<void> => {
+  const response = await api.get(path, {
+    params: { ...params, format: "csv" },
+    responseType: "blob",
+  });
+  const blob = response.data as Blob;
+  if (!String(response.headers["content-type"] ?? "").includes("text/csv")) {
+    throw new Error("The server did not return a CSV file");
+  }
+  const fileName =
+    /filename="([^"]+)"/.exec(String(response.headers["content-disposition"] ?? ""))?.[1] ??
+    `${[reportType, params.fromDateBs || "start", params.toDateBs || "today"].join("-")}.csv`;
+  saveAs(blob, fileName);
 };
 
 export const downloadReportExcel = (
@@ -149,6 +184,87 @@ export const downloadReportExcel = (
   });
   const safeLabel = reportLabel.replace(/[^\w-]+/g, "_").replace(/_+/g, "_");
   saveAs(blob, `${safeLabel}_${reportType}.xlsx`);
+};
+
+export { labelYearsWithBatch } from "lib/academicStructureUtils";
+
+export interface RegisterColumn<T> {
+  label: string;
+  value: (row: T) => string | number | null | undefined;
+  /** Amount column: NPR formatting and a TOTAL at the bottom. */
+  amount?: boolean;
+}
+
+const escapeHtmlText = (value: string) =>
+  value.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
+
+/** Register list → Excel file, or → a printable HTML table, with a TOTAL row. */
+export const exportRegister = <T,>(opts: {
+  title: string;
+  columns: Array<RegisterColumn<T>>;
+  rows: T[];
+  format: "xlsx" | "html";
+}): string | void => {
+  const totals = opts.columns.map((column) =>
+    column.amount
+      ? opts.rows.reduce((sum, row) => sum + (Number(column.value(row)) || 0), 0)
+      : null,
+  );
+  const totalLabelIndex = opts.columns.findIndex((column) => !column.amount);
+  if (opts.format === "xlsx") {
+    const sheet = XLSX.utils.aoa_to_sheet([
+      opts.columns.map((column) => column.label),
+      ...opts.rows.map((row) =>
+        opts.columns.map((column) => {
+          const value = column.value(row);
+          return value === null || value === undefined ? "" : value;
+        }),
+      ),
+      opts.columns.map((_, index) =>
+        index === totalLabelIndex
+          ? `TOTAL (${opts.rows.length})`
+          : (totals[index] ?? ""),
+      ),
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Register");
+    const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    saveAs(
+      new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      `${opts.title.replace(/[^\w-]+/g, "_")}.xlsx`,
+    );
+    return;
+  }
+  const cell = (column: RegisterColumn<T>, value: unknown) => {
+    if (value === null || value === undefined || value === "") return "";
+    return column.amount && typeof value === "number"
+      ? formatCurrencyNpr(value)
+      : escapeHtmlText(String(value));
+  };
+  const head = opts.columns
+    .map((column) => `<th${column.amount ? ' style="text-align:right"' : ""}>${escapeHtmlText(column.label)}</th>`)
+    .join("");
+  const body = opts.rows
+    .map(
+      (row) =>
+        `<tr>${opts.columns
+          .map(
+            (column) =>
+              `<td${column.amount ? ' style="text-align:right"' : ""}>${cell(column, column.value(row))}</td>`,
+          )
+          .join("")}</tr>`,
+    )
+    .join("");
+  const foot = `<tr style="font-weight:700;border-top:2px solid #94a3b8">${opts.columns
+    .map((column, index) =>
+      index === totalLabelIndex
+        ? `<td>TOTAL (${opts.rows.length})</td>`
+        : `<td style="text-align:right">${totals[index] !== null ? formatCurrencyNpr(totals[index]!) : ""}</td>`,
+    )
+    .join("")}</tr>`;
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}${foot}</tbody></table>`;
 };
 
 /** Generic Excel export for record tables (not typed accounting report columns). */
@@ -186,13 +302,14 @@ export const downloadFinancialSummaryExcel = (
     ["Period", report.period.label],
     [],
     ["Category", "Transactions", "Total (NPR)"],
-    ...report.data.map((row) => [row.category, row.transactions, row.totalNpr]),
+    ...report.data.map((row) => [row.category, row.transactions ?? "", row.totalNpr]),
     [],
     ["Total Fee Collections", "", report.totals.feeCollectionNpr],
-    ["Total Income", "", report.totals.incomeNpr],
-    ["Total Expenses", "", report.totals.expenseNpr],
-    ["Total Purchases", "", report.totals.purchaseNpr],
+    ["Total Other Income", "", report.totals.incomeNpr],
+    ["Total Indirect Expenses", "", report.totals.expenseNpr],
+    ["Total Direct Expense (paid)", "", report.totals.purchaseNpr],
     ["Total Salaries", "", report.totals.salaryNpr],
+    ["Total Refunds", "", report.totals.refundNpr ?? 0],
     ["Net Surplus", "", report.totals.netSurplusNpr],
   ]);
   XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
@@ -215,7 +332,7 @@ export const downloadFinancialSummaryExcel = (
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
-  saveAs(blob, `Financial_Summary_${report.period.monthBs}.xlsx`);
+  saveAs(blob, `Financial_Summary_${report.period.label.replace(/[^\w-]+/g, "_")}.xlsx`);
 };
 
 export const reportUsesMonthFilter = (

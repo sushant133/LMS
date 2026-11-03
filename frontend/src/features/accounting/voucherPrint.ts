@@ -93,9 +93,6 @@ export const printSimpleDocument = (opts: {
   const addressLine = branding.address
     ? `<p class="header-address">${escapeHtml(branding.address)}</p>`
     : "";
-  const nameNp = branding.nameNp
-    ? `<p class="header-np">${escapeHtml(branding.nameNp)}</p>`
-    : "";
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -141,7 +138,6 @@ export const printSimpleDocument = (opts: {
 <body>
   <div class="header">
     <h1>${escapeHtml(college)}</h1>
-    ${nameNp}
     ${addressLine}
     <h2>${escapeHtml(opts.title)}</h2>
     ${opts.subtitle ? `<p class="subtitle">${escapeHtml(opts.subtitle)}</p>` : ""}
@@ -153,6 +149,12 @@ export const printSimpleDocument = (opts: {
 
   printHtmlViaIframe(html);
 };
+
+const REGISTER_VOUCHER_TITLES = {
+  Purchase: "Direct Expense",
+  Expense: "Indirect Expense",
+  Income: "Receipt",
+} as const;
 
 export const printRegisterVoucher = (opts: {
   kind: "Purchase" | "Expense" | "Income";
@@ -170,7 +172,7 @@ export const printRegisterVoucher = (opts: {
     .join("");
 
   printSimpleDocument({
-    title: `${opts.kind} Voucher`,
+    title: `${REGISTER_VOUCHER_TITLES[opts.kind]} Voucher`,
     subtitle: opts.voucherNumber
       ? `Voucher No. ${opts.voucherNumber}`
       : undefined,

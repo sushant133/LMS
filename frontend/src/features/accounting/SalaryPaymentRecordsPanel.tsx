@@ -15,6 +15,7 @@ import {
   formatTenderPayBreakdown,
   normalizeTeacherPaymentType,
   PAYMENT_METHODS,
+  salaryRoundingNpr,
   TEACHER_PAYMENT_TYPE_LABELS,
 } from "@phit-erp/shared";
 import { getTodayBs } from "@munatech/nepali-datepicker";
@@ -395,7 +396,6 @@ export const SalaryPaymentRecordsPanel = ({
     (document.querySelector("[data-college-name]") as HTMLElement | null)
       ?.dataset.collegeName ||
     "College";
-  const collegeNameNp = settingsQuery.data?.schoolNameNp?.trim() || "";
   const collegeAddress = formatCollegeAddress(settingsQuery.data?.address);
   const monthLabel = formatPayrollMonthLabel(monthBs);
   /** Sheets already saved in this month, plus the open one if it is new. */
@@ -1117,12 +1117,17 @@ export const SalaryPaymentRecordsPanel = ({
     const totalNetSalaryNpr = round2(
       rows.reduce((s, r) => s + (r.netSalaryNpr || 0), 0),
     );
+    // Net is paid in whole rupees; the difference is the Rounding column
+    const totalRoundingNpr = round2(
+      rows.reduce((s, r) => s + salaryRoundingNpr(r), 0),
+    );
     return {
       totalMonthlySalaryNpr,
       totalAbsentDeductionNpr,
       totalExtraAmountNpr,
       totalSalaryAmountNpr,
       totalTax1PercentNpr,
+      totalRoundingNpr,
       totalNetSalaryNpr,
       totalNetSalaryInWords: formatNrsAmountInWords(totalNetSalaryNpr),
     };
@@ -1207,6 +1212,7 @@ export const SalaryPaymentRecordsPanel = ({
         <td class="n">${formatCurrencyNpr(r.extraAmountNpr)}</td>
         <td class="n">${formatCurrencyNpr(r.salaryAmountNpr)}</td>
         <td class="n">${formatCurrencyNpr(r.tax1PercentNpr)}</td>
+        <td class="n">${formatCurrencyNpr(salaryRoundingNpr(r))}</td>
         <td class="n"><strong>${formatCurrencyNpr(r.netSalaryNpr)}</strong></td>
         <td></td>
         <td class="name-cell">${escapeHtml(r.remarks || "")}</td>
@@ -1372,11 +1378,6 @@ export const SalaryPaymentRecordsPanel = ({
   <div class="sheet-header">
     <p class="college-name">${escapeHtml(collegeName)}</p>
     ${
-      collegeNameNp
-        ? `<p class="college-name-np">${escapeHtml(collegeNameNp)}</p>`
-        : ""
-    }
-    ${
       collegeAddress
         ? `<p class="college-address">${escapeHtml(collegeAddress)}</p>`
         : ""
@@ -1418,6 +1419,7 @@ export const SalaryPaymentRecordsPanel = ({
         <th>Extra Amount</th>
         <th>Salary Amount</th>
         <th>1% Tax</th>
+        <th>Rounding</th>
         <th>Net Salary</th>
         <th>Signature</th>
         <th>Remarks</th>
@@ -1433,6 +1435,7 @@ export const SalaryPaymentRecordsPanel = ({
         <td class="n">${formatCurrencyNpr(totals.totalExtraAmountNpr)}</td>
         <td class="n">${formatCurrencyNpr(totals.totalSalaryAmountNpr)}</td>
         <td class="n">${formatCurrencyNpr(totals.totalTax1PercentNpr)}</td>
+        <td class="n">${formatCurrencyNpr(totals.totalRoundingNpr)}</td>
         <td class="n">${formatCurrencyNpr(totals.totalNetSalaryNpr)}</td>
         <td colspan="2"></td>
       </tr>
@@ -1619,6 +1622,7 @@ export const SalaryPaymentRecordsPanel = ({
         "Extra Amount": r.extraAmountNpr,
         "Salary Amount": r.salaryAmountNpr,
         "1% Tax": r.tax1PercentNpr,
+        Rounding: salaryRoundingNpr(r),
         "Net Salary": r.netSalaryNpr,
         Signature: "",
         Remarks: r.remarks || "",
@@ -1642,6 +1646,7 @@ export const SalaryPaymentRecordsPanel = ({
         "Extra Amount": totals.totalExtraAmountNpr,
         "Salary Amount": totals.totalSalaryAmountNpr,
         "1% Tax": totals.totalTax1PercentNpr,
+        Rounding: totals.totalRoundingNpr,
         "Net Salary": totals.totalNetSalaryNpr,
         Signature: "",
         Remarks: "",
@@ -1665,6 +1670,7 @@ export const SalaryPaymentRecordsPanel = ({
         "Extra Amount": "",
         "Salary Amount": "",
         "1% Tax": "",
+        Rounding: "",
         "Net Salary": "",
         Signature: "",
         Remarks: "",
@@ -1688,6 +1694,7 @@ export const SalaryPaymentRecordsPanel = ({
         "Extra Amount": "",
         "Salary Amount": "",
         "1% Tax": "",
+        Rounding: "",
         "Net Salary": "",
         Signature: "",
         Remarks: "",
@@ -2807,6 +2814,12 @@ export const SalaryPaymentRecordsPanel = ({
                 </p>
               </div>
               <div>
+                <p className="text-xs text-slate-500">Rounding</p>
+                <p className="font-medium">
+                  {formatCurrencyNpr(salaryRoundingNpr(entryPreview))}
+                </p>
+              </div>
+              <div>
                 <p className="text-xs text-slate-500">Net salary</p>
                 <p className="font-semibold text-brand-800">
                   {formatCurrencyNpr(entryPreview.netSalaryNpr)}
@@ -2952,11 +2965,6 @@ export const SalaryPaymentRecordsPanel = ({
             <p className="text-base font-bold uppercase tracking-wide text-slate-900">
               {collegeName}
             </p>
-            {collegeNameNp ? (
-              <p className="text-sm font-semibold text-slate-800">
-                {collegeNameNp}
-              </p>
-            ) : null}
             {collegeAddress ? (
               <p className="mt-0.5 text-xs text-slate-600">{collegeAddress}</p>
             ) : null}
@@ -3010,6 +3018,9 @@ export const SalaryPaymentRecordsPanel = ({
                     <Th className="text-right">Extra Amount</Th>
                     <Th className="text-right">Salary Amount</Th>
                     <Th className="text-right">1% Tax</Th>
+                    <Th className="text-right" title="Net is paid in whole rupees; this is the difference">
+                      Rounding
+                    </Th>
                     <Th className="text-right">Net Salary</Th>
                     <Th className="text-center">Signature</Th>
                     <Th>Remarks</Th>
@@ -3383,6 +3394,9 @@ export const SalaryPaymentRecordsPanel = ({
                           </span>
                         )}
                       </Td>
+                      <Td className="text-right tabular-nums text-slate-500">
+                        {formatCurrencyNpr(salaryRoundingNpr(row))}
+                      </Td>
                       <Td className="text-right font-semibold text-slate-900">
                         {canEditAmounts ? (
                           <NumberInput
@@ -3477,6 +3491,9 @@ export const SalaryPaymentRecordsPanel = ({
                     </Td>
                     <Td className="text-right">
                       {formatCurrencyNpr(totals.totalTax1PercentNpr)}
+                    </Td>
+                    <Td className="text-right text-slate-500">
+                      {formatCurrencyNpr(totals.totalRoundingNpr)}
                     </Td>
                     <Td className="text-right text-brand-800">
                       {formatCurrencyNpr(totals.totalNetSalaryNpr)}

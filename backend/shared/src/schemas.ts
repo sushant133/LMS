@@ -1025,6 +1025,12 @@ export const studentBackCountSchema = z
     }
   });
 export type StudentBackCountInput = z.infer<typeof studentBackCountSchema>;
+
+/** CTEVT → Running Batch Backlogs: the full list of a running student's backlog papers (empty clears). */
+export const studentRunningBacklogsSchema = z.object({
+  backlogs: z.array(studentBackPaperSchema).max(50)
+});
+export type StudentRunningBacklogsInput = z.infer<typeof studentRunningBacklogsSchema>;
 export type TeacherInput = z.infer<typeof teacherSchema>;
 export type CollegeStaffInput = z.infer<typeof collegeStaffSchema>;
 export type CollegeStaffPasswordResetInput = z.infer<typeof collegeStaffPasswordResetSchema>;

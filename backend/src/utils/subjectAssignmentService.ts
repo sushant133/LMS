@@ -1215,7 +1215,12 @@ export const listSubjectAssignments = async (
   const query: Record<string, unknown> = { schoolId };
   if (filters.academicYearBs) query.academicYearBs = filters.academicYearBs;
   if (filters.status?.length) query.status = { $in: filters.status };
-  if (filters.subjectId) query.subjectId = filters.subjectId;
+  if (filters.subjectId) {
+    // A subject is one per course year: match its copy in every batch
+    const { expandCurriculumSubjectIds } = await import("./academicManagementService.js");
+    const ids = await expandCurriculumSubjectIds(new mongoose.Types.ObjectId(String(schoolId)), filters.subjectId);
+    query.subjectId = ids.length === 1 ? ids[0] : { $in: ids };
+  }
   if (filters.teacherId) query.teacherId = filters.teacherId;
   if (filters.classId) query.classId = filters.classId;
   if (filters.sectionId) query.sectionId = filters.sectionId;

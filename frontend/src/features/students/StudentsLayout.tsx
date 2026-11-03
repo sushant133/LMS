@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
-import { UserPlus, Users } from "lucide-react";
+import { ShieldCheck, UserPlus, Users } from "lucide-react";
+import { isInstitutionAdmin } from "@phit-erp/shared";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsGrantedAdmin } from "hooks/useModuleAccess";
@@ -67,6 +68,12 @@ export const StudentsLayout = () => {
             <Users className="h-4 w-4 shrink-0" />
             Students List
           </NavLink>
+          {user && isInstitutionAdmin(user.role) ? (
+            <NavLink to="/students/data-checks" className={tabClass}>
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              Data Checks
+            </NavLink>
+          ) : null}
         </div>
       ) : null}
 

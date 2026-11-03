@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
-import type { Types } from "mongoose";
-import { DEPRECIATION_POOLS, SYSTEM_ACCOUNT_CODES, getDepreciationPool } from "@phit-erp/shared";
+import { Types } from "mongoose";
+import { DEPRECIATION_POOLS, SYSTEM_ACCOUNT_CODES, getDepreciationPool, headerAccountCodes } from "@phit-erp/shared";
+import { ChartOfAccount } from "../models/ChartOfAccount.js";
+import { BankAccount } from "../models/BankAccount.js";
 import { BankReconciliation } from "../models/BankReconciliation.js";
 import { Budget } from "../models/Budget.js";
 import { DepreciationRun } from "../models/DepreciationRun.js";
@@ -260,10 +262,22 @@ export const runDepreciation = asyncHandler(async (req: Request, res: Response) 
 // Bank reconciliation
 // ---------------------------------------------------------------------------
 
+/** Bank account a reconciliation is for (must belong to this institution), or undefined for the combined Bank ledger. */
+const resolveReconciliationBank = async (req: Request, value: unknown): Promise<Types.ObjectId | undefined> => {
+  if (typeof value !== "string" || !value) return undefined;
+  if (!Types.ObjectId.isValid(value)) throw new ApiError(400, "Invalid bank account");
+  const bank = await BankAccount.findOne({ _id: value, schoolId: tenantObjectId(req) }).select("_id").lean();
+  if (!bank) throw new ApiError(404, "Bank account not found");
+  return bank._id;
+};
+
 export const listBankReconciliations = asyncHandler(async (req: Request, res: Response) => {
-  const reconciliations = await BankReconciliation.find({ ...withTenantScope(req), isDeleted: false })
-    .sort({ statementDateBs: -1 })
-    .limit(100);
+  const filter: Record<string, unknown> = { ...withTenantScope(req), isDeleted: false };
+  if (typeof req.query.bankAccountId === "string") {
+    filter.bankAccountId =
+      req.query.bankAccountId === "combined" ? null : await resolveReconciliationBank(req, req.query.bankAccountId);
+  }
+  const reconciliations = await BankReconciliation.find(filter).sort({ statementDateBs: -1 }).limit(100);
   return sendSuccess(res, "Bank reconciliations fetched", reconciliations);
 });
 
@@ -272,9 +286,10 @@ export const previewBankReconciliation = asyncHandler(async (req: Request, res: 
   const statementDateBs = ensureValidBsDate(String(req.query.statementDateBs ?? ""));
   const accountCode = String(req.query.accountCode ?? SYSTEM_ACCOUNT_CODES.BANK);
   const fromDateBs = typeof req.query.fromDateBs === "string" && req.query.fromDateBs ? req.query.fromDateBs : undefined;
+  const bankAccountId = await resolveReconciliationBank(req, req.query.bankAccountId);
 
-  // Pre-tick whatever a previous completed reconciliation already settled.
-  const previouslyCleared = await getPreviouslyClearedIds(schoolId, accountCode, statementDateBs);
+  // Pre-tick whatever a previous completed reconciliation of this bank already settled.
+  const previouslyCleared = await getPreviouslyClearedIds(schoolId, accountCode, statementDateBs, bankAccountId);
 
   const view = await buildReconciliationView({
     schoolId,
@@ -282,7 +297,8 @@ export const previewBankReconciliation = asyncHandler(async (req: Request, res: 
     statementDateBs,
     statementBalanceNpr: Number(req.query.statementBalanceNpr ?? 0),
     clearedEntryIds: previouslyCleared,
-    fromDateBs
+    fromDateBs,
+    bankAccountId
   });
 
   return sendSuccess(res, "Reconciliation preview generated", view);
@@ -295,6 +311,7 @@ export const saveBankReconciliation = asyncHandler(async (req: Request, res: Res
   const accountCode = String(body.accountCode ?? SYSTEM_ACCOUNT_CODES.BANK);
   const statementBalanceNpr = Number(body.statementBalanceNpr ?? 0);
   const clearedEntryIds = Array.isArray(body.clearedEntryIds) ? (body.clearedEntryIds as string[]) : [];
+  const bankAccountId = await resolveReconciliationBank(req, body.bankAccountId);
 
   const view = await buildReconciliationView({
     schoolId,
@@ -302,7 +319,8 @@ export const saveBankReconciliation = asyncHandler(async (req: Request, res: Res
     statementDateBs,
     statementBalanceNpr,
     clearedEntryIds,
-    fromDateBs: body.fromDateBs ? String(body.fromDateBs) : undefined
+    fromDateBs: body.fromDateBs ? String(body.fromDateBs) : undefined,
+    bankAccountId
   });
 
   const markCompleted = body.status === "COMPLETED";
@@ -314,11 +332,12 @@ export const saveBankReconciliation = asyncHandler(async (req: Request, res: Res
   }
 
   const doc = await BankReconciliation.findOneAndUpdate(
-    { schoolId, accountCode, statementDateBs, isDeleted: false },
+    // One reconciliation per bank per statement date (null = combined Bank ledger)
+    { schoolId, accountCode, bankAccountId: bankAccountId ?? null, statementDateBs, isDeleted: false },
     {
       schoolId,
       accountCode,
-      bankAccountId: body.bankAccountId ? String(body.bankAccountId) : undefined,
+      bankAccountId: bankAccountId ?? null,
       statementDateBs,
       statementBalanceNpr: round2(statementBalanceNpr),
       clearedEntryIds,
@@ -372,6 +391,17 @@ export const upsertBudget = asyncHandler(async (req: Request, res: Response) => 
       notes: String(line.notes ?? "")
     }))
     .filter((line) => line.accountCode);
+
+  // Group (header) accounts only total their children — budgeting them double counts.
+  const chart = await ChartOfAccount.find({ schoolId }).select("code name parentCode").lean();
+  const headers = headerAccountCodes(chart);
+  const header = lines.find((line) => headers.has(line.accountCode));
+  if (header) {
+    throw new ApiError(
+      400,
+      `${header.accountCode} ${header.accountName || ""} is a group account — budget the accounts under it instead`.trim()
+    );
+  }
 
   const existing = await Budget.findOne({ schoolId, fiscalYearBs, isDeleted: false });
   if (existing?.status === "APPROVED" && body.status !== "DRAFT") {

@@ -142,7 +142,7 @@ export interface ProgramYearFeeSummary {
   label: string;
   chargedNpr: number;
   paidNpr: number;
-  /** Part of paidNpr received in advance on an earlier year's receipt. */
+  /** Part of paidNpr that came from another year's receipt. */
   advanceNpr?: number;
   scholarshipNpr: number;
   discountNpr: number;
@@ -190,16 +190,36 @@ export interface StudentAccountSummary {
   lastPaymentDateBs?: string;
   lastPaymentDateAd?: string;
   yearWise?: ProgramYearFeeSummary[];
+  /** Paid beyond every due (credit balance). */
+  advanceNpr?: number;
+  /** Receipts saved without a program year (older / imported) — not in any year column. */
+  unassignedFees?: { count: number; chargedNpr: number; paidNpr: number; remainingNpr: number };
 }
 
 export interface AccountingExpenseRecord {
   _id: string;
+  /** False when the record has no journal voucher (not in the ledger / reports yet). */
+  journalPosted?: boolean;
   schoolId: string;
   category: string;
   vendor: string;
   dateBs: string;
   amountNpr: number;
   paymentMethod: PaymentMethod;
+  bankAccountId?: string;
+  /** Printed on the Journal Voucher */
+  voucherDetails?: {
+    narration?: string;
+    receiptNo?: string;
+    chequeNo?: string;
+    chequeDateBs?: string;
+    preparedByName?: string;
+    preparedByDesignation?: string;
+    checkedByName?: string;
+    approvedByName?: string;
+    receivedByName?: string;
+    receivedByDesignation?: string;
+  };
   description: string;
   voucherNumber?: string;
   approvedBy?: string;
@@ -211,6 +231,8 @@ export interface AccountingExpenseRecord {
 
 export interface AccountingPurchaseRecord {
   _id: string;
+  /** False when the record has no journal voucher (not in the ledger / reports yet). */
+  journalPosted?: boolean;
   schoolId: string;
   category: string;
   vendor: string;
@@ -222,6 +244,20 @@ export interface AccountingPurchaseRecord {
   totalAmountNpr: number;
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
+  bankAccountId?: string;
+  /** Printed on the Journal Voucher */
+  voucherDetails?: {
+    narration?: string;
+    receiptNo?: string;
+    chequeNo?: string;
+    chequeDateBs?: string;
+    preparedByName?: string;
+    preparedByDesignation?: string;
+    checkedByName?: string;
+    approvedByName?: string;
+    receivedByName?: string;
+    receivedByDesignation?: string;
+  };
   description?: string;
   voucherNumber?: string;
   attachmentUrl?: string;
@@ -232,12 +268,15 @@ export interface AccountingPurchaseRecord {
 
 export interface AccountingIncomeRecord {
   _id: string;
+  /** False when the record has no journal voucher (not in the ledger / reports yet). */
+  journalPosted?: boolean;
   schoolId: string;
   category: string;
   source: string;
   dateBs: string;
   amountNpr: number;
   paymentMethod: PaymentMethod;
+  bankAccountId?: string;
   description?: string;
   receiptNumber?: string;
   voucherNumber?: string;
@@ -340,6 +379,8 @@ export interface SalarySheetRow {
   extraAmountNpr: number;
   salaryAmountNpr: number;
   tax1PercentNpr: number;
+  /** Net rounded to the nearest rupee: Net − (Salary amount − 1% tax). */
+  roundingNpr?: number;
   netSalaryNpr: number;
   remarks: string;
   attendanceIncomplete: boolean;
@@ -373,6 +414,7 @@ export interface SalarySheetTotals {
   totalExtraAmountNpr: number;
   totalSalaryAmountNpr: number;
   totalTax1PercentNpr: number;
+  totalRoundingNpr?: number;
   totalNetSalaryNpr: number;
   totalNetSalaryInWords: string;
 }
@@ -492,6 +534,150 @@ export interface BankAccountRecord {
   updatedAt?: string;
 }
 
+/** One bank account's balance, from the ledger lines tagged to it. */
+export interface BankCashAccountBalance {
+  bankAccountId: string;
+  bankName: string;
+  accountName: string;
+  accountNumber: string;
+  branch?: string;
+  isActive: boolean;
+  openingBalanceNpr: number;
+  receiptsNpr: number;
+  paymentsNpr: number;
+  balanceNpr: number;
+  /** Statement date of the latest reconciliation of this bank. */
+  lastReconciledBs?: string;
+  lastReconciliationStatus?: "DRAFT" | "COMPLETED";
+}
+
+/** A Bank (1101) line with no bank account — counted in Bank, but in no bank's book. */
+export interface UnlinkedBankLine {
+  journalEntryId: string;
+  voucherNumber: string;
+  dateBs: string;
+  narration: string;
+  referenceType?: string;
+  /** Money into the bank (debit) is positive, money out (credit) negative. */
+  amountNpr: number;
+}
+
+export interface UnlinkedBankResponse {
+  /** Net of every unlinked Bank line, reversed pairs included (equals the summary figure). */
+  totalNpr: number;
+  /** Active vouchers to fix: reverse, then post again with the bank account. */
+  lines: UnlinkedBankLine[];
+}
+
+export interface BankCashSummary {
+  /** Ledger balance of Cash in Hand. */
+  cashInHandNpr: number;
+  /** Ledger balance of the Bank control account. */
+  bankLedgerNpr: number;
+  /** Bank balance including every bank account's opening balance (ledger + openings). */
+  bankBalanceNpr?: number;
+  banks: BankCashAccountBalance[];
+  /** Bank ledger movement not tagged to any bank account. */
+  unlinkedBankNpr: number;
+  todayBs: string;
+  todayReceiptsNpr: number;
+  todayPaymentsNpr: number;
+}
+
+export type BankCashSectionKey =
+  | "STUDENT_FEE"
+  | "SECURITY_DEPOSIT"
+  | "OTHER_RECEIPT"
+  | "DIRECT_EXPENSE"
+  | "INDIRECT_EXPENSE"
+  | "TRANSFER"
+  | "SALARY"
+  | "REFUND"
+  | "JOURNAL"
+  | "CASH_BOOK";
+
+export interface BankCashVoucherLine {
+  account: string;
+  accountCode: string;
+  description: string;
+  debitNpr: number;
+  creditNpr: number;
+}
+
+export interface BankCashRegisterRow {
+  id: string;
+  journalEntryId: string;
+  dateBs: string;
+  voucherNumber: string;
+  voucherType: string;
+  sectionKey: BankCashSectionKey;
+  account: string;
+  description: string;
+  cashBank: string;
+  debitNpr: number;
+  creditNpr: number;
+  remarks: string;
+  isReversal: boolean;
+  isReversed: boolean;
+  canVoid: boolean;
+  voucherLines: BankCashVoucherLine[];
+  voucherDebitNpr: number;
+  voucherCreditNpr: number;
+  isBalanced: boolean;
+}
+
+export interface BankCashRegisterResponse {
+  rows: BankCashRegisterRow[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+  totalDebitNpr: number;
+  totalCreditNpr: number;
+}
+
+export interface BankCashIntegrity {
+  voucherCount: number;
+  totalDebitNpr: number;
+  totalCreditNpr: number;
+  differenceNpr: number;
+  isBalanced: boolean;
+  unbalanced: Array<{ journalEntryId: string; voucherNumber: string; dateBs: string; differenceNpr: number }>;
+  unbalancedCount: number;
+}
+
+export interface BankCashBookRow {
+  dateBs: string;
+  voucherNumber: string;
+  narration: string;
+  receiptNpr: number;
+  paymentNpr: number;
+  balanceNpr: number;
+  isOpening?: boolean;
+}
+
+export interface BankCashBookResponse {
+  title: string;
+  openingNpr: number;
+  closingNpr: number;
+  totalReceiptsNpr: number;
+  totalPaymentsNpr: number;
+  rows: BankCashBookRow[];
+}
+
+export interface BankCashTransferRecord {
+  _id: string;
+  voucherNumber: string;
+  dateBs: string;
+  transferType: "CASH_TO_BANK" | "BANK_TO_CASH" | "BANK_TO_BANK" | "OTHER";
+  fromLabel: string;
+  toLabel: string;
+  amountNpr: number;
+  narration: string;
+  isReversed: boolean;
+  createdAt?: string;
+}
+
 export interface CashBookEntryRecord {
   _id: string;
   schoolId: string;
@@ -558,6 +744,9 @@ export interface AccountingDashboardResponse {
   /** Nepal-college dashboard cards */
   todayCollectionNpr: number;
   monthlyCollectionNpr: number;
+  /** Security deposits collected (memo — a liability, not in the collection cards or charts) */
+  todayDepositNpr?: number;
+  monthlyDepositNpr?: number;
   totalIncomeNpr: number;
   totalExpensesNpr: number;
   cashBalanceNpr: number;
