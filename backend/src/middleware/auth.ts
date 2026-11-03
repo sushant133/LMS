@@ -14,6 +14,7 @@ import { enforceInstitutionReadOnly } from "./readOnlyGuard.js";
 import { enforceModuleAccess } from "./moduleAccessGuard.js";
 import { enforceDepartmentAccountScope } from "./departmentAccountGuard.js";
 import { ApiError } from "../utils/apiError.js";
+import { runWithRequestContext } from "../utils/requestContext.js";
 import {
   isStudentAttendanceApiPath,
   loadStudentAttendanceGrant
@@ -44,10 +45,17 @@ const loadUserFromCookie = async (req: Request): Promise<boolean> => {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
 
     const dbUser = await User.findById(decoded.userId)
-      .select("isActive role email schoolId departmentAccount moduleAccess moduleActions secondaryRoles")
+      .select("isActive role email schoolId departmentAccount moduleAccess moduleActions secondaryRoles passwordChangedAt")
       .lean();
 
     if (!dbUser || !dbUser.isActive) {
+      return false;
+    }
+
+    // A password change ends sessions issued before it (JWT iat is in whole seconds)
+    const changedAt = (dbUser as { passwordChangedAt?: Date | null }).passwordChangedAt;
+    const issuedAt = (decoded as { iat?: number }).iat;
+    if (changedAt && typeof issuedAt === "number" && issuedAt < Math.floor(new Date(changedAt).getTime() / 1000)) {
       return false;
     }
 
@@ -84,13 +92,21 @@ export const protect = (req: Request, _res: Response, next: NextFunction): void 
       return next(new ApiError(401, "Authentication required"));
     }
 
-    return enforceDepartmentAccountScope(req, _res, (scopeErr?: unknown) => {
-      if (scopeErr) return next(scopeErr);
-      return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
-        if (err) return next(err);
-        void enforceModuleAccess(req, _res, next);
-      });
-    });
+    // Who is acting, for helpers deep in the request (e.g. who may delete an uploaded file)
+    const context = {
+      userId: req.user!.userId,
+      role: normalizeUserRole(req.user!.role),
+      schoolId: req.user!.schoolId ?? null
+    };
+    return runWithRequestContext(context, () =>
+      enforceDepartmentAccountScope(req, _res, (scopeErr?: unknown) => {
+        if (scopeErr) return next(scopeErr);
+        return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
+          if (err) return next(err);
+          void enforceModuleAccess(req, _res, next);
+        });
+      })
+    );
   })();
 };
 

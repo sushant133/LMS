@@ -127,8 +127,8 @@ app.get("/api/health", async (_req, res) => {
     message: "PHIT LMS backend is running",
     environment: env.NODE_ENV,
     timestamp: new Date().toISOString(),
-    /** Centralized VPS/local filesystem storage (no secrets). */
-    fileStorage: {
+    /** Storage diagnostics; server folder paths are only shown outside production. */
+    fileStorage: env.NODE_ENV === "production" ? { mode: "local", uploadDirExists, uploadDirWritable } : {
       mode: "local",
       uploadDir: uploadsDir,
       uploadDirExists,

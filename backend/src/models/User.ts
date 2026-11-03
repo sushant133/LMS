@@ -27,6 +27,8 @@ export interface UserDocument {
   secondaryRoles?: UserRole[];
   isActive: boolean;
   mustChangePassword: boolean;
+  /** Set whenever the password changes; sessions issued before it are no longer accepted. */
+  passwordChangedAt?: Date | null;
   /**
    * Per-module access control.
    * Values: "NONE" | "READ_ONLY" | "WRITE". Missing key = WRITE (legacy default).
@@ -84,6 +86,7 @@ const userSchema = new Schema<UserDocument, UserModel>(
     },
     isActive: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false },
+    passwordChangedAt: { type: Date, default: null },
     moduleAccess: {
       type: Map,
       of: { type: String, enum: ["NONE", "READ_ONLY", "WRITE"] },
@@ -177,6 +180,8 @@ userSchema.pre("save", async function hashPassword(next) {
   }
 
   user.password = await bcrypt.hash(user.password, 12);
+  // Signs out sessions from before the change (a new account has none)
+  if (!user.isNew) user.passwordChangedAt = new Date();
   next();
 });
 

@@ -1,3 +1,4 @@
+import { getRequestContext } from "./requestContext.js";
 import { v2 as cloudinary } from "cloudinary";
 import { env, isCloudinaryEnabled } from "../config/env.js";
 import { ensureCloudinaryConfigured } from "./cloudinary.js";
@@ -77,6 +78,13 @@ export const deleteStoredMediaUrl = async (url?: string | null): Promise<void> =
   const trimmed = url.trim();
 
   const cloud = extractCloudinaryPublicId(trimmed);
+  if (cloud) {
+    const context = getRequestContext();
+    if (context && context.role !== "SUPER_ADMIN" && context.role !== "COLLEGE_ADMIN") {
+      logger.warn(`Kept Cloudinary asset ${cloud.publicId}: only administrators may remove it`);
+      return;
+    }
+  }
   if (cloud && isCloudinaryEnabled()) {
     try {
       ensureCloudinaryConfigured();

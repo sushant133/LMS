@@ -941,7 +941,13 @@ export const collegeAdministratorUpdateSchema = collegeAdministratorSchema.parti
 });
 
 export const selfProfileUpdateSchema = z.object({
-  fullName: z.string().min(2).optional(),
+  // No HTML in a self-chosen name (it is printed on registers and receipts)
+  fullName: z
+    .string()
+    .trim()
+    .min(2)
+    .refine((name) => !/[<>]/.test(name), { message: "Name cannot contain < or >" })
+    .optional(),
   phone: z.string().min(7).optional(),
   profilePhotoUrl: optionalPhotoUrlSchema
 });

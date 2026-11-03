@@ -89,6 +89,9 @@ export const listPayroll = asyncHandler(async (req: Request, res: Response) => {
 
 export const createPayroll = asyncHandler(async (req: Request, res: Response) => {
   const payload = payrollSchema.parse(req.body);
+  // The teacher must belong to this college
+  const teacher = await Teacher.findOne(withTenantScope(req, { _id: payload.teacherId })).lean();
+  if (!teacher) throw new ApiError(404, "Teacher not found");
   const netSalaryNpr = payload.basicSalaryNpr + payload.allowancesNpr - payload.deductionsNpr;
   const payroll = await Payroll.create({
     ...payload,
@@ -96,8 +99,7 @@ export const createPayroll = asyncHandler(async (req: Request, res: Response) =>
     netSalaryNpr
   });
 
-  const teacher = await Teacher.findById(payload.teacherId).lean();
-  if (teacher?.user) {
+  if (teacher.user) {
     await sendNotification({
       schoolId: req.tenantSchoolId!,
       recipientUserId: teacher.user.toString(),

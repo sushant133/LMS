@@ -1,3 +1,5 @@
+import { UploadedFile } from "../../models/UploadedFile.js";
+import { getRequestContext } from "../../utils/requestContext.js";
 import crypto from "crypto";
 import path from "path";
 import fs from "fs-extra";
@@ -282,6 +284,17 @@ export const finalizeLocalUpload = async (
     kind
   };
 
+  if (uploadedBy) {
+    // Best effort — a failed record only means a non-admin cannot delete this file later
+    await UploadedFile.updateOne(
+      { path: publicPath },
+      { $setOnInsert: { path: publicPath, schoolId, uploadedBy } },
+      { upsert: true }
+    ).catch((error: unknown) =>
+      logger.warn(`Could not record uploader for ${publicPath}: ${error instanceof Error ? error.message : String(error)}`)
+    );
+  }
+
   logger.debug(`Stored upload ${publicPath} (${meta.size} bytes, ${meta.mimeType})`);
   return meta;
 };
@@ -293,6 +306,38 @@ export const finalizeLocalUploads = async (
   options: FinalizeUploadOptions = {}
 ): Promise<FileStorageMeta[]> =>
   Promise.all(files.map((file) => finalizeLocalUpload(req, file, modulePath, options)));
+
+/** Roles that may remove any file of their own college. */
+const UPLOAD_ADMIN_ROLES = new Set(["SUPER_ADMIN", "COLLEGE_ADMIN"]);
+
+/**
+ * May the current user delete this stored file?
+ *  - No request (scripts / jobs): yes.
+ *  - System Administrator: yes.
+ *  - Never a file of another college.
+ *  - College Administrator: any file of the college.
+ *  - Everyone else: only files they uploaded.
+ * A refused delete only leaves the old file in place; the user's action still succeeds.
+ */
+export const mayDeleteUpload = async (publicPath: string): Promise<boolean> => {
+  const context = getRequestContext();
+  if (!context) return true;
+  if (context.role === "SUPER_ADMIN") return true;
+  const parts = publicPath.trim().replace(/^\/?(api\/)?uploads\//, "").split(/[/\\]+/).filter(Boolean);
+  const fileSchoolId = parts[0] ?? "";
+  if (!context.schoolId || fileSchoolId !== String(context.schoolId)) {
+    logger.warn(`Refused delete of ${publicPath}: belongs to another college (user ${context.userId})`);
+    return false;
+  }
+  if (UPLOAD_ADMIN_ROLES.has(context.role)) return true;
+  const record = await UploadedFile.findOne({ path: `/uploads/${parts.join("/")}` })
+    .select("uploadedBy")
+    .lean()
+    .catch(() => null);
+  if (record?.uploadedBy === context.userId) return true;
+  logger.warn(`Kept ${publicPath}: not uploaded by user ${context.userId}`);
+  return false;
+};
 
 /**
  * Delete a file from the VPS by its public relative path.
@@ -306,6 +351,7 @@ export const deleteLocalFileByPublicPath = async (
   try {
     const absolute = resolvePublicPathToAbsolute(publicPath);
     if (!absolute) return false;
+    if (!(await mayDeleteUpload(publicPath))) return false;
 
     if (await fs.pathExists(absolute)) {
       await fs.remove(absolute);

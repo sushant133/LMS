@@ -27,6 +27,7 @@ import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel, formatDualDateCell } from "./accountingUtils";
 import { printSimpleDocument } from "./voucherPrint";
+import { escapeHtml } from "lib/escapeHtml";
 
 type LedgerLine = {
   key: string;
@@ -269,10 +270,10 @@ export const LedgerPanel = ({
       .reverse()
       .map(
         (r) => `<tr>
-        <td>${r.dateBs}</td>
-        <td>${r.voucherNumber}</td>
-        <td>${r.accountCode} ${r.accountName}</td>
-        <td>${r.narration}</td>
+        <td>${escapeHtml(r.dateBs)}</td>
+        <td>${escapeHtml(r.voucherNumber)}</td>
+        <td>${escapeHtml(r.accountCode)} ${escapeHtml(r.accountName)}</td>
+        <td>${escapeHtml(r.narration)}</td>
         <td style="text-align:right">${r.debitNpr > 0 ? r.debitNpr.toFixed(2) : "—"}</td>
         <td style="text-align:right">${r.creditNpr > 0 ? r.creditNpr.toFixed(2) : "—"}</td>
         <td style="text-align:right">${r.runningBalanceNpr.toFixed(2)}</td>
@@ -280,7 +281,7 @@ export const LedgerPanel = ({
       )
       .join("");
     const headerExtra = selectedSummary
-      ? `<p><strong>Group:</strong> ${selectedSummary.group} &nbsp;
+      ? `<p><strong>Group:</strong> ${escapeHtml(selectedSummary.group)} &nbsp;
          <strong>Total Debit:</strong> ${selectedSummary.totalDebit.toFixed(2)} &nbsp;
          <strong>Total Credit:</strong> ${selectedSummary.totalCredit.toFixed(2)} &nbsp;
          <strong>Closing:</strong> ${selectedSummary.closingBalance.toFixed(2)}</p>`
@@ -289,7 +290,7 @@ export const LedgerPanel = ({
       title,
       bodyHtml: `
         ${headerExtra}
-        <p style="font-size:12px;color:#555">Period: ${fromDate || "…"} to ${toDate || "…"}</p>
+        <p style="font-size:12px;color:#555">Period: ${escapeHtml(fromDate || "…")} to ${escapeHtml(toDate || "…")}</p>
         <table>
           <thead>
             <tr>

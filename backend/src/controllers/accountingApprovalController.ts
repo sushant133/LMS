@@ -84,7 +84,7 @@ export const requestFinancialApproval = asyncHandler(async (req: Request, res: R
   const schoolId = tenantObjectId(req);
   const entityType = req.body.entityType as string;
   const entityId = String(req.params.entityId);
-  const actionType = (req.body.actionType as "REVERSE" | "VOID") ?? "VOID";
+  const actionType: "REVERSE" | "VOID" = req.body.actionType === "REVERSE" ? "REVERSE" : "VOID";
 
   if (!["FeeCollection", "AccountingExpense", "AccountingPurchase", "AccountingIncome"].includes(entityType)) {
     throw new ApiError(400, "Invalid entity type");

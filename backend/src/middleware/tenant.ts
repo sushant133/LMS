@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { ApiError } from "../utils/apiError.js";
 import { resolveInstitutionSchoolId } from "../utils/institutionSchool.js";
 import { getCachedSchool } from "../utils/schoolCache.js";
+import { getRequestContext } from "../utils/requestContext.js";
 import { pickNonEmptySchoolId } from "../utils/tenant.js";
 
 /**
@@ -55,6 +56,8 @@ export const tenantGuard = async (req: Request, _res: Response, next: NextFuncti
       }
 
       req.tenantSchoolId = school._id.toString();
+      const superContext = getRequestContext();
+      if (superContext) superContext.schoolId = req.tenantSchoolId;
       return next();
     }
 
@@ -80,6 +83,8 @@ export const tenantGuard = async (req: Request, _res: Response, next: NextFuncti
     }
 
     req.tenantSchoolId = school._id.toString();
+    const context = getRequestContext();
+    if (context) context.schoolId = req.tenantSchoolId;
     return next();
   } catch (error) {
     return next(error);

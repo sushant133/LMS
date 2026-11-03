@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { printPageCss } from "lib/printPage";
+import { escapeHtml } from "lib/escapeHtml";
 import { scrollToForm } from "lib/scrollToForm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -924,13 +925,13 @@ export const FieldPostingSectionPanel = ({
               const dayCells = days
                 .map((d) => {
                   const code = st.cells[d]?.code || "";
-                  return `<td style="text-align:center;font-weight:600">${code || ""}</td>`;
+                  return `<td style="text-align:center;font-weight:600">${escapeHtml(code || "")}</td>`;
                 })
                 .join("");
               return `<tr>
                 <td style="text-align:center">${i + 1}</td>
-                <td>${st.fullName}</td>
-                <td style="text-align:center">${st.rollNumber ?? ""}</td>
+                <td>${escapeHtml(st.fullName)}</td>
+                <td style="text-align:center">${escapeHtml(st.rollNumber ?? "")}</td>
                 ${dayCells}
                 <td style="text-align:center">${st.present}</td>
                 <td style="text-align:center">${st.absent}</td>
@@ -963,7 +964,7 @@ export const FieldPostingSectionPanel = ({
       ${institutionHeader}
       <h1>${sectionLabel(section)} Attendance Register</h1>
       <div class="meta">
-        Month (BS): <strong>${month || "—"}</strong>
+        Month (BS): <strong>${escapeHtml(month || "—")}</strong>
         ${registerShiftFilter ? ` · Shift: ${shiftLabel(registerShiftFilter)}` : " · All shifts"}
         · ${students.length} student(s)
         · Printed ${new Date().toLocaleString()}
