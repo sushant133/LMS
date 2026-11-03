@@ -299,6 +299,9 @@ export const AcademicManagementFilterBar = ({
                 <option value="PENDING_APPROVAL">Pending Approval</option>
                 <option value="APPROVED">Approved</option>
                 <option value="REJECTED">Rejected</option>
+                {activeTab === "syllabus" ? (
+                  <option value="NOT_TAUGHT">Not Taught (topics not completed)</option>
+                ) : null}
               </>
             )}
           </Select>

@@ -128,6 +128,45 @@ interface SyllabusPanelProps {
   isAdminView?: boolean;
 }
 
+/**
+ * "Not Taught" view of a syllabus: keeps only sub-topics not completed (not started, in
+ * progress, skipped or needing revision), the topics / chapters they sit in, and topics with
+ * no sub-topics that are not 100% done. Returns null when everything has been taught.
+ * Display / print only — the saved syllabus is never changed.
+ */
+const notTaughtSyllabusView = (plan: AcademicSyllabusRecord): AcademicSyllabusRecord | null => {
+  type SubUnit = AcademicSyllabusRecord["chapters"][number]["units"][number]["subUnits"][number];
+  const keepSubUnit = (sub: SubUnit): SubUnit | null => {
+    const children = (sub.children ?? [])
+      .map(keepSubUnit)
+      .filter((child): child is SubUnit => child !== null);
+    if (sub.status !== "COMPLETED" || children.length > 0) return { ...sub, children };
+    return null;
+  };
+  const chapters = (plan.chapters ?? [])
+    .map((chapter) => {
+      const units = (chapter.units ?? [])
+        .map((topic) => {
+          const subUnits = (topic.subUnits ?? [])
+            .map(keepSubUnit)
+            .filter((sub): sub is SubUnit => sub !== null);
+          const hasSubUnits = (topic.subUnits ?? []).length > 0;
+          if (subUnits.length > 0) return { ...topic, subUnits };
+          if (!hasSubUnits && Number(topic.completedPercent ?? 0) < 100) return topic;
+          return null;
+        })
+        .filter((topic): topic is NonNullable<typeof topic> => topic !== null);
+      return units.length > 0 ? { ...chapter, units } : null;
+    })
+    .filter((chapter): chapter is NonNullable<typeof chapter> => chapter !== null);
+  if (chapters.length === 0) return null;
+  return {
+    ...plan,
+    chapters,
+    units: (plan.units ?? []).filter((unit) => unit.status !== "COMPLETED"),
+  };
+};
+
 export const SyllabusPanel = ({
   filters,
   subjects,
@@ -289,9 +328,15 @@ export const SyllabusPanel = ({
    * Do not send batchId / yearId to the list API — those hide valid plans from
    * other batch year instances. Hierarchy filtering stays client-side.
    */
+  /** Status "Not Taught": show only the topics / sub-topics not yet completed. */
+  const notTaughtOnly = filters.status === "NOT_TAUGHT";
   const listParams = useMemo(
-    () => academicListApiParams(filters, { isCollege }),
-    [filters, isCollege],
+    () =>
+      academicListApiParams(
+        notTaughtOnly ? { ...filters, status: undefined } : filters,
+        { isCollege },
+      ),
+    [filters, isCollege, notTaughtOnly],
   );
 
   const queryKey = ["academic-management", "syllabi", listParams];
@@ -360,6 +405,9 @@ export const SyllabusPanel = ({
       );
       return;
     }
+    // "Not Taught" shows a trimmed copy — edit the full syllabus as saved
+    const fullPlan = (plansQuery.data ?? []).find((p) => p._id === plan._id);
+    if (fullPlan && fullPlan !== plan) plan = { ...fullPlan, status: plan.status };
     // Always load full hierarchy from server before editing.
     // CRITICAL: prefer the richer of GET vs list card — never open empty over real units.
     try {
@@ -888,10 +936,16 @@ export const SyllabusPanel = ({
 
   const allPlans = plansQuery.data ?? [];
 
-  const keywordFilteredPlans = useMemo(
-    () => allPlans.filter((plan) => matchSessionPlanKeyword(plan, filters.keyword ?? "")),
-    [allPlans, filters.keyword],
-  );
+  const keywordFilteredPlans = useMemo(() => {
+    const matched = allPlans.filter((plan) =>
+      matchSessionPlanKeyword(plan, filters.keyword ?? ""),
+    );
+    if (!notTaughtOnly) return matched;
+    // Same list, cards and print — trimmed to what is still to be taught
+    return matched
+      .map(notTaughtSyllabusView)
+      .filter((plan): plan is AcademicSyllabusRecord => plan !== null);
+  }, [allPlans, filters.keyword, notTaughtOnly]);
 
   const faculties = useMemo(
     () =>
@@ -2298,13 +2352,14 @@ export const SyllabusPanel = ({
           institutionName={institutionName}
           nepaliText={printNepali}
           title={
-            printPlans.length === 1
+            (notTaughtOnly ? "Not Taught — " : "") +
+            (printPlans.length === 1
               ? printNepali
                 ? nepaliStructuralLabels.syllabus
                 : "Syllabus"
               : printNepali
                 ? nepaliStructuralLabels.syllabusReport
-                : "Syllabus Report"
+                : "Syllabus Report")
           }
           subtitle={
             printPlans.length === 1

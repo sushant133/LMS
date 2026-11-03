@@ -80,7 +80,8 @@ export interface AcademicManagementFilters extends AcademicManagementScope {
   month?: string;
   dateFrom?: string;
   dateTo?: string;
-  status?: AcademicPlanStatus | LogBookReviewStatus;
+  /** "NOT_TAUGHT" (Syllabus tab): only topics not yet completed — applied on screen, not by the server. */
+  status?: AcademicPlanStatus | LogBookReviewStatus | "NOT_TAUGHT";
   keyword?: string;
 }
 

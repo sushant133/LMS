@@ -32,6 +32,8 @@ export const filtersToParams = (
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params[key] = String(value);
   });
+  // "Not Taught" is a Syllabus screen view, not a saved status — never sent to the server
+  if (params.status === "NOT_TAUGHT") delete params.status;
   return params;
 };
 
