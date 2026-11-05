@@ -190,9 +190,12 @@ export { labelYearsWithBatch } from "lib/academicStructureUtils";
 
 export interface RegisterColumn<T> {
   label: string;
-  value: (row: T) => string | number | null | undefined;
+  /** `index` is the row's 0-based position in the export. */
+  value: (row: T, index: number) => string | number | null | undefined;
   /** Amount column: NPR formatting and a TOTAL at the bottom. */
   amount?: boolean;
+  /** Too narrow for the "TOTAL (n)" label (e.g. S.N), so it goes in the next column. */
+  noTotalLabel?: boolean;
 }
 
 const escapeHtmlText = (value: string) =>
@@ -207,16 +210,18 @@ export const exportRegister = <T,>(opts: {
 }): string | void => {
   const totals = opts.columns.map((column) =>
     column.amount
-      ? opts.rows.reduce((sum, row) => sum + (Number(column.value(row)) || 0), 0)
+      ? opts.rows.reduce((sum, row, rowIndex) => sum + (Number(column.value(row, rowIndex)) || 0), 0)
       : null,
   );
-  const totalLabelIndex = opts.columns.findIndex((column) => !column.amount);
+  const totalLabelIndex = opts.columns.findIndex(
+    (column) => !column.amount && !column.noTotalLabel,
+  );
   if (opts.format === "xlsx") {
     const sheet = XLSX.utils.aoa_to_sheet([
       opts.columns.map((column) => column.label),
-      ...opts.rows.map((row) =>
+      ...opts.rows.map((row, rowIndex) =>
         opts.columns.map((column) => {
-          const value = column.value(row);
+          const value = column.value(row, rowIndex);
           return value === null || value === undefined ? "" : value;
         }),
       ),
@@ -248,11 +253,11 @@ export const exportRegister = <T,>(opts: {
     .join("");
   const body = opts.rows
     .map(
-      (row) =>
+      (row, rowIndex) =>
         `<tr>${opts.columns
           .map(
             (column) =>
-              `<td${column.amount ? ' style="text-align:right"' : ""}>${cell(column, column.value(row))}</td>`,
+              `<td${column.amount ? ' style="text-align:right"' : ""}>${cell(column, column.value(row, rowIndex))}</td>`,
           )
           .join("")}</tr>`,
     )

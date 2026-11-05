@@ -1939,6 +1939,7 @@ export const StudentFeeRecordsPanel = () => {
                           return parts.filter(Boolean).join(" · ");
                         };
                         const columns: Array<RegisterColumn<StudentAccountSummary>> = [
+                          { label: "S.N", value: (_a, index) => index + 1, noTotalLabel: true },
                           { label: "Student", value: (a) => a.student.user?.fullName ?? "" },
                           { label: "Admission No.", value: (a) => a.student.admissionNumber },
                           {
@@ -1986,6 +1987,7 @@ export const StudentFeeRecordsPanel = () => {
                 <Table>
                   <TableHead>
                     <tr>
+                      <Th>S.N</Th>
                       <Th>Student</Th>
                       <Th>Batch / Year</Th>
                       <Th>1st Year</Th>
@@ -1998,12 +2000,13 @@ export const StudentFeeRecordsPanel = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {filteredAccounts.map((acc) => {
+                    {filteredAccounts.map((acc, index) => {
                       const years = acc.yearWise ?? [];
                       const y = (n: number) =>
                         years.find((r) => r.programYear === n);
                       return (
                         <tr key={acc.student._id}>
+                          <Td>{index + 1}</Td>
                           <Td>
                             <div className="font-medium">
                               {acc.student.user?.fullName ?? "—"}
