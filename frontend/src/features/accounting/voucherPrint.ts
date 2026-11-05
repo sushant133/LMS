@@ -102,7 +102,10 @@ export const printSimpleDocument = (opts: {
   <style>
     * { box-sizing: border-box; }
     body {
-      font-family: "Kanchan", "Preeti Unicode", "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+      /* Never list "Kanchan" / "Preeti" here: some installed copies draw Latin
+         letters and digits as Devanagari, which garbles English reports on those
+         PCs only. Unicode Nepali text still renders via the Devanagari fonts. */
+      font-family: "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
       margin: 0;
       padding: 16mm 14mm;
       color: #0f172a;
