@@ -499,7 +499,14 @@ export const LessonPlanPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
-  const canPerformApprove = useCanApproveRecords();
+  /**
+   * Approve / reject / unlock / unapprove are the Administrator's alone. Department
+   * Accounts (Academics) verify and return to the teacher, and approved records
+   * are frozen for them (mirrors the API).
+   */
+  const canPerformApprove = useCanApproveRecords() && !user?.departmentAccount;
+  const lockedForDepartment = (status?: string | null): boolean =>
+    Boolean(user?.departmentAccount) && String(status ?? "") === "APPROVED";
   const canMutate = writeAccess;
   const canEditDelete =
     writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
@@ -2534,7 +2541,7 @@ export const LessonPlanPanel = ({
                   ? actionScope
                       .filter(
                         (plan) =>
-                          isAdmin ||
+                          (isAdmin && !lockedForDepartment(plan.status)) ||
                           plan.status === "DRAFT" ||
                           plan.status === "REJECTED",
                       )
@@ -2604,15 +2611,15 @@ export const LessonPlanPanel = ({
                                   ) : null}
                                   {String(plan.status) === "VERIFIED" ? (
                                     <>
-                                      <Button
+                                      <>{canPerformApprove ? (<Button
                                         size="sm"
                                         onClick={() => approveMutation.mutate(plan._id)}
                                         disabled={!canPerformApprove || approveMutation.isPending}
                                         title={canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE}
                                       >
                                         Approve
-                                      </Button>
-                                      <Button
+                                      </Button>) : null}</>
+                                      <>{canPerformApprove ? (<Button
                                         size="sm"
                                         variant="outline"
                                         onClick={() => {
@@ -2623,7 +2630,7 @@ export const LessonPlanPanel = ({
                                         title={canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE}
                                       >
                                         Reject
-                                      </Button>
+                                      </Button>) : null}</>
                                     </>
                                   ) : null}
                                 </div>
@@ -2679,7 +2686,7 @@ export const LessonPlanPanel = ({
                             >
                               Verify {scopeLabel} ({verifyIds.length})
                             </Button>
-                            <Button
+                            <>{canPerformApprove ? (<Button
                               size="sm"
                               variant="outline"
                               disabled={
@@ -2707,7 +2714,7 @@ export const LessonPlanPanel = ({
                               }}
                             >
                               Unlock {scopeLabel} ({unlockIds.length})
-                            </Button>
+                            </Button>) : null}</>
                             </>
                             ) : null}
                             {canEditDelete ? (
@@ -2871,7 +2878,7 @@ export const LessonPlanPanel = ({
                                             </>
                                           ) : null}
                                           {canEditDelete &&
-                                          (isAdmin ||
+                                          ((isAdmin && !lockedForDepartment(plan.status)) ||
                                             plan.status === "DRAFT" ||
                                             plan.status === "REJECTED") ? (
                                             <Button
@@ -2913,15 +2920,15 @@ export const LessonPlanPanel = ({
                                           ) : null}
                                           {isAdmin && String(plan.status) === "VERIFIED" ? (
                                             <>
-                                              <Button
+                                              <>{canPerformApprove ? (<Button
                                                 size="sm"
                                                 disabled={!canPerformApprove || approveMutation.isPending}
                                                 title={canPerformApprove ? undefined : APPROVE_ADMIN_ONLY_MESSAGE}
                                                 onClick={() => approveMutation.mutate(plan._id)}
                                               >
                                                 Approve
-                                              </Button>
-                                              <Button
+                                              </Button>) : null}</>
+                                              <>{canPerformApprove ? (<Button
                                                 size="sm"
                                                 variant="outline"
                                                 disabled={
@@ -2946,12 +2953,12 @@ export const LessonPlanPanel = ({
                                                 }}
                                               >
                                                 Reject
-                                              </Button>
+                                              </Button>) : null}</>
                                             </>
                                           ) : null}
                                           {isAdmin &&
                                           plan.status === "APPROVED" ? (
-                                            <Button
+                                            <>{canPerformApprove ? (<Button
                                               size="sm"
                                               variant="outline"
                                               disabled={
@@ -2968,7 +2975,7 @@ export const LessonPlanPanel = ({
                                               }
                                             >
                                               Unlock
-                                            </Button>
+                                            </Button>) : null}</>
                                           ) : null}
                                           <ReviewUndoActions
                                             resource="lesson-plans"

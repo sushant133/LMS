@@ -25,6 +25,7 @@ import {
   formatIssuedByLabel,
 } from "features/library/libraryUtils";
 import { useAuth } from "features/auth/AuthProvider";
+import { useModuleAccess } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import {
   buildPrintInstitutionHeaderHtml,
@@ -202,6 +203,8 @@ export const LibraryReturnsPanel = ({
   focusReturnHistory = false,
 }: LibraryReturnsPanelProps) => {
   const { user } = useAuth();
+  /** View-only Library (e.g. Examination Department Account): no Return action. */
+  const { canWrite: canReturnBooks } = useModuleAccess("library");
   /** Super Admin / College Admin (primary or secondary role). */
   const canPrint = Boolean(
     user &&
@@ -641,6 +644,7 @@ export const LibraryReturnsPanel = ({
                           ) : null}
                         </Td>
                         <Td>
+                          {canReturnBooks ? (
                           <Button
                             size="sm"
                             variant={
@@ -654,6 +658,7 @@ export const LibraryReturnsPanel = ({
                               ? "Selected"
                               : "Return"}
                           </Button>
+                          ) : null}
                         </Td>
                       </tr>
                     ))

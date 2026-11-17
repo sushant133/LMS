@@ -19,9 +19,11 @@ export const roleLabelMap: Record<UserRole, string> = USER_ROLE_LABELS;
  * Leadership designation (e.g. Principal) takes priority over system role (Teacher).
  */
 export const getUserDisplayTitle = (
-  user?: Pick<UserProfile, "role" | "designation"> | null
+  user?: Pick<UserProfile, "role" | "designation" | "departmentAccount"> | null
 ): string => {
   if (!user) return "";
+  // Academics Department Account signs in as Administrator — show its department instead
+  if (user.departmentAccount === "ACADEMICS") return "Academics Department";
   const designation = user.designation?.trim();
   if (designation) return designation;
   return roleLabelMap[normalizeUserRole(user.role)] ?? user.role;

@@ -99,6 +99,7 @@ import {
   getSessionPlanSyllabusCoverage,
   getTodayTimetable,
   actorIsAcademicAdmin,
+  assertDepartmentAccountCanChangeAcademic,
   notifyAdminsOfPendingAcademic,
   notifyTeacherOfAcademicDecision,
   recordApproval,
@@ -529,6 +530,7 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
     "session plans"
   );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   // Editing must not move this plan onto a subject/year that already has one.
   if (payload.subjectId !== undefined || payload.academicYearBs !== undefined) {
@@ -652,6 +654,7 @@ export const deleteSessionPlan = asyncHandler(async (req: Request, res: Response
     "session plans"
   );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
@@ -1149,6 +1152,7 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     );
   }
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   // Rewrite hierarchy when client sends structure (including blank unit titles).
   const hasChaptersField = payload.chapters !== undefined;
@@ -1296,6 +1300,7 @@ export const deleteSyllabus = asyncHandler(async (req: Request, res: Response) =
     teacherId: existing.teacherId?.toString(),
     subjectId: existing.subjectId.toString()
   });
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
@@ -1323,6 +1328,7 @@ export const updateSyllabusSubUnitProgress = asyncHandler(async (req: Request, r
     teacherId: existing.teacherId?.toString(),
     subjectId: existing.subjectId.toString()
   });
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   const subUnit = await AcademicSyllabusSubUnit.findOne({
     _id: req.params.subUnitId,
@@ -1429,6 +1435,7 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
     subjectId: existing.subjectId.toString()
   });
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   await withTransaction(async (session) => {
     const sessionOpt = getSessionOption(session);
@@ -1837,6 +1844,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
     "lesson plans"
   );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   const sessionPlanId = payload.sessionPlanId ?? existing.sessionPlanId?.toString();
   if (!sessionPlanId) {
@@ -2056,6 +2064,7 @@ export const deleteLessonPlan = asyncHandler(async (req: Request, res: Response)
     "lesson plans"
   );
   if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
+  assertDepartmentAccountCanChangeAcademic(req, existing.status === "APPROVED");
 
   const items = await AcademicLessonPlanItem.find({ lessonPlanId: existing._id })
     .select("sessionPlanUnitId")
@@ -2469,6 +2478,7 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (!(await actorIsAcademicAdmin(req)) && existing.reviewStatus === "APPROVED") {
     throw new ApiError(403, "Approved log book entries cannot be modified");
   }
+  assertDepartmentAccountCanChangeAcademic(req, existing.reviewStatus === "APPROVED");
 
   // If topic link changed, re-validate and re-populate inherited fields
   if (payload.lessonPlanItemId && payload.lessonPlanItemId !== existing.lessonPlanItemId?.toString()) {
@@ -2671,6 +2681,7 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (!(await actorIsAcademicAdmin(req)) && existing.reviewStatus === "APPROVED") {
     throw new ApiError(403, "Approved log book entries cannot be deleted");
   }
+  assertDepartmentAccountCanChangeAcademic(req, existing.reviewStatus === "APPROVED");
   if (
     String((existing as { completionSource?: string }).completionSource || "") ===
       "ADMINISTRATION" &&
@@ -2709,6 +2720,7 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
 
   const existing = await AcademicLogBookEntry.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Log book entry not found");
+  assertDepartmentAccountCanChangeAcademic(req, existing.reviewStatus === "APPROVED");
 
   existing.reviewStatus = payload.reviewStatus;
   existing.adminRemarks = payload.adminRemarks;
@@ -2965,6 +2977,13 @@ export const addComment = asyncHandler(async (req: Request, res: Response) => {
   if (!entity) throw new ApiError(404, "Entity not found for comment");
 
   await assertCommentEntityAccess(req, payload.entityType, entity);
+  {
+    const record = entity as { status?: unknown; reviewStatus?: unknown };
+    assertDepartmentAccountCanChangeAcademic(
+      req,
+      String(record.status ?? record.reviewStatus ?? "") === "APPROVED"
+    );
+  }
 
   const comment = await addAcademicComment(req, payload.entityType, payload.entityId, payload.comment);
 

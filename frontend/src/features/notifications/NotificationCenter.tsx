@@ -332,7 +332,7 @@ export const NotificationCenter = () => {
                       </div>
                       <p
                         className={cn(
-                          "mt-1 text-sm",
+                          "mt-1 whitespace-pre-line text-sm",
                           unread ? "text-slate-700" : "text-slate-500",
                         )}
                       >

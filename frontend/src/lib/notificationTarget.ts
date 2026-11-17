@@ -70,6 +70,7 @@ const TYPE_CANDIDATES: Record<string, string[]> = {
   COMPLAINT: ["/complains"],
   ACADEMIC_MANAGEMENT: ["/academic-management-view", "/academic-management"],
   ACADEMIC_PROMOTION: ["/academics", "/my-profile", "/parent-portal"],
+  TIMETABLE: ["/timetable-view", "/timetable"],
   PAYROLL: ["/hr"],
   TRANSPORT: ["/transport", "/parent-portal"],
 };

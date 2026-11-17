@@ -8,6 +8,8 @@ import {
   canAccessModule,
   canApproveRecords,
   DAILY_ATTENDANCE_STATUSES,
+  DEPARTMENT_ACCOUNT_MODULES,
+  isDepartmentAccountType,
   EMPLOYEE_ATTENDANCE_STATUSES,
   hasConfiguredModuleAccess,
   hasInstitutionAccess,
@@ -264,9 +266,19 @@ const resolveAccess = async (req: Request): Promise<AccessCtx> => {
   const hasSavedGrant = (key: "teacher-attendance" | "staff-attendance"): boolean =>
     hasConfiguredModuleAccess(moduleAccess) && canAccessModule(moduleAccess, key);
 
-  const canTeacherRegister = adminLike || hasSavedGrant("teacher-attendance");
+  /*
+   * Department Accounts sign in as Administrator but only see the registers
+   * their department is granted (Academics: Student Attendance only).
+   */
+  const department = req.user?.departmentAccount;
+  const departmentAllows = (key: "teacher-attendance" | "staff-attendance"): boolean =>
+    !isDepartmentAccountType(department) || Boolean(DEPARTMENT_ACCOUNT_MODULES[department][key]);
 
-  const canStaffRegister = adminLike || hasSavedGrant("staff-attendance");
+  const canTeacherRegister =
+    (adminLike || hasSavedGrant("teacher-attendance")) && departmentAllows("teacher-attendance");
+
+  const canStaffRegister =
+    (adminLike || hasSavedGrant("staff-attendance")) && departmentAllows("staff-attendance");
 
   return {
     adminLike,
@@ -345,6 +357,12 @@ const isRegisterAdmin = async (req: Request): Promise<boolean> => {
  * Administrator-only.
  */
 const canEditRegisterTab = async (req: Request, tab: string): Promise<boolean> => {
+  // Department Accounts (e.g. Academics) never edit teacher / staff registers
+  const department = req.user?.departmentAccount;
+  if (isDepartmentAccountType(department) && String(tab).toUpperCase() !== "STUDENT") {
+    const key = String(tab).toUpperCase() === "TEACHER" ? "teacher-attendance" : "staff-attendance";
+    if (DEPARTMENT_ACCOUNT_MODULES[department][key] !== "WRITE") return false;
+  }
   if (await isRegisterAdmin(req)) return true;
   if (String(tab).toUpperCase() !== "STUDENT") return false;
   return (await loadStudentAttendanceGrant(req)).write;

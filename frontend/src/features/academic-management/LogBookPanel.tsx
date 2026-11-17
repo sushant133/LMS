@@ -438,7 +438,14 @@ export const LogBookPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
-  const canPerformApprove = useCanApproveRecords();
+  /**
+   * Approve / reject / unlock / unapprove are the Administrator's alone. Department
+   * Accounts (Academics) verify and return to the teacher, and approved records
+   * are frozen for them (mirrors the API).
+   */
+  const canPerformApprove = useCanApproveRecords() && !user?.departmentAccount;
+  const lockedForDepartment = (status?: string | null): boolean =>
+    Boolean(user?.departmentAccount) && String(status ?? "") === "APPROVED";
   const canMutate = writeAccess;
   const canEditDelete =
     writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
@@ -1245,7 +1252,9 @@ export const LogBookPanel = ({
 
   const renderEntryActions = (entry: AcademicLogBookEntryRecord) => (
     <div className="flex flex-wrap gap-1">
-      {canEditDelete && isOwnLogEntry(entry) ? (
+      {canEditDelete &&
+      isOwnLogEntry(entry) &&
+      !lockedForDepartment(entry.reviewStatus) ? (
         <Button
           size="sm"
           variant="outline"
@@ -1281,7 +1290,7 @@ export const LogBookPanel = ({
             </Button>
           ) : null}
           {String(entry.reviewStatus) === "VERIFIED" || entry.reviewStatus === "REVIEWED" ? (
-            <Button
+            <>{canPerformApprove ? (<Button
               size="sm"
               variant="outline"
               className="text-emerald-700"
@@ -1295,7 +1304,7 @@ export const LogBookPanel = ({
             >
               <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
               Approve
-            </Button>
+            </Button>) : null}</>
           ) : null}
           {entry.reviewStatus === "PENDING" ? (
             <Button
@@ -1326,7 +1335,7 @@ export const LogBookPanel = ({
       ) : null}
       {canEditDelete &&
       isOwnLogEntry(entry) &&
-      (isAdmin ||
+      ((isAdmin && !lockedForDepartment(entry.reviewStatus)) ||
         entry.reviewStatus !== "APPROVED") ? (
         <Button
           size="sm"
@@ -2123,7 +2132,13 @@ export const LogBookPanel = ({
                   <AcademicCommentsPanel
                     entityType="LOG_BOOK_ENTRY"
                     entityId={selectedEntryId}
-                    canComment={isAdmin || isTeacher}
+                    canComment={
+                      (isAdmin || isTeacher) &&
+                      !lockedForDepartment(
+                        (entriesQuery.data ?? []).find((row) => row._id === selectedEntryId)
+                          ?.reviewStatus,
+                      )
+                    }
                   />
                 </div>
               ) : null}

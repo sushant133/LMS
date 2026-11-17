@@ -122,14 +122,16 @@ export const LibraryIssuedBooksPanel = ({
 }: LibraryIssuedBooksPanelProps) => {
   const { user } = useAuth();
   const isCollege = useIsCollege();
-  /** Super Admin / College Admin (primary or secondary role). */
-  const canManageIssues = Boolean(
+  /** Super Admin / College Admin (primary or secondary role) — may print the list. */
+  const canPrintIssues = Boolean(
     user &&
       (canManageInstitution(user.role) ||
         (user.secondaryRoles ?? []).some((role) =>
           canManageInstitution(normalizeUserRole(role)),
         )),
   );
+  // Department Accounts with view-only Library (Examination, Academics) never change issues
+  const canManageIssues = canPrintIssues && !user?.departmentAccount;
   const [searchQuery, setSearchQuery] = useState("");
   const [printing, setPrinting] = useState(false);
   const [batchId, setBatchId] = useState("");
@@ -267,7 +269,7 @@ export const LibraryIssuedBooksPanel = ({
 
   /** College admin / Super admin only — print currently filtered issued list. */
   const printIssuedList = () => {
-    if (!canManageIssues) {
+    if (!canPrintIssues) {
       toast.error("Only college admin or super admin can print");
       return;
     }
@@ -536,7 +538,7 @@ export const LibraryIssuedBooksPanel = ({
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      {canManageIssues ? (
+                      {canPrintIssues ? (
                         <Button
                           type="button"
                           size="sm"

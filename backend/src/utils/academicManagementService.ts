@@ -265,9 +265,26 @@ export const isAcademicAdmin = (role: string): boolean => canManageInstitution(r
 /** Administrator or Super Admin (primary or secondary role) — the only people who may approve. */
 export const actorIsInstitutionApprover = async (req: Request): Promise<boolean> => {
   if (!req.user) return false;
+  // Department Accounts (Academics) verify and return only — approve, unapprove
+  // and returning an approved record stay with the Administrator.
+  if (req.user.departmentAccount) return false;
   if (canManageInstitution(req.user.role)) return true;
   const secondary = await getUserSecondaryRoles(req.user.userId);
   return secondary.some((role) => canManageInstitution(role));
+};
+
+export const APPROVED_ACADEMIC_LOCKED_MESSAGE =
+  "This record is approved and locked. Only the Administrator can change it.";
+
+/**
+ * Department Accounts (Academics) may work on records until they are approved;
+ * an approved syllabus, plan or log book entry is frozen for them (no edit,
+ * delete, reorder or return). The Administrator keeps full control.
+ */
+export const assertDepartmentAccountCanChangeAcademic = (req: Request, isApproved: boolean): void => {
+  if (isApproved && req.user?.departmentAccount) {
+    throw new ApiError(403, APPROVED_ACADEMIC_LOCKED_MESSAGE);
+  }
 };
 
 /**

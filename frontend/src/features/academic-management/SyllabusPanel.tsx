@@ -183,7 +183,14 @@ export const SyllabusPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
-  const canPerformApprove = useCanApproveRecords();
+  /**
+   * Approve / reject / unlock / unapprove are the Administrator's alone. Department
+   * Accounts (Academics) verify and return to the teacher, and approved records
+   * are frozen for them (mirrors the API).
+   */
+  const canPerformApprove = useCanApproveRecords() && !user?.departmentAccount;
+  const lockedForDepartment = (status?: string | null): boolean =>
+    Boolean(user?.departmentAccount) && String(status ?? "") === "APPROVED";
   /**
    * Granted Academic Management administrators (Vice Principal / Principal /
    * Coordinator) own syllabus records: they may edit, delete and unlock.
@@ -201,7 +208,8 @@ export const SyllabusPanel = ({
   const canMutate = writeAccess && !isTeacher;
   const canEditDelete = canMutate && (canAdministerSyllabi || !isAdminView);
   /** Unlock reopens a locked syllabus for editing — not an approval action. */
-  const canPerformUnlock = canPerformApprove || canAdministerSyllabi;
+  const canPerformUnlock =
+    canPerformApprove || (canAdministerSyllabi && !user?.departmentAccount);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
@@ -1191,7 +1199,9 @@ export const SyllabusPanel = ({
 
   const canEditStructure = (plan: AcademicSyllabusRecord) =>
     canEditDelete &&
-    (plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin);
+    (plan.status === "DRAFT" ||
+      plan.status === "REJECTED" ||
+      (isAdmin && !lockedForDepartment(plan.status)));
 
   /**
    * Teachers may move a sub-unit between Not Started / In Progress / Skipped
@@ -1200,6 +1210,7 @@ export const SyllabusPanel = ({
    */
   const canUpdateProgress = (plan: AcademicSyllabusRecord) =>
     writeAccess &&
+    !lockedForDepartment(plan.status) &&
     (isAdmin ||
       isTeacher ||
       plan.status === "APPROVED" ||
@@ -1697,7 +1708,7 @@ export const SyllabusPanel = ({
                   </span>
                 </Button>
               ) : canEditDelete ? (
-                <Button
+                <>{canPerformUnlock ? (<Button
                   size="sm"
                   variant="outline"
                   disabled={!canPerformUnlock || unlockMutation.isPending}
@@ -1717,7 +1728,7 @@ export const SyllabusPanel = ({
                       ? "सबै खोलेर सम्पादन"
                       : "Unlock & edit all"}
                   </span>
-                </Button>
+                </Button>) : null}</>
               ) : null}
               {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
                 <Button
@@ -1744,7 +1755,7 @@ export const SyllabusPanel = ({
               {(plan.status === "SUBMITTED" ||
                 plan.status === "PENDING_APPROVAL") ? (
                 <>
-                  <Button
+                  <>{canPerformApprove ? (<Button
                     size="sm"
                     disabled={!canPerformApprove || approveMutation.isPending}
                     title={
@@ -1755,8 +1766,8 @@ export const SyllabusPanel = ({
                     <span className={cn(planNepali && nepaliTextClass)}>
                       {planNepali ? "स्वीकृत गर्नुहोस्" : "Approve"}
                     </span>
-                  </Button>
-                  <Button
+                  </Button>) : null}</>
+                  <>{canPerformApprove ? (<Button
                     size="sm"
                     variant="outline"
                     disabled={!canPerformApprove || rejectMutation.isPending}
@@ -1776,11 +1787,11 @@ export const SyllabusPanel = ({
                     <span className={cn(planNepali && nepaliTextClass)}>
                       {planNepali ? "अस्वीकृत गर्नुहोस्" : "Reject"}
                     </span>
-                  </Button>
+                  </Button>) : null}</>
                 </>
               ) : null}
               {plan.status === "APPROVED" ? (
-                <Button
+                <>{canPerformUnlock ? (<Button
                   size="sm"
                   variant="outline"
                   disabled={!canPerformUnlock || unlockMutation.isPending}
@@ -1792,7 +1803,7 @@ export const SyllabusPanel = ({
                   <span className={cn(planNepali && nepaliTextClass)}>
                     {planNepali ? "खोल्नुहोस् मात्र" : "Unlock only"}
                   </span>
-                </Button>
+                </Button>) : null}</>
               ) : null}
               {canEditDelete ? (
               <Button
@@ -1838,7 +1849,9 @@ export const SyllabusPanel = ({
               entityType="SYLLABUS"
               entityId={plan._id}
               nepaliText={planNepali}
-              canComment={isAdmin || plan.status !== "APPROVED"}
+              canComment={
+              (isAdmin && !lockedForDepartment(plan.status)) || plan.status !== "APPROVED"
+            }
             />
           </div>
         </CardContent>

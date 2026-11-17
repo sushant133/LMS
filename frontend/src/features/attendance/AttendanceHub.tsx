@@ -11,7 +11,11 @@ import {
 } from "lucide-react";
 import { canManageInstitution, hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
-import { useIsGrantedAdmin, useStudentAttendanceGrant } from "hooks/useModuleAccess";
+import {
+  useIsGrantedAdmin,
+  useModuleAccess,
+  useStudentAttendanceGrant,
+} from "hooks/useModuleAccess";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { api, unwrap } from "lib/api";
@@ -91,11 +95,25 @@ export const AttendanceHub = () => {
     !isTeacher &&
     !isStaff;
 
+  /**
+   * Department Accounts only get the HR sheets their department is granted
+   * (Academics: Student Attendance only — no Teacher / Staff attendance).
+   */
+  const { canAccess: teacherModuleAccess } = useModuleAccess("teacher-attendance");
+  const { canAccess: staffModuleAccess } = useModuleAccess("staff-attendance");
+  const isDepartmentAccount = Boolean(user?.departmentAccount);
+  const departmentAllowsTeacherHr = !isDepartmentAccount || teacherModuleAccess;
+  const departmentAllowsStaffHr = !isDepartmentAccount || staffModuleAccess;
+
   const permsQuery = useQuery({
     queryKey: ["employee-attendance", "permissions"],
     queryFn: () =>
       unwrap<EmpPerms>(api.get("/employee-attendance/permissions")),
-    enabled: Boolean(user) && !isStudent && !isParentOnly,
+    enabled:
+      Boolean(user) &&
+      !isStudent &&
+      !isParentOnly &&
+      (departmentAllowsTeacherHr || departmentAllowsStaffHr),
   });
 
   const perms = permsQuery.data;
@@ -104,7 +122,8 @@ export const AttendanceHub = () => {
    * - Institution admins always
    * - Staff with teacher-attendance Module Access (perms.teacher.view)
    */
-  const showTeacherHr = canWriteAdmin || Boolean(perms?.teacher.view);
+  const showTeacherHr =
+    departmentAllowsTeacherHr && (canWriteAdmin || Boolean(perms?.teacher.view));
   /**
    * HR Staff Attendance sheet:
    * - Admins always
@@ -112,7 +131,8 @@ export const AttendanceHub = () => {
    * - COLLEGE_STAFF role
    */
   const showStaff =
-    canWriteAdmin || Boolean(perms?.staff.view) || isStaff;
+    departmentAllowsStaffHr &&
+    (canWriteAdmin || Boolean(perms?.staff.view) || isStaff);
 
   /** Traditional register */
   const showRegister =

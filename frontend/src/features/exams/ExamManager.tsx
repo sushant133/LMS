@@ -22,6 +22,7 @@ import {
   EXAM_STATUSES,
   computeSubjectMark,
   examSchema,
+  isDepartmentSectionHidden,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -496,10 +497,20 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     | "confidential-codes";
   // ?exam=print-results (e.g. from Reports & Analytics) opens Results directly
   const [examSearchParams] = useSearchParams();
-  const [adminSection, setAdminSection] = useState<AdminSection>(() => {
+  /** Exam Sessions (create/edit exams, routines, analytics, result review) — Administrator only for the Examination Department Account. */
+  const canUseExamSessions = !isDepartmentSectionHidden(
+    user?.departmentAccount,
+    "exam-sessions",
+  );
+  const [adminSection, setAdminSectionState] = useState<AdminSection>(() => {
     const requested = examSearchParams.get("exam");
-    return requested === "print-results" || requested === "exam-records" ? requested : "manage";
+    if (requested === "print-results" || requested === "exam-records") return requested;
+    return canUseExamSessions ? "manage" : "print-results";
   });
+  const setAdminSection = (section: AdminSection) =>
+    setAdminSectionState(
+      section === "manage" && !canUseExamSessions ? "print-results" : section,
+    );
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
   >("routine");
@@ -1289,13 +1300,15 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
       {isAdmin ? (
         <>
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant={adminSection === "manage" ? "default" : "outline"}
-              onClick={() => setAdminSection("manage")}
-            >
-              Exam Sessions
-            </Button>
+            {canUseExamSessions ? (
+              <Button
+                size="sm"
+                variant={adminSection === "manage" ? "default" : "outline"}
+                onClick={() => setAdminSection("manage")}
+              >
+                Exam Sessions
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant={adminSection === "print-results" ? "default" : "outline"}

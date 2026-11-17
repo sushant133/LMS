@@ -18,6 +18,10 @@ import {
   requireTeacherScope
 } from "../utils/teacherScope.js";
 import { assertNoTimetableConflicts } from "../utils/timetableConflicts.js";
+import {
+  queueTimetablePeriodTimesChange,
+  queueTimetableSlotChange
+} from "../utils/timetableChangeNotifier.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -242,6 +246,8 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     subjectAssignmentId: noStaff ? null : subjectAssignmentId || null,
     schoolId: req.tenantSchoolId
   });
+  // Tell the batch's students and the teacher what was added
+  void queueTimetableSlotChange(schoolId.toString(), null, slot.toObject());
   return sendSuccess(res, "Timetable slot created", slot, 201);
 });
 
@@ -374,6 +380,7 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     { new: true }
   );
   if (!slot) throw new ApiError(404, "Timetable slot not found");
+  void queueTimetableSlotChange(schoolId.toString(), existing, slot.toObject());
   return sendSuccess(res, "Timetable slot updated", slot);
 });
 
@@ -388,6 +395,7 @@ export const deleteTimetableSlot = asyncHandler(async (req: Request, res: Respon
 
   const slot = await TimetableSlot.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
   if (!slot) throw new ApiError(404, "Timetable slot not found");
+  void queueTimetableSlotChange(tenantObjectId(req).toString(), slot.toObject(), null);
   return sendSuccess(res, "Timetable slot deleted");
 });
 
@@ -535,6 +543,14 @@ export const bulkUpdatePeriodTimes = asyncHandler(async (req: Request, res: Resp
     );
     updatedCount += 1;
   }
+
+  void queueTimetablePeriodTimesChange(
+    schoolId.toString(),
+    college ? { batchId, yearId } : { classId, sectionId },
+    slots,
+    { start: oldStartTime, end: oldEndTime },
+    { start: newStartTime, end: newEndTime }
+  );
 
   return sendSuccess(res, "Period times updated for the full week", {
     updatedCount,

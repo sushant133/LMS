@@ -1648,7 +1648,7 @@ export const StudentFeeRecordsPanel = () => {
     </colgroup>
     <thead>
       <tr>
-        <th class="c">#</th>
+        <th class="c">S.N</th>
         <th>Receipt</th>
         <th>Student</th>
         <th>Batch / Year</th>
@@ -1704,9 +1704,10 @@ export const StudentFeeRecordsPanel = () => {
     }
     downloadRecordsExcel(
       "Student_Fee_Records",
-      filteredReceipts.map((row) => {
+      filteredReceipts.map((row, index) => {
         const st = resolveStudent(row);
         return {
+          "S.N": index + 1,
           receiptNumber: row.receiptNumber,
           studentName: st.name,
           admissionNumber: st.admission,
@@ -3686,10 +3687,13 @@ export const StudentFeeRecordsPanel = () => {
                 <Table className="w-max min-w-full border-separate border-spacing-0">
                   <TableHead>
                     <tr>
-                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-0 md:z-20 md:min-w-[8rem] md:max-w-[8rem] md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.15)]">
+                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-0 md:z-20 md:min-w-[4rem] md:max-w-[4rem]">
+                        S.N
+                      </Th>
+                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-16 md:z-20 md:min-w-[8rem] md:max-w-[8rem] md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.15)]">
                         Receipt
                       </Th>
-                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-32 md:z-20 md:min-w-[12rem] md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.15)]">
+                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-48 md:z-20 md:min-w-[12rem] md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.15)]">
                         Student
                       </Th>
                       <Th className="whitespace-nowrap">Batch / Year</Th>
@@ -3717,14 +3721,17 @@ export const StudentFeeRecordsPanel = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {filteredReceipts.map((row) => {
+                    {filteredReceipts.map((row, index) => {
                       const st = resolveStudent(row);
                       return (
                         <tr key={row._id} className="group">
-                          <Td className="whitespace-nowrap bg-white font-mono text-sm group-hover:bg-slate-50 md:sticky md:left-0 md:z-10 md:min-w-[8rem] md:max-w-[8rem] md:truncate md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                          <Td className="whitespace-nowrap bg-white text-sm group-hover:bg-slate-50 md:sticky md:left-0 md:z-10 md:min-w-[4rem] md:max-w-[4rem]">
+                            {index + 1}
+                          </Td>
+                          <Td className="whitespace-nowrap bg-white font-mono text-sm group-hover:bg-slate-50 md:sticky md:left-16 md:z-10 md:min-w-[8rem] md:max-w-[8rem] md:truncate md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.12)]">
                             {row.receiptNumber}
                           </Td>
-                          <Td className="min-w-[12rem] bg-white group-hover:bg-slate-50 md:sticky md:left-32 md:z-10 md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                          <Td className="min-w-[12rem] bg-white group-hover:bg-slate-50 md:sticky md:left-48 md:z-10 md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.12)]">
                             <div className="font-medium text-slate-900">
                               {st.name}
                             </div>

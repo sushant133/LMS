@@ -38,9 +38,9 @@ export const DEPARTMENT_ACCOUNT_DESCRIPTIONS: Record<DepartmentAccountType, stri
   ACCOUNTING:
     "Accounting, fee management, finance archive, HR payroll, and the academic calendar. Staff-level: delete, approve and setup stay with the Administrator.",
   EXAMINATION:
-    "College exams, routines, marks, results, marksheets, CTEVT exam fees, and the academic calendar. Staff-level: delete, approve and publish stay with the Administrator.",
+    "College exams, marks, results, marksheets, CTEVT exam fees, the academic calendar, and view-only Library (due books and overdue fines). Staff-level: exam sessions, delete, approve and publish stay with the Administrator.",
   ACADEMICS:
-    "Everything academic — students, staff, attendance, academic structure, plans, timetable, library, lab, notices — except Accounting and Examination."
+    "Student attendance, academic management, timetable, field management and reports — plus view-only access to students, the academic calendar, library, laboratory and inventory."
 };
 
 export const isDepartmentAccountType = (value: unknown): value is DepartmentAccountType =>
@@ -80,6 +80,8 @@ export const DEPARTMENT_ACCOUNT_MODULES: Record<DepartmentAccountType, ModuleAcc
     "examinations-college": W,
     "examinations-ctevt": W,
     results: W,
+    // View only: due books and overdue fines (exam clearance checks)
+    library: R,
     // No notices: the notice board is for college staff
     "academic-calendar": R,
     students: R,
@@ -88,39 +90,83 @@ export const DEPARTMENT_ACCOUNT_MODULES: Record<DepartmentAccountType, ModuleAcc
   ACADEMICS: {
     dashboard: W,
     profile: W,
-    students: W,
-    teachers: W,
-    staff: W,
-    parents: W,
+    // Student Attendance only — teacher / staff attendance are not granted
     attendance: W,
     "daily-attendance": W,
-    "teacher-attendance": W,
-    "staff-attendance": W,
     "field-duty": W,
-    "academic-structure": W,
-    academics: W,
-    "subject-assignment": W,
+    // All Academic Management tools except Syllabus Completion (ACADEMICS_BLOCKED_API_PATTERNS)
     "academic-management": W,
-    "academic-calendar": W,
-    timetable: W,
     homework: W,
-    notices: W,
-    banners: W,
-    library: W,
-    laboratory: W,
-    inventory: W,
-    transport: W,
-    hostel: W,
+    timetable: W,
     reports: W,
-    complaints: W
+    // View only (in the menu, no add / edit / delete / import)
+    students: R,
+    "academic-calendar": R,
+    library: R,
+    laboratory: R,
+    inventory: R,
+    // Reference data only. Their screens are blocked (ACADEMICS_BLOCKED_ROUTE_PREFIXES),
+    // but timetable, attendance, library, lab, field duty and academic management
+    // pickers read these lists.
+    academics: R,
+    teachers: R,
+    staff: R,
+    "subject-assignment": R
+    // Removed: notices, banners, complaints, parents, academic-structure,
+    // teacher-attendance, staff-attendance, transport, hostel
   }
 };
 
 /**
- * Read-only modules every department still sees in its menu. Everything else
- * READ_ONLY is reference data for pickers and stays out of the sidebar.
+ * View-only modules that still appear in a department's menu. Other
+ * READ_ONLY entries are reference data for pickers and stay out of the sidebar.
  */
-const DEPARTMENT_NAV_READ_MODULES: readonly ErpModuleKey[] = ["academic-calendar"];
+const DEPARTMENT_NAV_READ_MODULES: Record<DepartmentAccountType, readonly ErpModuleKey[]> = {
+  ACCOUNTING: ["academic-calendar"],
+  EXAMINATION: ["academic-calendar", "library"],
+  ACADEMICS: ["academic-calendar", "students", "library", "laboratory", "inventory"]
+};
+
+/**
+ * Screens a department may never open even though their module is granted as
+ * reference data (READ_ONLY for pickers) or shares a URL with a granted module.
+ */
+const DEPARTMENT_BLOCKED_ROUTES_BY_TYPE: Record<DepartmentAccountType, readonly string[]> = {
+  ACCOUNTING: [],
+  EXAMINATION: [],
+  ACADEMICS: [
+    "/teachers",
+    "/college-staff",
+    "/academics",
+    "/parent-links",
+    "/notices",
+    "/banners",
+    "/complaints",
+    "/complains",
+    "/transport",
+    "/hostel"
+  ]
+};
+
+/**
+ * APIs a department may never call even though the owning module is granted:
+ * Syllabus Completion (inside Academic Management) and the teacher / staff
+ * attendance registers (which share /attendance-register with students).
+ */
+const DEPARTMENT_BLOCKED_API_PATTERNS: Record<DepartmentAccountType, readonly RegExp[]> = {
+  ACCOUNTING: [],
+  // Exam Sessions tab is the Administrator's: routine editing and exam analytics.
+  // (GET /exams/routines — the list Admit Card / Attendance Sheet read — is not matched.)
+  // Creating / editing the exam session itself is refused in isDepartmentAdminOnlyRequest.
+  EXAMINATION: [/^\/exams\/[^/]+\/routines(\/|$)/, /^\/exams\/[^/]+\/analytics(\/|$)/],
+  ACADEMICS: [
+    /^\/academic-management\/syllabus-oversight(\/|$)/,
+    /^\/academic-management\/reports\/syllabus-completion(\/|$)/,
+    /^\/attendance-register\/(teachers|staff)(\/|$)/,
+    // Notice attachments live under the shared /uploads prefix
+    /^\/uploads\/notices(\/|$)/
+  ]
+};
 
 /**
  * Notification types each department receives. Department Accounts are
@@ -142,6 +188,7 @@ export const DEPARTMENT_NOTIFICATION_TYPES: Record<DepartmentAccountType, readon
     "ACADEMIC_MANAGEMENT",
     "ACADEMIC_CALENDAR",
     "ACADEMIC_PROMOTION",
+    "TIMETABLE",
     // Daily summary (attendance, log book, lesson plans, library)
     "GENERAL"
   ]
@@ -192,6 +239,51 @@ export const resolveDepartmentModuleForApiPath = (apiPath: string): ErpModuleKey
 };
 
 /**
+ * Screen sections (tabs inside a granted module) a department account does not
+ * get. The API behind each is refused too (DEPARTMENT_BLOCKED_API_PATTERNS /
+ * isDepartmentAdminOnlyRequest).
+ */
+export type DepartmentHiddenSection = "exam-sessions";
+
+const DEPARTMENT_HIDDEN_SECTIONS: Record<DepartmentAccountType, readonly DepartmentHiddenSection[]> = {
+  ACCOUNTING: [],
+  EXAMINATION: ["exam-sessions"],
+  ACADEMICS: []
+};
+
+/**
+ * Administrator-only screen sections a department may still view (read only).
+ * Examination: Library → Overdue Fines, to check students' dues.
+ */
+export type DepartmentViewSection = "library-fines";
+
+const DEPARTMENT_VIEW_SECTIONS: Record<DepartmentAccountType, readonly DepartmentViewSection[]> = {
+  ACCOUNTING: [],
+  EXAMINATION: ["library-fines"],
+  ACADEMICS: []
+};
+
+export const canDepartmentViewSection = (
+  type: DepartmentAccountType | null | undefined,
+  section: DepartmentViewSection
+): boolean => Boolean(type && DEPARTMENT_VIEW_SECTIONS[type].includes(section));
+
+export const isDepartmentSectionHidden = (
+  type: DepartmentAccountType | null | undefined,
+  section: DepartmentHiddenSection
+): boolean => Boolean(type && DEPARTMENT_HIDDEN_SECTIONS[type].includes(section));
+
+/**
+ * True when a department account is refused this API even though the owning
+ * module is granted (e.g. Academics → Syllabus Completion). The UI uses this
+ * to hide the matching tabs.
+ */
+export const isDepartmentApiBlocked = (type: DepartmentAccountType, apiPath: string): boolean => {
+  const path = normalizeApiPath(apiPath);
+  return DEPARTMENT_BLOCKED_API_PATTERNS[type].some((pattern) => pattern.test(path));
+};
+
+/**
  * Decide whether a department account may call an API.
  * Self-service paths (auth, notifications, shared reference lists) are
  * allowed before this runs.
@@ -204,6 +296,7 @@ export const canDepartmentAccessApi = (
   const path = normalizeApiPath(apiPath);
   const isRead = ["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
 
+  if (isDepartmentApiBlocked(type, path)) return false;
   if (DEPARTMENT_SHARED_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) return true;
   if (isRead && DEPARTMENT_SHARED_READ_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) {
     return true;
@@ -259,6 +352,19 @@ const ACCOUNTING_ADMIN_ONLY_WRITE_PREFIXES = [
 ];
 
 /**
+ * Academic Management actions only the Administrator may take. The Academics
+ * account verifies and returns records to the teacher (`/verify`, `/return`,
+ * `/unverify`, log book `/review`); approving, unapproving, rejecting,
+ * unlocking, bulk approval and faculty setup are refused. Approved records are
+ * also frozen for it in the controllers (assertDepartmentAccountCanChangeAcademic).
+ */
+const ACADEMICS_ADMIN_ONLY_API_PATTERNS: readonly RegExp[] = [
+  /^\/academic-management\/[^/]+\/[^/]+\/(approve|unapprove|reject|unlock)(\/|$)/,
+  /^\/academic-management\/approvals\/approve-all(\/|$)/,
+  /^\/academic-management\/faculties(\/|$)/
+];
+
+/**
  * True when a staff-level department account may not make this request
  * because only the Administrator can: any delete, any approval-type action,
  * editing a posted fee payment, and Accounting setup.
@@ -268,11 +374,21 @@ export const isDepartmentAdminOnlyRequest = (
   method: string,
   apiPath: string
 ): boolean => {
-  if (!STAFF_LEVEL_DEPARTMENT_ACCOUNTS.includes(type)) return false;
   const verb = method.toUpperCase();
   if (["GET", "HEAD", "OPTIONS"].includes(verb)) return false;
-
   const path = normalizeApiPath(apiPath);
+
+  // Academics: Academic Management approvals and setup stay with the Administrator
+  if (type === "ACADEMICS") {
+    return ACADEMICS_ADMIN_ONLY_API_PATTERNS.some((pattern) => pattern.test(path));
+  }
+  // Examination: creating / editing exam sessions is the Administrator's (Exam Sessions tab)
+  if (type === "EXAMINATION") {
+    if (verb === "POST" && path === "/exams") return true;
+    if ((verb === "PUT" || verb === "PATCH") && /^\/exams\/[^/]+$/.test(path)) return true;
+  }
+  if (!STAFF_LEVEL_DEPARTMENT_ACCOUNTS.includes(type)) return false;
+
   // Own uploads / address lookups are not department records
   if (DEPARTMENT_SHARED_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) return false;
   if (verb === "DELETE") return true;
@@ -321,6 +437,7 @@ export const canDepartmentAccessRoute = (
 ): boolean => {
   const path = (pathname.split("?")[0] ?? pathname) || "/";
   if (DEPARTMENT_BLOCKED_ROUTE_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) return false;
+  if (DEPARTMENT_BLOCKED_ROUTES_BY_TYPE[type].some((prefix) => matchesPrefix(path, prefix))) return false;
   if (DEPARTMENT_ALWAYS_ROUTE_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) return true;
 
   const keys = routeModuleKeys(path);
@@ -330,7 +447,7 @@ export const canDepartmentAccessRoute = (
     const mode = modules[key];
     if (mode === "WRITE") return true;
     if (mode !== "READ_ONLY") return false;
-    return purpose === "route" || DEPARTMENT_NAV_READ_MODULES.includes(key);
+    return purpose === "route" || DEPARTMENT_NAV_READ_MODULES[type].includes(key);
   });
 };
 

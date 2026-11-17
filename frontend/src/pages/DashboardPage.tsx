@@ -1569,7 +1569,7 @@ const NotificationsPanel = ({
                       New
                     </Badge>
                   </div>
-                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                  <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-600">
                     {notification.message}
                   </p>
                 </div>
@@ -1640,18 +1640,18 @@ const DEPARTMENT_QUICK_ACTIONS: Record<DepartmentAccountType, Array<{ label: str
   ],
   EXAMINATION: [
     { label: "Examination Management", href: "/exams-view" },
+    { label: "Library", href: "/library" },
     { label: "Academic Calendar", href: "/academic-calendar" }
   ],
   ACADEMICS: [
     { label: "Students", href: "/students" },
-    { label: "College Staff", href: "/college-staff" },
     { label: "Attendance", href: "/attendance-view" },
-    { label: "Academic Structure", href: "/academics" },
     { label: "Academic Management", href: "/academic-management-view" },
     { label: "Timetable", href: "/timetable-view" },
-    { label: "Notices", href: "/notices" },
+    { label: "Field Management", href: "/field-management" },
     { label: "Academic Calendar", href: "/academic-calendar" },
     { label: "Library", href: "/library" },
+    { label: "Laboratory", href: "/laboratory" },
     { label: "Reports", href: "/reports" }
   ]
 };
@@ -2056,6 +2056,14 @@ export const DashboardPage = () => {
     const departmentActions = DEPARTMENT_QUICK_ACTIONS[department].filter((action) =>
       canDepartmentAccessRoute(department, action.href, "nav"),
     );
+    // Academics: drop cards that link into screens it cannot open (Teachers, Academic Structure, Notices…)
+    const departmentStats =
+      department === "ACADEMICS"
+        ? statsWithLiveUnread.filter((stat) => {
+            const href = stat.href ?? resolveDashboardStatHref(stat.label);
+            return !href || canDepartmentAccessRoute(department, href);
+          })
+        : statsWithLiveUnread;
     return (
       <PageContent className="space-y-5 sm:space-y-6">
         <DashboardBannerPopup banners={data.banners} />
@@ -2068,7 +2076,7 @@ export const DashboardPage = () => {
           institutionName={institutionName}
           unreadCount={unreadCount}
         />
-        <StatGrid stats={statsWithLiveUnread} />
+        <StatGrid stats={departmentStats} />
         <AcademicCalendarWidgets />
         <QuickActions actions={departmentActions} />
       </PageContent>

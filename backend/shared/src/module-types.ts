@@ -23,6 +23,7 @@ export type NotificationType =
   | "ACADEMIC_MANAGEMENT"
   | "ACADEMIC_CALENDAR"
   | "ACADEMIC_PROMOTION"
+  | "TIMETABLE"
   | "GENERAL";
 
 export type ComplaintCategory =

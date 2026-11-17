@@ -116,7 +116,11 @@ const invalidateFines = () =>
  * Daily fine for all students, individual student rates, and the fines list
  * where a returned book's fine is recorded as paid or waived.
  */
-export const LibraryFinesPanel = () => {
+/**
+ * `readOnly`: view fines and their settings without changing anything
+ * (Examination Department Account). The API refuses the writes too.
+ */
+export const LibraryFinesPanel = ({ readOnly = false }: { readOnly?: boolean } = {}) => {
   const [view, setView] = useState<View>("all");
   const [search, setSearch] = useState("");
 
@@ -323,6 +327,12 @@ export const LibraryFinesPanel = () => {
 
   return (
     <div className="space-y-6">
+      {readOnly ? (
+        <p className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          View only — fine settings, rates and payments are managed by the Administrator.
+        </p>
+      ) : null}
+      <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-6 border-0 p-0">
       {/* 1. Fine for all students */}
       <Card>
         <CardHeader>
@@ -647,6 +657,7 @@ export const LibraryFinesPanel = () => {
           )}
         </CardContent>
       </Card>
+      </fieldset>
 
       {/* 4. Fines */}
       <Card>
@@ -726,7 +737,7 @@ export const LibraryFinesPanel = () => {
                   {rows.map((row) => {
                     const acting = actionRow?.issueId === row.issueId ? actionRow : null;
                     // Anything owed can be collected / waived — even while the book is still out
-                    const canClear = row.fine.outstandingNpr > 0;
+                    const canClear = !readOnly && row.fine.outstandingNpr > 0;
                     const stillOut = row.loanStatus !== "RETURNED";
                     return (
                       <tr key={row.issueId}>

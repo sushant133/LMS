@@ -4,6 +4,7 @@ import type {
   AcademicReportResponse,
   AcademicReportType,
 } from "@phit-erp/shared";
+import { isDepartmentApiBlocked } from "@phit-erp/shared";
 import { Download, Printer } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -57,7 +58,17 @@ export const AcademicReportsPanel = ({
     () => academicListApiParams(filters, { isCollege }),
     [filters, isCollege],
   );
-  const option = reportOptions.find((item) => item.id === reportType);
+  /** Department Accounts only see reports their department may load (Academics: no Syllabus Completion). */
+  const visibleReportOptions = useMemo(
+    () =>
+      reportOptions.filter(
+        (item) =>
+          !user?.departmentAccount ||
+          !isDepartmentApiBlocked(user.departmentAccount, `/academic-management/reports/${item.id}`),
+      ),
+    [user?.departmentAccount],
+  );
+  const option = visibleReportOptions.find((item) => item.id === reportType);
 
   /** Teacher-wise reports need a teacher — a signed-in teacher is their own. */
   const needsTeacher =
@@ -164,7 +175,7 @@ export const AcademicReportsPanel = ({
             }
             className="min-w-[240px]"
           >
-            {reportOptions.map((item) => (
+            {visibleReportOptions.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
               </option>

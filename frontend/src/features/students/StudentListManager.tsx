@@ -711,7 +711,7 @@ export const StudentListManager = () => {
       <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <CardTitle>
-            {canManage ? "All Students" : "My Students"}
+            {canManage || (hasInstitutionRead && !isTeacher) ? "All Students" : "My Students"}
           </CardTitle>
           <p className="mt-1 text-sm text-slate-500">
             {isTeacher && !canManage

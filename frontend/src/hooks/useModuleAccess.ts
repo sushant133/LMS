@@ -227,6 +227,8 @@ export const useStudentAttendanceGrant = (): { read: boolean; write: boolean } =
  */
 export const useIsFullAdministrator = (): boolean => {
   const { user } = useAuth();
+  const departmentReadOnly = useDepartmentRouteReadOnly();
+  if (departmentReadOnly) return false;
   if (!user || isStaffLevelDepartmentAccount(user.departmentAccount)) return false;
   return [user.role, ...(user.secondaryRoles ?? [])].some((role) =>
     isInstitutionAdmin(normalizeUserRole(String(role))),
@@ -239,9 +241,22 @@ export const useIsStaffLevelDepartmentAccount = (): boolean => {
   return isStaffLevelDepartmentAccount(user?.departmentAccount);
 };
 
+/**
+ * Department Account on a screen whose module it only has view access to
+ * (e.g. Academics on Students / Library / Laboratory): no edit, delete or
+ * approve. The API refuses those writes too (departmentAccountGuard).
+ */
+const useDepartmentRouteReadOnly = (): boolean => {
+  const { user } = useAuth();
+  const { mode } = useModuleAccess();
+  return Boolean(user?.departmentAccount) && mode !== "WRITE";
+};
+
 /** Delete existing records — Administrator only, never a staff-level Department Account. */
 export const useCanDeleteRecords = (): boolean => {
   const { user } = useAuth();
+  const departmentReadOnly = useDepartmentRouteReadOnly();
+  if (departmentReadOnly) return false;
   if (isStaffLevelDepartmentAccount(user?.departmentAccount)) return false;
   return canEditOrDeleteRecords(user?.role ?? "");
 };
@@ -249,6 +264,8 @@ export const useCanDeleteRecords = (): boolean => {
 /** Edit / Delete on existing records — Administrator and System Administrator only. */
 export const useCanEditOrDeleteRecords = (): boolean => {
   const { user } = useAuth();
+  const departmentReadOnly = useDepartmentRouteReadOnly();
+  if (departmentReadOnly) return false;
   if (isStaffLevelDepartmentAccount(user?.departmentAccount)) return false;
   return canEditOrDeleteRecords(user?.role ?? "");
 };
@@ -265,6 +282,8 @@ export const useCanEditOrDeleteModuleRecords = (
 ): boolean => {
   const { user } = useAuth();
   const isGrantedAdmin = useIsGrantedAdmin(moduleKey);
+  const { mode } = useModuleAccess(moduleKey);
+  if (user?.departmentAccount && mode !== "WRITE") return false;
   if (isStaffLevelDepartmentAccount(user?.departmentAccount)) return false;
   if (canEditOrDeleteRecords(user?.role ?? "")) return true;
   return isGrantedAdminEditModule(moduleKey) && isGrantedAdmin;
@@ -277,6 +296,8 @@ export const useCanEditOrDeleteModuleRecords = (
  */
 export const useCanApproveRecords = (): boolean => {
   const { user } = useAuth();
+  const departmentReadOnly = useDepartmentRouteReadOnly();
+  if (departmentReadOnly) return false;
   if (!user || isStaffLevelDepartmentAccount(user.departmentAccount)) return false;
   return [user.role, ...(user.secondaryRoles ?? [])].some((role) =>
     canApproveRecords(String(role)),

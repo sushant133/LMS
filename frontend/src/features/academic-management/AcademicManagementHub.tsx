@@ -13,6 +13,7 @@ import {
   type SubjectRecord,
   type YearRecord,
   hasInstitutionAccess,
+  isDepartmentApiBlocked,
 } from "@phit-erp/shared";
 import {
   BookMarked,
@@ -120,7 +121,14 @@ export const AcademicManagementHub = () => {
    * who administers Academic Management, so a granted Vice Principal /
    * Principal sees the same tabs as the Administrator.
    */
-  const canSyllabusOversight = isAdminWorkspace && isAdmin;
+  const canSyllabusOversight =
+    isAdminWorkspace &&
+    isAdmin &&
+    // Department Accounts (Academics) do not get Syllabus Completion
+    !(
+      user?.departmentAccount &&
+      isDepartmentApiBlocked(user.departmentAccount, "/academic-management/syllabus-oversight")
+    );
   const tabs = allTabs.filter((tab) => !tab.adminOnly || canSyllabusOversight);
 
   // ?tab=reports (e.g. from Reports & Analytics) opens that tab directly

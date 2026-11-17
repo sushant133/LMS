@@ -149,7 +149,14 @@ export const SessionPlanPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
-  const canPerformApprove = useCanApproveRecords();
+  /**
+   * Approve / reject / unlock / unapprove are the Administrator's alone. Department
+   * Accounts (Academics) verify and return to the teacher, and approved records
+   * are frozen for them (mirrors the API).
+   */
+  const canPerformApprove = useCanApproveRecords() && !user?.departmentAccount;
+  const lockedForDepartment = (status?: string | null): boolean =>
+    Boolean(user?.departmentAccount) && String(status ?? "") === "APPROVED";
   const canMutate = writeAccess;
   const canEditDelete =
     writeAccess && (canManageInstitution(user?.role ?? "") || !isAdminView);
@@ -705,7 +712,9 @@ export const SessionPlanPanel = ({
   /** Same rule as the per-card Delete button. */
   const canDeletePlan = (plan: AcademicSessionPlanRecord) =>
     canEditDelete &&
-    (plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin);
+    (plan.status === "DRAFT" ||
+      plan.status === "REJECTED" ||
+      (isAdmin && !lockedForDepartment(plan.status)));
 
   const [selectedPlanIds, setSelectedPlanIds] = useState<Set<string>>(
     () => new Set(),
@@ -1040,7 +1049,7 @@ export const SessionPlanPanel = ({
             ) : null}
             {isAdmin && String(plan.status) === "VERIFIED" ? (
               <>
-                <Button
+                <>{canPerformApprove ? (<Button
                   size="sm"
                   disabled={!canPerformApprove || approveMutation.isPending}
                   title={
@@ -1049,8 +1058,8 @@ export const SessionPlanPanel = ({
                   onClick={() => approveMutation.mutate({ id: plan._id })}
                 >
                   Approve
-                </Button>
-                <Button
+                </Button>) : null}</>
+                <>{canPerformApprove ? (<Button
                   size="sm"
                   variant="outline"
                   disabled={!canPerformApprove || rejectMutation.isPending}
@@ -1064,7 +1073,7 @@ export const SessionPlanPanel = ({
                   }}
                 >
                   Reject
-                </Button>
+                </Button>) : null}</>
               </>
             ) : null}
             {/* Any locked status (submitted → approved) can be reopened as a draft. */}
@@ -1073,7 +1082,7 @@ export const SessionPlanPanel = ({
               plan.status === "PENDING_APPROVAL" ||
               String(plan.status) === "VERIFIED" ||
               plan.status === "APPROVED") ? (
-              <Button
+              <>{canPerformApprove ? (<Button
                 size="sm"
                 variant="outline"
                 disabled={!canPerformApprove || unlockMutation.isPending}
@@ -1094,7 +1103,7 @@ export const SessionPlanPanel = ({
                 }}
               >
                 Unlock
-              </Button>
+              </Button>) : null}</>
             ) : null}
             <ReviewUndoActions
               resource="session-plans"
@@ -1107,7 +1116,7 @@ export const SessionPlanPanel = ({
             {canEditDelete &&
             (plan.status === "DRAFT" ||
               plan.status === "REJECTED" ||
-              isAdmin) ? (
+              (isAdmin && !lockedForDepartment(plan.status))) ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -1151,7 +1160,9 @@ export const SessionPlanPanel = ({
           <AcademicCommentsPanel
             entityType="SESSION_PLAN"
             entityId={plan._id}
-            canComment={isAdmin || plan.status !== "APPROVED"}
+            canComment={
+              (isAdmin && !lockedForDepartment(plan.status)) || plan.status !== "APPROVED"
+            }
           />
         </div>
       </CardContent>

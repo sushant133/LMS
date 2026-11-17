@@ -259,6 +259,7 @@ export const sendNotificationSchema = z.object({
       "ACADEMIC_MANAGEMENT",
       "ACADEMIC_CALENDAR",
       "ACADEMIC_PROMOTION",
+      "TIMETABLE",
       "GENERAL"
     ])
     .default("GENERAL")

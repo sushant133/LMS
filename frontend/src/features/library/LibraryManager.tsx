@@ -18,6 +18,7 @@ import {
   type LibraryYearLevel,
   type ModuleStaffInput,
   type UserProfile,
+  canDepartmentViewSection,
 } from "@phit-erp/shared";
 import {
   BookMarked,
@@ -716,7 +717,14 @@ export const LibraryManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  /** Examination Department Account: Overdue Fines view only (due books / dues check). */
+  const finesViewOnly =
+    !isFullAdmin && canDepartmentViewSection(user?.departmentAccount, "library-fines");
+  /** Department Accounts with view-only Library cannot issue books. */
+  const hideIssueTab = Boolean(user?.departmentAccount) && libraryReadOnly;
   const visibleTabs = tabs.filter((item) => {
+    if (item.id === "issue" && hideIssueTab) return false;
+    if (item.id === "fines" && finesViewOnly) return true;
     if (item.fullAdminOnly && !isFullAdmin) return false;
     if (item.adminOnly && !isAdmin) return false;
     // Issue Limits: admin (edit) + library staff (view)
@@ -2629,7 +2637,9 @@ export const LibraryManager = () => {
       )}
 
       {tab === "print-books" && <LibraryPrintBooksPanel />}
-      {tab === "fines" && isFullAdmin && <LibraryFinesPanel />}
+      {tab === "fines" && (isFullAdmin || finesViewOnly) && (
+        <LibraryFinesPanel readOnly={!isFullAdmin} />
+      )}
     </div>
   );
 };
